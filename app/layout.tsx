@@ -1,5 +1,5 @@
-import type { Metadata, Viewport } from 'next'; // 👈 Viewport가 여기 추가되어야 함
-import { Inter } from 'next/font/google'; // 👈 Inter 폰트 가져오기
+import type { Metadata, Viewport } from 'next';
+import { Inter } from 'next/font/google';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -9,7 +9,15 @@ export const metadata: Metadata = {
   description: 'Focus on your work with Pomofomo',
   manifest: '/manifest.webmanifest',
   icons: {
-    apple: '/icon.png', // 👈 (주의) 확장자 .png까지 적어주는 게 안전합니다
+    icon: '/icon.png', // 기본 파비콘
+    apple: [
+      { url: '/icon.png', sizes: '180x180', type: 'image/png' }, // 애플용 고화질 아이콘 지정
+    ],
+  },
+  appleWebApp: {
+    capable: true, // 웹앱으로 동작 가능하게 설정
+    title: 'Pomofomo', // 홈 화면에 추가될 때의 이름
+    statusBarStyle: 'black-translucent', // 상단 상태바 스타일 (선택사항: default, black, black-translucent)
   },
 };
 

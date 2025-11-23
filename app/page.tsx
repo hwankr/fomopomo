@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import TimerApp from '@/components/TimerApp';
 import HistoryList from '@/components/HistoryList';
@@ -13,11 +13,10 @@ export default function Home() {
   const [session, setSession] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 모달 상태
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false); // 프로필 메뉴 토글용
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
@@ -53,16 +52,16 @@ export default function Home() {
 
   if (isLoading) return null;
 
-  // 버튼 스타일 (공통)
+  // ✨ whitespace-nowrap 추가: 절대 줄바꿈 안 됨
   const headerBtnStyle = `
-    flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all duration-200
+    flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap
     bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-900
     dark:bg-slate-800 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-white
   `;
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
-      <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 p-4 overflow-y-auto font-sans text-gray-900 dark:text-gray-100">
+      <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 p-3 sm:p-4 overflow-y-auto font-sans text-gray-900 dark:text-gray-100">
         <Toaster position="top-center" reverseOrder={false} />
 
         <LoginModal
@@ -80,29 +79,23 @@ export default function Home() {
           onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
         />
 
-        {/* 전체 레이아웃 폭을 넓혀서 여유를 줌 */}
-        <div className="py-8 flex flex-col items-center w-full max-w-lg relative">
-          {/* --- 헤더 (간격 조정됨) --- */}
-          <div className="w-full flex justify-between items-center mb-12 px-2">
-            {/* 왼쪽: 로고 */}
+        <div className="py-4 sm:py-8 flex flex-col items-center w-full max-w-lg relative">
+          <div className="w-full flex justify-between items-center mb-8 px-1">
             <div className="flex items-center gap-2 select-none">
-              <span className="text-2xl">🍅</span>
-              <h1 className="text-xl font-extrabold text-gray-800 dark:text-white tracking-tight">
+              <span className="text-3xl">🍅</span>
+              <h1 className="text-2xl font-extrabold text-gray-800 dark:text-white tracking-tight">
                 Pomofomo
               </h1>
             </div>
 
-            {/* 오른쪽: 버튼 그룹 */}
-            <div className="flex items-center gap-3">
-              {/* 테마 */}
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`${headerBtnStyle} px-3`}
+                className={headerBtnStyle}
               >
                 {isDarkMode ? '☀️' : '🌙'}
               </button>
 
-              {/* 리포트 */}
               <button
                 onClick={() => setIsReportModalOpen(true)}
                 className={headerBtnStyle}
@@ -113,7 +106,7 @@ export default function Home() {
                   viewBox="0 0 24 24"
                   strokeWidth={2}
                   stroke="currentColor"
-                  className="w-4 h-4"
+                  className="w-5 h-5"
                 >
                   <path
                     strokeLinecap="round"
@@ -129,7 +122,7 @@ export default function Home() {
                 <span className="hidden sm:inline">Report</span>
               </button>
 
-              {/* 설정 */}
+              {/* ✨ 아이콘 수정됨: 톱니바퀴(Gear) */}
               <button
                 onClick={() => setIsSettingsModalOpen(true)}
                 className={headerBtnStyle}
@@ -140,21 +133,24 @@ export default function Home() {
                   viewBox="0 0 24 24"
                   strokeWidth={2}
                   stroke="currentColor"
-                  className="w-4 h-4"
+                  className="w-5 h-5"
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.253-.962.584-1.892.985-2.783.247-.55.06-1.21-.463-1.511l-.657-.38c-.551-.318-1.26-.117-1.527.461a20.845 20.845 0 01-1.44 4.282m3.102-.069a18.03 18.03 0 01.59 4.59c0 1.586-.205 3.124-.59 4.59m0-9.18a23.848 23.848 0 01-8.835-2.535"
+                    d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
                 <span className="hidden sm:inline">Setting</span>
               </button>
 
-              {/* ✨ 프로필 / 로그인 버튼 수정 ✨ */}
               {session ? (
                 <div className="relative">
-                  {/* 프로필 사진 버튼 */}
                   <button
                     onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
                     className="w-9 h-9 rounded-lg overflow-hidden border-2 border-white dark:border-slate-600 shadow-sm hover:opacity-80 transition-opacity"
@@ -168,8 +164,6 @@ export default function Home() {
                       className="w-full h-full object-cover"
                     />
                   </button>
-
-                  {/* 드롭다운 메뉴 (클릭하면 나옴) */}
                   {isProfileMenuOpen && (
                     <>
                       <div

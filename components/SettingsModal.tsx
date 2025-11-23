@@ -16,25 +16,42 @@ type Preset = {
   minutes: number;
 };
 
+const DEFAULT_SETTINGS = {
+  pomoTime: 25,
+  shortBreak: 5,
+  longBreak: 15,
+  autoStartBreaks: false,
+  autoStartPomos: false,
+  longBreakInterval: 4,
+  volume: 50,
+  isMuted: false, // ✨ 기본값 추가
+  presets: [
+    { id: '1', label: '작업1', minutes: 25 },
+    { id: '2', label: '작업2', minutes: 50 },
+    { id: '3', label: '작업3', minutes: 90 },
+  ],
+};
+
 export default function SettingsModal({
   isOpen,
   onClose,
   onSave,
 }: SettingsModalProps) {
-  const [pomoTime, setPomoTime] = useState(25);
-  const [shortBreak, setShortBreak] = useState(5);
-  const [longBreak, setLongBreak] = useState(15);
-  const [autoStartBreaks, setAutoStartBreaks] = useState(false);
-  const [autoStartPomos, setAutoStartPomos] = useState(false);
-  const [longBreakInterval, setLongBreakInterval] = useState(4);
-  const [volume, setVolume] = useState(50);
-
-  // ✨ 디폴트 프리셋 변경 (작업1, 2, 3)
-  const [presets, setPresets] = useState<Preset[]>([
-    { id: '1', label: '작업1', minutes: 25 },
-    { id: '2', label: '작업2', minutes: 50 },
-    { id: '3', label: '작업3', minutes: 90 },
-  ]);
+  const [pomoTime, setPomoTime] = useState(DEFAULT_SETTINGS.pomoTime);
+  const [shortBreak, setShortBreak] = useState(DEFAULT_SETTINGS.shortBreak);
+  const [longBreak, setLongBreak] = useState(DEFAULT_SETTINGS.longBreak);
+  const [autoStartBreaks, setAutoStartBreaks] = useState(
+    DEFAULT_SETTINGS.autoStartBreaks
+  );
+  const [autoStartPomos, setAutoStartPomos] = useState(
+    DEFAULT_SETTINGS.autoStartPomos
+  );
+  const [longBreakInterval, setLongBreakInterval] = useState(
+    DEFAULT_SETTINGS.longBreakInterval
+  );
+  const [volume, setVolume] = useState(DEFAULT_SETTINGS.volume);
+  const [isMuted, setIsMuted] = useState(DEFAULT_SETTINGS.isMuted); // ✨ 상태 추가
+  const [presets, setPresets] = useState<Preset[]>(DEFAULT_SETTINGS.presets);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -59,13 +76,23 @@ export default function SettingsModal({
         }
 
         if (loadedSettings) {
-          setPomoTime(loadedSettings.pomoTime ?? 25);
-          setShortBreak(loadedSettings.shortBreak ?? 5);
-          setLongBreak(loadedSettings.longBreak ?? 15);
-          setAutoStartBreaks(loadedSettings.autoStartBreaks ?? false);
-          setAutoStartPomos(loadedSettings.autoStartPomos ?? false);
-          setLongBreakInterval(loadedSettings.longBreakInterval ?? 4);
-          setVolume(loadedSettings.volume ?? 50);
+          setPomoTime(loadedSettings.pomoTime ?? DEFAULT_SETTINGS.pomoTime);
+          setShortBreak(
+            loadedSettings.shortBreak ?? DEFAULT_SETTINGS.shortBreak
+          );
+          setLongBreak(loadedSettings.longBreak ?? DEFAULT_SETTINGS.longBreak);
+          setAutoStartBreaks(
+            loadedSettings.autoStartBreaks ?? DEFAULT_SETTINGS.autoStartBreaks
+          );
+          setAutoStartPomos(
+            loadedSettings.autoStartPomos ?? DEFAULT_SETTINGS.autoStartPomos
+          );
+          setLongBreakInterval(
+            loadedSettings.longBreakInterval ??
+              DEFAULT_SETTINGS.longBreakInterval
+          );
+          setVolume(loadedSettings.volume ?? DEFAULT_SETTINGS.volume);
+          setIsMuted(loadedSettings.isMuted ?? DEFAULT_SETTINGS.isMuted); // ✨ 로드
           if (loadedSettings.presets && loadedSettings.presets.length > 0) {
             setPresets(loadedSettings.presets);
           }
@@ -74,6 +101,19 @@ export default function SettingsModal({
     };
     loadSettings();
   }, [isOpen]);
+
+  const saveToAll = async (newSettings: any) => {
+    localStorage.setItem('pomofomo_settings', JSON.stringify(newSettings));
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        settings: newSettings,
+      });
+    }
+  };
 
   const handleSave = async () => {
     const newSettings = {
@@ -84,30 +124,68 @@ export default function SettingsModal({
       autoStartPomos,
       longBreakInterval,
       volume,
+      isMuted,
       presets,
     };
-
-    localStorage.setItem('pomofomo_settings', JSON.stringify(newSettings));
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        settings: newSettings,
-      });
-    }
-
+    await saveToAll(newSettings);
     toast.success('설정이 저장되었습니다!');
     onSave();
     onClose();
   };
 
+  const handleResetSettings = async () => {
+    if (!confirm('설정을 초기화하시겠습니까?')) return;
+
+    setPomoTime(DEFAULT_SETTINGS.pomoTime);
+    setShortBreak(DEFAULT_SETTINGS.shortBreak);
+    setLongBreak(DEFAULT_SETTINGS.longBreak);
+    setAutoStartBreaks(DEFAULT_SETTINGS.autoStartBreaks);
+    setAutoStartPomos(DEFAULT_SETTINGS.autoStartPomos);
+    setLongBreakInterval(DEFAULT_SETTINGS.longBreakInterval);
+    setVolume(DEFAULT_SETTINGS.volume);
+    setIsMuted(DEFAULT_SETTINGS.isMuted);
+    setPresets(DEFAULT_SETTINGS.presets);
+
+    await saveToAll(DEFAULT_SETTINGS);
+    toast.success('설정 초기화 완료');
+    onSave();
+  };
+
+  const handleResetAccount = async () => {
+    if (!confirm('⚠️ 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('로그인 상태가 아닙니다.');
+      return;
+    }
+
+    const toastId = toast.loading('삭제 중...');
+
+    try {
+      await supabase.from('study_sessions').delete().eq('user_id', user.id);
+      await supabase.from('user_settings').delete().eq('user_id', user.id);
+      await supabase.from('timer_states').delete().eq('user_id', user.id);
+
+      localStorage.removeItem('pomofomo_settings');
+      localStorage.removeItem('pomofomo_pomoTime');
+      localStorage.removeItem('pomofomo_initialPomoTime');
+      localStorage.removeItem('pomofomo_stopwatchTime');
+
+      toast.success('계정 초기화 완료', { id: toastId });
+      await supabase.auth.signOut();
+      window.location.reload();
+    } catch (e) {
+      console.error(e);
+      toast.error('초기화 실패', { id: toastId });
+    }
+  };
+
   const addPreset = () => {
-    // ✨ 3개 제한 기능 추가
     if (presets.length >= 3) {
-      toast.error('프리셋은 최대 3개까지만 설정 가능합니다.');
+      toast.error('최대 3개까지만 가능합니다.');
       return;
     }
     setPresets([
@@ -162,7 +240,6 @@ export default function SettingsModal({
               <h3 className="text-gray-400 text-xs font-bold flex items-center gap-2">
                 🔥 바로가기 버튼 설정 (최대 3개)
               </h3>
-              {/* 3개 이상이면 추가 버튼 숨김/비활성화 */}
               {presets.length < 3 && (
                 <button
                   onClick={addPreset}
@@ -292,19 +369,72 @@ export default function SettingsModal({
             </div>
           </section>
           <hr className="border-gray-100" />
+
+          {/* ✨ 소리 설정 (음소거 기능 추가) */}
           <section>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-gray-400 text-xs font-bold">🔊 알림 볼륨</h3>
-              <span className="text-gray-400 text-xs font-mono">{volume}%</span>
+              <h3 className="text-gray-400 text-xs font-bold">🔊 알림 소리</h3>
+
+              {/* 음소거 토글 */}
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 text-xs font-bold">음소거</span>
+                <button
+                  onClick={() => setIsMuted(!isMuted)}
+                  className={`${toggleBase} w-8 h-4 ${
+                    isMuted ? 'bg-gray-600' : 'bg-gray-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transform transition-transform duration-200 ${
+                      isMuted ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  ></span>
+                </button>
+              </div>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-rose-400"
-            />
+
+            {/* 음소거면 슬라이더 비활성화 효과 */}
+            <div
+              className={`transition-opacity duration-200 ${
+                isMuted ? 'opacity-40 pointer-events-none' : 'opacity-100'
+              }`}
+            >
+              <div className="flex justify-between mb-1">
+                <span className="text-gray-500 text-xs">Volume</span>
+                <span className="text-gray-400 text-xs font-mono">
+                  {volume}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-rose-400"
+              />
+            </div>
+          </section>
+
+          <hr className="border-gray-100" />
+          <section>
+            <h3 className="text-red-400 text-xs font-bold mb-3 flex items-center gap-2">
+              ⚠️ DANGER ZONE
+            </h3>
+            <div className="flex gap-3">
+              <button
+                onClick={handleResetSettings}
+                className="flex-1 py-3 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors border border-orange-100 text-center"
+              >
+                ↻ 설정 초기화
+              </button>
+              <button
+                onClick={handleResetAccount}
+                className="flex-1 py-3 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors border border-red-100 text-center"
+              >
+                🗑️ 계정 초기화
+              </button>
+            </div>
           </section>
         </div>
         <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">

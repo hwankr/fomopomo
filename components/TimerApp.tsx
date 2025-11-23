@@ -100,21 +100,15 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     }
   };
 
-  // ✨ [핵심 로직 수정] 시간 기록 함수
-  // rawSeconds: 실제 흐른 초 (예: 110초)
-  const saveRecord = async (recordMode: string, rawSeconds: number) => {
-    // 1. 분 단위 계산 (내림 처리) -> 110초면 1분
-    const minutes = Math.floor(rawSeconds / 60);
+  const saveRecord = async (recordMode: string, duration: number) => {
+    if (duration < 10) return;
 
-    // 2. 1분 미만이면 저장 안 함 (0분)
+    // 1분 미만 버림 로직
+    const minutes = Math.floor(duration / 60);
     if (minutes < 1) {
-      // 너무 짧으면 로그만 남기고 종료 (사용자에게 알림은 안 띄움, 귀찮으니까)
       console.log('1분 미만이라 기록되지 않음');
       return;
     }
-
-    // 3. 저장할 시간은 다시 초 단위로 환산 (DB가 초 단위니까)
-    // 1분 -> 60초 저장 (50초는 버림)
     const durationToSave = minutes * 60;
 
     const {
@@ -135,11 +129,10 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     try {
       const { error } = await supabase.from('study_sessions').insert({
         mode: recordMode,
-        duration: durationToSave, // ✨ 버림 처리된 시간 저장
+        duration: durationToSave,
         user_id: user.id,
       });
       if (error) throw error;
-      // 몇 분 저장됐는지 알려주면 더 좋음
       toast.success(`${minutes}분 기록 저장 완료!`, { id: toastId });
     } catch (e) {
       toast.error('저장 실패', { id: toastId });
@@ -148,9 +141,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     }
   };
 
-  // ✨ [추가됨] 뽀모도로 중도 포기 시, 한 만큼 저장하는 함수
   const savePartialProgress = () => {
-    // 전체 시간 - 남은 시간 = 공부한 시간
     const fullTime =
       timerMode === 'focus'
         ? settings.pomoTime * 60
@@ -159,16 +150,12 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
         : settings.longBreak * 60;
 
     const elapsed = fullTime - timeLeft;
-
-    // 공부한 시간이 있고, 완료된 상태(0초)가 아니라면 저장 시도
     if (elapsed > 0 && timeLeft > 0) {
       const type = timerMode === 'focus' ? 'pomo' : 'break';
-      // 여기서 saveRecord를 호출하면 "1분 미만 버림" 로직이 자동 적용됨
       saveRecord(type, elapsed);
     }
   };
 
-  // 🍅 타이머 완료 로직
   useEffect(() => {
     if (timeLeft === 0 && isRunning) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -182,7 +169,6 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
           ? settings.shortBreak
           : settings.longBreak;
 
-      // 완료 시에는 전체 시간 저장
       saveRecord(timerMode === 'focus' ? 'pomo' : 'break', duration * 60);
 
       if (timerMode === 'focus') {
@@ -231,9 +217,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
   };
 
   const changeTimerMode = (mode: 'focus' | 'shortBreak' | 'longBreak') => {
-    // 모드 변경 시에도 하던 거 저장 (예: 집중하다가 휴식 누름)
     savePartialProgress();
-
     if (isRunning) {
       if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
@@ -253,17 +237,10 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
       return;
     }
 
-    // 프리셋 눌러서 시간 바뀔 때도 기존 시간 저장할지?
-    // 보통 멈춰있는 상태에서 바꾸는 거라 저장은 생략하거나, 필요하면 savePartialProgress() 추가
-    // 여기선 멈춰있을 때만 동작하므로 패스.
-
     setTimerMode('focus');
     setTimeLeft(minutes * 60);
     setSettings((prev) => ({ ...prev, pomoTime: minutes }));
-
-    toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`, {
-      style: { borderRadius: '10px', background: '#333', color: '#fff' },
-    });
+    toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
   };
 
   const toggleStopwatch = () => {
@@ -298,11 +275,8 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     if (stopwatchRef.current) clearInterval(stopwatchRef.current);
   };
 
-  // ✨ 수동 초기화 (중도 포기)
   const resetTimerManual = () => {
-    // 초기화 버튼 누르면 지금까지 한 거 저장!
     savePartialProgress();
-
     setIsRunning(false);
     if (timerRef.current) clearInterval(timerRef.current);
 
@@ -350,8 +324,12 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
 
   const theme = getThemeStyles();
 
+  // ✨ 모바일 대응 스타일
+  // px-4 py-1.5 (모바일) -> sm:px-5 sm:py-2 (PC)
+  // text-xs (모바일) -> sm:text-sm (PC)
+  // whitespace-nowrap: 줄바꿈 금지!
   const modeBtnBase =
-    'px-5 py-2 rounded-full text-sm font-bold border-2 transition-all';
+    'px-3 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-bold border-2 transition-all whitespace-nowrap flex-1 sm:flex-none';
   const modeBtnInactive =
     'text-gray-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5';
 
@@ -390,13 +368,16 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
       </div>
 
       <div
-        className={`px-10 py-6 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${theme.bgLight} ${theme.bgDark}`}
+        className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${theme.bgLight} ${theme.bgDark}`}
       >
         {!isLoaded ? (
-          <div className="text-gray-400 animate-pulse">설정 불러오는 중...</div>
+          <div className="text-gray-400 animate-pulse text-sm">
+            설정 불러오는 중...
+          </div>
         ) : tab === 'timer' ? (
           <div className="text-center animate-fade-in w-full">
-            <div className="flex justify-center gap-2 mb-6">
+            {/* 모드 버튼 그룹: 모바일에서는 꽉 차게(flex), 간격 좁게 */}
+            <div className="flex justify-center gap-1 sm:gap-2 mb-6 w-full">
               <button
                 onClick={() => changeTimerMode('focus')}
                 className={`${modeBtnBase} ${
@@ -427,6 +408,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
               </button>
             </div>
 
+            {/* 타이머 숫자: 모바일에서는 text-7xl, PC에서는 text-8xl */}
             <div
               className={`text-7xl sm:text-8xl font-bold mb-4 font-mono tracking-tighter transition-colors ${theme.textMain}`}
             >
@@ -439,7 +421,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
                   <button
                     key={preset.id}
                     onClick={() => handlePresetClick(preset.minutes)}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95"
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95 whitespace-nowrap"
                   >
                     {preset.label}
                   </button>
@@ -455,7 +437,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
             <div className="flex justify-center gap-4">
               <button
                 onClick={toggleTimer}
-                className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${theme.btnMain} dark:shadow-none w-40`}
+                className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${theme.btnMain} dark:shadow-none min-w-[140px]`}
               >
                 {isRunning ? '일시정지' : '시작'}
               </button>
@@ -496,7 +478,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
             <div className="flex gap-4 justify-center items-center">
               <button
                 onClick={toggleStopwatch}
-                className="px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 w-40"
+                className="px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 min-w-[140px]"
               >
                 {isStopwatchRunning ? '일시정지' : '시작'}
               </button>
