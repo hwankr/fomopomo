@@ -39,9 +39,8 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
   const stopwatchRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ✨ [핵심] 시간 계산을 위한 기준점 저장소 (절전 모드 방지용)
-  const endTimeRef = useRef<number>(0);   // 뽀모도로: 끝나는 예정 시간
-  const startTimeRef = useRef<number>(0); // 스톱워치: 시작한 시간
+  const endTimeRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(0);
 
   const [settings, setSettings] = useState({
     pomoTime: 25,
@@ -59,6 +58,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     ] as Preset[],
   });
 
+  // ✨ 1. useEffect 의존성 경고 해결 (timerMode 추가)
   useEffect(() => {
     const load = () => {
       const saved = localStorage.getItem("pomofomo_settings");
@@ -79,13 +79,14 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
       setIsLoaded(true);
     };
     load();
-  }, [settingsUpdated]);
+  }, [settingsUpdated, timerMode]); // ✅ timerMode 추가됨
 
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
-  const playAlarm = () => {
+  // ✨ 2. useCallback으로 감싸서 의존성 문제 해결
+  const playAlarm = useCallback(() => {
     if (settings.isMuted) return;
     try {
       const audio = new Audio("/alarm.mp3");
@@ -94,9 +95,10 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     } catch (error) {
       console.error(error);
     }
-  };
+  }, [settings.isMuted, settings.volume]);
 
-  const saveRecord = async (recordMode: string, duration: number) => {
+  // ✨ 3. catch(e) 오류 해결 (unused variable) -> catch (error)로 변경하고 콘솔 출력
+  const saveRecord = useCallback(async (recordMode: string, duration: number) => {
     if (duration < 10) return;
     const minutes = Math.floor(duration / 60);
     if (minutes < 1) {
@@ -119,14 +121,16 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
       });
       if (error) throw error;
       toast.success(`${minutes}분 기록 저장 완료!`, { id: toastId });
-    } catch (e) {
+    } catch (error) {
+      // ✅ e 대신 error를 사용하고 콘솔에 찍어서 'unused' 경고 해결
+      console.error(error);
       toast.error("저장 실패", { id: toastId });
     } finally {
       setIsSaving(false);
     }
-  };
+  }, []);
 
-  const savePartialProgress = () => {
+  const savePartialProgress = useCallback(() => {
     const fullTime = 
         timerMode === "focus" ? settings.pomoTime * 60 :
         timerMode === "shortBreak" ? settings.shortBreak * 60 :
@@ -137,19 +141,50 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
         const type = timerMode === 'focus' ? 'pomo' : 'break';
         saveRecord(type, elapsed);
     }
-  };
+  }, [timerMode, settings, timeLeft, saveRecord]);
 
-  // 🍅 뽀모도로 타이머 로직 (절전 모드 대응)
+  // ✨ 4. toggleTimer도 useCallback으로 감싸야 함 (useEffect에서 쓰니까)
+  const toggleTimer = useCallback((forceStart = false) => {
+    if (!forceStart && isStopwatchRunning) {
+      toast.error("스톱워치가 작동 중입니다.\n먼저 정지해주세요.", { style: { borderRadius: '10px', background: '#333', color: '#fff' } });
+      return;
+    }
+
+    if (!forceStart && isRunning) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setIsRunning(false);
+    } else {
+      const targetTime = Date.now() + (timeLeft * 1000);
+      endTimeRef.current = targetTime;
+
+      setIsRunning(true);
+      timerRef.current = setInterval(() => {
+        const now = Date.now();
+        const diff = Math.ceil((endTimeRef.current - now) / 1000);
+        
+        if (diff <= 0) {
+            setTimeLeft(0);
+        } else {
+            setTimeLeft(diff);
+        }
+      }, 200);
+    }
+  }, [isStopwatchRunning, isRunning, timeLeft]);
+
+  // 🍅 뽀모도로 타이머 로직 (핵심 수정 부분)
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
       if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
+      
+      // ✅ playAlarm은 이제 useCallback으로 감싸져서 의존성에 넣어도 안전함
       playAlarm();
 
       const duration = 
         timerMode === "focus" ? settings.pomoTime : 
         timerMode === "shortBreak" ? settings.shortBreak : settings.longBreak;
       
+      // ✅ saveRecord도 의존성에 추가 가능
       saveRecord(timerMode === "focus" ? "pomo" : "break", duration * 60);
 
       if (timerMode === "focus") {
@@ -160,7 +195,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
           setTimerMode("longBreak");
           setTimeLeft(settings.longBreak * 60);
           toast("🎉 긴 휴식 시간입니다!", { icon: '☕' });
-          if (settings.autoStartBreaks) setTimeout(() => toggleTimer(true), 1000); // 자동 시작 시 true 전달
+          if (settings.autoStartBreaks) setTimeout(() => toggleTimer(true), 1000);
         } else {
           setTimerMode("shortBreak");
           setTimeLeft(settings.shortBreak * 60);
@@ -174,39 +209,16 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
         if (settings.autoStartPomos) setTimeout(() => toggleTimer(true), 1000);
       }
     }
-  }, [timeLeft, isRunning, timerMode, settings, cycleCount]);
-
-  // --- 🍅 타이머 시작/정지 (타임스탬프 방식 적용) ---
-  const toggleTimer = (forceStart = false) => {
-    if (!forceStart && isStopwatchRunning) {
-      toast.error("스톱워치가 작동 중입니다.\n먼저 정지해주세요.", { style: { borderRadius: '10px', background: '#333', color: '#fff' } });
-      return;
-    }
-
-    if (!forceStart && isRunning) {
-      // 정지
-      if (timerRef.current) clearInterval(timerRef.current);
-      setIsRunning(false);
-    } else {
-      // 시작: 목표 시간을 '현재시간 + 남은시간'으로 계산
-      // 이렇게 하면 브라우저가 잠들어도 '목표 시간'은 변하지 않음
-      const targetTime = Date.now() + (timeLeft * 1000);
-      endTimeRef.current = targetTime;
-
-      setIsRunning(true);
-      timerRef.current = setInterval(() => {
-        const now = Date.now();
-        const diff = Math.ceil((endTimeRef.current - now) / 1000);
-        
-        if (diff <= 0) {
-            setTimeLeft(0);
-            // 여기서 clearInterval은 useEffect에서 처리됨
-        } else {
-            setTimeLeft(diff);
-        }
-      }, 200); // 1초보다 자주 체크해서 오차 줄임
-    }
-  };
+  }, [
+    timeLeft, 
+    isRunning, 
+    timerMode, 
+    settings, 
+    cycleCount, 
+    playAlarm,  // ✅ 추가됨
+    toggleTimer, // ✅ 추가됨
+    saveRecord  // ✅ 추가됨
+  ]);
 
   const changeTimerMode = (mode: "focus" | "shortBreak" | "longBreak") => {
     savePartialProgress();
@@ -232,7 +244,7 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
   };
 
-  // --- ⏱️ 스톱워치 시작/정지 (타임스탬프 방식 적용) ---
+  // --- ⏱️ 스톱워치 ---
   const toggleStopwatch = () => {
     if (isRunning) {
       toast.error("뽀모도로 타이머가 작동 중입니다.\n먼저 정지해주세요.", { style: { borderRadius: '10px', background: '#333', color: '#fff' } });
@@ -240,12 +252,9 @@ export default function TimerApp({ settingsUpdated }: TimerAppProps) {
     }
 
     if (isStopwatchRunning) {
-      // 정지
       if (stopwatchRef.current) clearInterval(stopwatchRef.current);
       setIsStopwatchRunning(false);
     } else {
-      // 시작: '시작 시간'을 '현재 시간 - 이미 흐른 시간'으로 설정
-      // 예: 10초에서 시작하면, 시작 시간은 10초 전으로 설정됨
       const startAt = Date.now() - (stopwatchTime * 1000);
       startTimeRef.current = startAt;
 
