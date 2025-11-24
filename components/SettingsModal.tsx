@@ -436,6 +436,28 @@ export default function SettingsModal({
               </button>
             </div>
           </section>
+
+                    {/* ✨ 후원 섹션 (새로 추가) */}
+          <hr className="border-gray-100" />
+          <section>
+            <h3 className="text-gray-400 text-xs font-bold mb-3 flex items-center gap-2">
+               ☕ SUPPORT
+            </h3>
+            <a 
+              href="https://www.buymeacoffee.com/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-yellow-400 text-yellow-900 rounded-xl font-bold hover:bg-yellow-500 transition-colors shadow-sm"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5 2a1 1 0 011-1h8a1 1 0 011 1v1h1a2 2 0 012 2v5a2 2 0 01-2 2h-1.441l-1.3 4.034a3 3 0 01-2.86 2.074H7.6a3 3 0 01-2.861-2.074L3.44 10H2a2 2 0 01-2-2V3a2 2 0 012-2h1V2zm1 1v6h8V3H6zm9 2V3h1v2h-1zm-11 0H3V3h1v2zm-.88 8L5.6 16.034a1 1 0 00.954.692h6.892a1 1 0 00.954-.692l1.48-4.634A3.96 3.96 0 0115 11h1V5H4v6h1a3.96 3.96 0 01-.88 2z" clipRule="evenodd" />
+              </svg>
+              개발자에게 커피 사주기
+            </a>
+            <p className="text-[10px] text-gray-400 text-center mt-2">
+              더 좋은 기능을 만드는 데 큰 힘이 됩니다! 🍅
+            </p>
+          </section>
         </div>
         <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
           <button

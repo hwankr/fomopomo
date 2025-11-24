@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { Session } from "@supabase/supabase-js";
 import TimerApp from '@/components/TimerApp';
 import HistoryList from '@/components/HistoryList';
 import LoginModal from '@/components/LoginModal';
@@ -10,7 +11,7 @@ import SettingsModal from '@/components/SettingsModal';
 import { Toaster } from 'react-hot-toast';
 
 export default function Home() {
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
