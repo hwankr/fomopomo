@@ -222,8 +222,6 @@ const saveToAll = async (newSettings: Settings) => {
 
   if (!isOpen) return null;
 
-  const labelStyle =
-    'text-gray-400 text-xs font-bold uppercase tracking-wider mb-2 block';
   const inputStyle =
     'w-full bg-gray-100 text-gray-700 p-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-rose-200 transition-all text-sm';
   const toggleBase =
