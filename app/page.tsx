@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session } from "@supabase/supabase-js";
+import Image from 'next/image';
 import TimerApp from '@/components/TimerApp';
 import HistoryList from '@/components/HistoryList';
 import LoginModal from '@/components/LoginModal';
@@ -157,13 +158,16 @@ export default function Home() {
                     onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
                     className="w-9 h-9 rounded-lg overflow-hidden border-2 border-white dark:border-slate-600 shadow-sm hover:opacity-80 transition-opacity"
                   >
-                    <img
+                    {/* ✅ <img> 태그를 <Image>로 교체 */}
+                    <Image
                       src={
                         session.user.user_metadata.avatar_url ||
                         'https://www.svgrepo.com/show/446532/avatar.svg'
                       }
                       alt="User"
-                      className="w-full h-full object-cover"
+                      width={36}
+                      height={36}
+                      className="object-cover"
                     />
                   </button>
                   {isProfileMenuOpen && (
