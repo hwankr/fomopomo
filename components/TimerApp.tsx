@@ -34,6 +34,7 @@ type SavedState = {
     timeLeft: number;          // 일시정지 시 저장할 '남은 시간'
     isRunning: boolean;
     cycleCount: number;
+    loggedSeconds: number;     // 현재 사이클에서 이미 저장한 집중 시간(중복 저장 방지)
   };
   stopwatch: {
     startTime: number | null;  // 멈추지 않고 흐르기 위한 '시작 시간' (Timestamp)
@@ -59,6 +60,7 @@ export default function TimerApp({
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [cycleCount, setCycleCount] = useState(0);
+  const [focusLoggedSeconds, setFocusLoggedSeconds] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isRunningRef = useRef(false);
 
@@ -92,6 +94,7 @@ export default function TimerApp({
     tLeft: number,
     tTarget: number | null,
     cycle: number,
+    tLogged: number,
     sRunning: boolean,
     sElapsed: number,
     sStart: number | null
@@ -104,6 +107,7 @@ export default function TimerApp({
         timeLeft: tLeft,
         targetTime: tTarget,
         cycleCount: cycle,
+        loggedSeconds: tLogged,
       },
       stopwatch: {
         isRunning: sRunning,
@@ -142,7 +146,8 @@ export default function TimerApp({
             // [타이머 복구]
             setTimerMode(state.timer.mode);
             setCycleCount(state.timer.cycleCount);
-            
+            setFocusLoggedSeconds(state.timer.loggedSeconds || 0);
+
             if (state.timer.isRunning && state.timer.targetTime) {
               // 실행 중이었다면: 목표 시간 - 현재 시간 = 남은 시간
               const diff = Math.ceil((state.timer.targetTime - now) / 1000);
@@ -168,9 +173,9 @@ export default function TimerApp({
               setIsStopwatchRunning(true);
               stopwatchStartTimeRef.current = state.stopwatch.startTime; // Ref 복구 필수
             } else {
-              setStopwatchTime(state.stopwatch.elapsed);
-              setIsStopwatchRunning(false);
-            }
+            setStopwatchTime(state.stopwatch.elapsed);
+            setIsStopwatchRunning(false);
+          }
             
             if (state.timer.isRunning || state.stopwatch.isRunning) {
                 toast.success("이전 작업을 복구했습니다.");
@@ -258,12 +263,47 @@ export default function TimerApp({
         ? settings.shortBreak * 60
         : settings.longBreak * 60;
 
+    if (timerMode !== 'focus') return;
+
     const elapsed = fullTime - timeLeft;
-    if (elapsed > 0 && timeLeft > 0) {
-      const type = timerMode === 'focus' ? 'pomo' : 'break';
-      saveRecord(type, elapsed);
+    const additionalSeconds = elapsed - focusLoggedSeconds;
+
+    if (additionalSeconds > 0 && timeLeft > 0) {
+      saveRecord('pomo', additionalSeconds);
+      setFocusLoggedSeconds(elapsed);
     }
-  }, [timerMode, settings, timeLeft, saveRecord]);
+  }, [timerMode, settings, timeLeft, saveRecord, focusLoggedSeconds]);
+
+  const handleTimerSave = useCallback(() => {
+    const fullTime =
+      timerMode === 'focus'
+        ? settings.pomoTime * 60
+        : timerMode === 'shortBreak'
+        ? settings.shortBreak * 60
+        : settings.longBreak * 60;
+
+    if (timerMode !== 'focus') return;
+
+    const elapsed = fullTime - timeLeft;
+    const additionalSeconds = elapsed - focusLoggedSeconds;
+
+    if (additionalSeconds > 0) {
+      saveRecord('pomo', additionalSeconds);
+      setFocusLoggedSeconds(elapsed);
+      saveState(
+        tab,
+        timerMode,
+        isRunning,
+        timeLeft,
+        null,
+        cycleCount,
+        elapsed,
+        isStopwatchRunning,
+        stopwatchTime,
+        null
+      );
+    }
+  }, [tab, timerMode, settings, timeLeft, focusLoggedSeconds, saveRecord, isRunning, cycleCount, isStopwatchRunning, stopwatchTime, saveState]);
 
   const toggleTimer = useCallback((forceStart = false) => {
     if (!forceStart && isStopwatchRunning) {
@@ -276,14 +316,14 @@ export default function TimerApp({
       if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
       // 💾 정지 상태 저장 (현재 남은 시간)
-      saveState(tab, timerMode, false, timeLeft, null, cycleCount, isStopwatchRunning, stopwatchTime, null);
+      saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
     } else {
       // [시작]
       const target = Date.now() + (timeLeft * 1000);
       endTimeRef.current = target;
       setIsRunning(true);
       // 💾 실행 상태 저장 (목표 종료 시간)
-      saveState(tab, timerMode, true, timeLeft, target, cycleCount, isStopwatchRunning, stopwatchTime, null);
+      saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
 
       timerRef.current = setInterval(() => {
         const now = Date.now();
@@ -292,7 +332,7 @@ export default function TimerApp({
         else setTimeLeft(diff);
       }, 200);
     }
-  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime]);
+  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds]);
 
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
@@ -301,16 +341,15 @@ export default function TimerApp({
 
       playAlarm();
 
-      const duration =
-        timerMode === 'focus'
-          ? settings.pomoTime
-          : timerMode === 'shortBreak'
-          ? settings.shortBreak
-          : settings.longBreak;
-
-      saveRecord(timerMode === 'focus' ? 'pomo' : 'break', duration * 60);
-
       if (timerMode === 'focus') {
+        const duration = settings.pomoTime * 60;
+        const remaining = duration - focusLoggedSeconds;
+
+        if (remaining > 0) {
+          saveRecord('pomo', remaining);
+        }
+        setFocusLoggedSeconds(0);
+
         const newCycle = cycleCount + 1;
         setCycleCount(newCycle);
 
@@ -330,6 +369,7 @@ export default function TimerApp({
       } else {
         setTimerMode('focus');
         setTimeLeft(settings.pomoTime * 60);
+        setFocusLoggedSeconds(0);
         toast('다시 집중할 시간입니다!', { icon: '🔥' });
         if (settings.autoStartPomos) setTimeout(() => toggleTimer(true), 1000);
       }
@@ -343,6 +383,7 @@ export default function TimerApp({
     playAlarm,
     toggleTimer,
     saveRecord,
+    focusLoggedSeconds,
   ]);
 
   const changeTimerMode = (mode: "focus" | "shortBreak" | "longBreak") => {
@@ -360,8 +401,10 @@ export default function TimerApp({
     else newTime = settings.longBreak * 60;
 
     setTimeLeft(newTime);
+    if (mode === 'focus') setFocusLoggedSeconds(0);
+
     // 💾 변경된 모드 상태 저장
-    saveState(tab, mode, false, newTime, null, cycleCount, isStopwatchRunning, stopwatchTime, null);
+    saveState(tab, mode, false, newTime, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
   };
 
   const handlePresetClick = (minutes: number) => {
@@ -372,10 +415,11 @@ export default function TimerApp({
     
     setTimerMode("focus");
     setTimeLeft(minutes * 60);
+    setFocusLoggedSeconds(0);
     setSettings(prev => ({ ...prev, pomoTime: minutes }));
-    
+
     // 💾 프리셋 변경 저장
-    saveState(tab, "focus", false, minutes * 60, null, cycleCount, isStopwatchRunning, stopwatchTime, null);
+    saveState(tab, "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null);
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
   };
 
@@ -390,7 +434,7 @@ export default function TimerApp({
       if (stopwatchRef.current) clearInterval(stopwatchRef.current);
       setIsStopwatchRunning(false);
       // 💾 정지 상태 저장 (현재 흐른 시간)
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, false, stopwatchTime, null);
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null);
     } else {
       // [시작]
       // 시작 시간 = 현재 시간 - 이미 흐른 시간
@@ -398,7 +442,7 @@ export default function TimerApp({
       stopwatchStartTimeRef.current = start;
       setIsStopwatchRunning(true);
       // 💾 실행 상태 저장 (시작 시간)
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, true, stopwatchTime, start);
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start);
 
       stopwatchRef.current = setInterval(() => {
         const now = Date.now();
@@ -415,7 +459,7 @@ export default function TimerApp({
     if (stopwatchRef.current) clearInterval(stopwatchRef.current);
     
     // 💾 저장 후 초기화 상태 반영
-    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, false, 0, null);
+    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null);
   };
 
   const resetStopwatch = () => {
@@ -428,15 +472,16 @@ export default function TimerApp({
     savePartialProgress();
     setIsRunning(false);
     if (timerRef.current) clearInterval(timerRef.current);
-    
+
     let resetTime = 0;
     if (timerMode === "focus") resetTime = settings.pomoTime * 60;
     else if (timerMode === "shortBreak") resetTime = settings.shortBreak * 60;
     else resetTime = settings.longBreak * 60;
-    
+
     setTimeLeft(resetTime);
+    if (timerMode === 'focus') setFocusLoggedSeconds(0);
     // 💾 초기화 상태 저장
-    saveState(tab, timerMode, false, resetTime, null, cycleCount, isStopwatchRunning, stopwatchTime, null);
+    saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
   };
 
   useEffect(() => {
@@ -491,6 +536,9 @@ export default function TimerApp({
       : settings.longBreak * 60;
 
   const showReset = timeLeft !== currentMaxTime;
+  const focusElapsed = timerMode === 'focus' ? currentMaxTime - timeLeft : 0;
+  const showFocusSaveButton =
+    timerMode === 'focus' && !isRunning && focusElapsed - focusLoggedSeconds > 0;
 
   return (
     <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300">
@@ -589,6 +637,16 @@ export default function TimerApp({
               >
                 {isRunning ? '일시정지' : '시작'}
               </button>
+
+              {showFocusSaveButton && (
+                <button
+                  onClick={handleTimerSave}
+                  disabled={isSaving}
+                  className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                >
+                  저장
+                </button>
+              )}
 
               {!isRunning && showReset && (
                 <button
