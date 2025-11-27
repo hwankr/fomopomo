@@ -74,14 +74,19 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
 
       const { data, error } = await supabase
         .from('study_sessions')
-        .select('*')
+        .select('id, mode, duration, created_at, task')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
+        .order('created_at', { ascending: false, nullsLast: true })
+        .limit(20);
 
       if (error) throw error;
-      if (data) setHistory(data);
+      setHistory(data ?? []);
     } catch (error) {
+      const message =
+        error instanceof Error && error.message.includes('permission denied')
+          ? 'Supabase RLS 정책에서 study_sessions 조회 권한을 확인해주세요. (예: user_id = auth.uid())'
+          : '기록을 불러오지 못했습니다.';
+      toast.error(message);
       console.error(error);
     } finally {
       setLoading(false);

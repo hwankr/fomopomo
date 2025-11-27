@@ -14,16 +14,12 @@ import {
 } from 'recharts';
 import {
   startOfWeek,
-  endOfWeek,
-  eachDayOfInterval,
   startOfMonth,
   endOfMonth,
   startOfYear,
   endOfYear,
-  eachMonthOfInterval,
+  addDays,
   format,
-  isSameDay,
-  isSameMonth,
 } from 'date-fns';
 
 interface ReportModalProps {
@@ -35,6 +31,10 @@ type ChartData = {
   name: string;
   hours: number;
   seconds: number;
+  taskTotals: Record<string, number>;
+  bucketKey: string;
+  displayLabel: string;
+  breakdownLabel: string;
 };
 
 export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
@@ -42,8 +42,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
   const [totalFocusTime, setTotalFocusTime] = useState(0);
   const [todayFocusTime, setTodayFocusTime] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  // ✨ 뷰 모드 상태 추가 (week | month | year)
+  const [selectedBucket, setSelectedBucket] = useState<ChartData | null>(null);
   const [viewMode, setViewMode] = useState<'week' | 'month' | 'year'>('week');
 
   const formatDuration = (seconds: number) => {
@@ -56,8 +55,8 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
   const formatTooltipDuration = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}?? ${m}?`;
-    return `${m}?`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
   };
 
   const formatAxisValue = (hours: number) => {
@@ -72,15 +71,18 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     const today = new Date();
-    let start, end;
+    let start: Date;
+    let end: Date;
 
-    // ✨ 1. 뷰 모드에 따라 날짜 범위 설정
     if (viewMode === 'week') {
-      start = startOfWeek(today, { weekStartsOn: 1 }); // 월요일 시작
-      end = endOfWeek(today, { weekStartsOn: 1 });
+      start = startOfWeek(today, { weekStartsOn: 1 });
+      end = addDays(start, 4); // Monday to Friday
     } else if (viewMode === 'month') {
       start = startOfMonth(today);
       end = endOfMonth(today);
@@ -89,28 +91,22 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
       end = endOfYear(today);
     }
 
-    // 2. 해당 범위의 데이터 가져오기
     const { data: periodSessions } = await supabase
       .from('study_sessions')
-      .select('duration, created_at')
+      .select('duration, created_at, task')
       .eq('user_id', user.id)
       .gte('created_at', start.toISOString())
       .lte('created_at', end.toISOString());
 
-    // 3. 전체 누적 시간 (Total Hours용 - 범위 상관없이 전체)
     const { data: allSessions } = await supabase
       .from('study_sessions')
       .select('duration')
       .eq('user_id', user.id);
 
-    // --- 데이터 가공 ---
-
-    // A. 총 누적 시간
     const totalSeconds =
       allSessions?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
     setTotalFocusTime(totalSeconds);
 
-    // B. 오늘 시간 (항상 표시)
     const todaySessions = await supabase
       .from('study_sessions')
       .select('duration')
@@ -128,56 +124,98 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
       todaySessions.data?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
     setTodayFocusTime(todaySeconds);
 
-    // ✨ C. 그래프 데이터 만들기 (모드별 분기)
-    let newChartData = [];
+    const buckets: Record<
+      string,
+      {
+        label: string;
+        seconds: number;
+        taskTotals: Record<string, number>;
+        breakdown: string;
+      }
+    > = {};
 
-    if (viewMode === 'year') {
-      // [연간 뷰] 월별 데이터 (Jan ~ Dec)
-      const months = eachMonthOfInterval({ start, end });
-      newChartData = months.map((month) => {
-        const monthSeconds =
-          periodSessions
-            ?.filter((s) => isSameMonth(new Date(s.created_at), month))
-            .reduce((acc, curr) => acc + curr.duration, 0) || 0;
-
-        return {
-          name: format(month, 'MMM'), // Jan, Feb...
-          hours: parseFloat((monthSeconds / 3600).toFixed(1)),
-          seconds: monthSeconds,
+    if (viewMode === 'week') {
+      const dayLabels = ['월', '화', '수', '목', '금'];
+      const dayFull = ['월요일', '화요일', '수요일', '목요일', '금요일'];
+      for (let i = 0; i < 5; i++) {
+        const day = addDays(start, i);
+        const key = format(day, 'yyyy-MM-dd');
+        buckets[key] = {
+          label: `${dayLabels[i]} (${format(day, 'M/d')})`,
+          seconds: 0,
+          taskTotals: {},
+          breakdown: `${dayFull[i]} 작업별 집중 시간`,
         };
-      });
+      }
+    } else if (viewMode === 'month') {
+      const daysInMonth = end.getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const day = new Date(start.getFullYear(), start.getMonth(), d);
+        const key = format(day, 'yyyy-MM-dd');
+        buckets[key] = {
+          label: String(d),
+          seconds: 0,
+          taskTotals: {},
+          breakdown: `${d}일의 작업별 집중 시간`,
+        };
+      }
     } else {
-      // [주간/월간 뷰] 일별 데이터
-      const days = eachDayOfInterval({ start, end });
-      newChartData = days.map((day) => {
-        const daySeconds =
-          periodSessions
-            ?.filter((s) => isSameDay(new Date(s.created_at), day))
-            .reduce((acc, curr) => acc + curr.duration, 0) || 0;
-
-        return {
-          name: viewMode === 'week' ? format(day, 'EEE') : format(day, 'd'), // Mon or 1, 2, 3...
-          hours: parseFloat((daySeconds / 3600).toFixed(1)),
-          seconds: daySeconds,
+      for (let m = 0; m < 12; m++) {
+        const monthDate = new Date(start.getFullYear(), m, 1);
+        const key = format(monthDate, 'yyyy-MM');
+        buckets[key] = {
+          label: `${m + 1}`,
+          seconds: 0,
+          taskTotals: {},
+          breakdown: `${m + 1}월의 작업별 집중 시간`,
         };
-      });
+      }
     }
 
+    periodSessions?.forEach((session) => {
+      const sessionDate = new Date(session.created_at);
+      let bucketKey = '';
+
+      if (viewMode === 'week' || viewMode === 'month') {
+        bucketKey = format(sessionDate, 'yyyy-MM-dd');
+      } else {
+        bucketKey = format(sessionDate, 'yyyy-MM');
+      }
+
+      if (!buckets[bucketKey]) return;
+
+      const taskName = session.task?.trim() || '작업 지정 없음';
+      buckets[bucketKey].seconds += session.duration;
+      buckets[bucketKey].taskTotals[taskName] =
+        (buckets[bucketKey].taskTotals[taskName] ?? 0) + session.duration;
+    });
+
+    const newChartData = Object.entries(buckets).map(
+      ([bucketKey, bucket]) => ({
+        name: bucket.label,
+        hours: parseFloat((bucket.seconds / 3600).toFixed(1)),
+        seconds: bucket.seconds,
+        taskTotals: bucket.taskTotals,
+        bucketKey,
+        displayLabel: bucket.label,
+        breakdownLabel:
+          bucket.breakdown ?? `${bucket.label} 작업별 집중 시간`,
+      })
+    );
+
     setChartData(newChartData);
+    setSelectedBucket(newChartData[0] ?? null);
     setLoading(false);
   }, [viewMode]);
 
-  // 뷰 모드가 바뀌거나 창이 열릴 때 데이터 다시 가져오기
   useEffect(() => {
     if (isOpen) {
-      // ✅ setTimeout으로 감싸서 비동기로 실행 (0ms)
       setTimeout(() => fetchReportData(), 0);
     }
   }, [isOpen, fetchReportData]);
 
   if (!isOpen) return null;
 
-  // 탭 버튼 스타일
   const tabBase = 'px-4 py-1.5 text-xs font-bold rounded-md transition-all';
   const tabActive =
     'bg-white dark:bg-slate-600 text-gray-800 dark:text-white shadow-sm border border-gray-200 dark:border-slate-500';
@@ -187,7 +225,6 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
       <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300">
-        {/* 헤더 */}
         <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-slate-700">
           <div className="flex items-center gap-3">
             <span className="bg-rose-100 text-rose-500 dark:bg-rose-900/30 dark:text-rose-400 p-2 rounded-xl">
@@ -232,7 +269,6 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
         </div>
 
         <div className="p-6 overflow-y-auto scrollbar-hide">
-          {/* 1. 요약 카드 섹션 */}
           <div className="grid grid-cols-2 gap-4 mb-8">
             <div className="bg-gray-50 dark:bg-slate-700/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-600">
               <div className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">
@@ -255,12 +291,10 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
             </div>
           </div>
 
-          {/* 2. 그래프 섹션 */}
           <div className="bg-white dark:bg-slate-700/30 p-0 sm:p-6 rounded-2xl sm:border border-gray-100 dark:border-slate-600">
-            {/* ✨ 그래프 헤더 (탭 버튼) */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                📊 집중 통계
+                집중 통계
               </h3>
               <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-lg flex">
                 <button
@@ -290,7 +324,6 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
               </div>
             </div>
 
-            {/* 그래프 영역 */}
             <div className="h-64 w-full relative">
               {loading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-slate-800/50 z-10">
@@ -312,7 +345,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
                     className="dark:stroke-slate-600"
                   />
                   <XAxis
-                    dataKey="name"
+                    dataKey="displayLabel"
                     stroke="#9ca3af"
                     fontSize={11}
                     tickLine={false}
@@ -329,19 +362,30 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
                   <Tooltip
                     cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                     contentStyle={{
-                      backgroundColor: '#1f2937',
-                      borderColor: '#374151',
-                      color: '#fff',
+                      backgroundColor: '#ffffff',
+                      borderColor: '#e5e7eb',
+                      color: '#111827',
                       borderRadius: '8px',
                       fontSize: '12px',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.12)',
                     }}
+                    labelStyle={{ color: '#111827', fontWeight: 700 }}
+                    labelFormatter={(label) => `${label}`}
                     formatter={(_, __, props) => [
                       formatTooltipDuration(props?.payload?.seconds ?? 0),
-                      '??',
+                      '집중 시간',
                     ]}
                   />
-                  <Bar dataKey="hours" radius={[4, 4, 0, 0]} maxBarSize={50}>
+                  <Bar
+                    dataKey="hours"
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={50}
+                    onClick={(data) => {
+                      if (data && 'payload' in data) {
+                        setSelectedBucket(data.payload as ChartData);
+                      }
+                    }}
+                  >
                     {chartData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
@@ -357,11 +401,37 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
               </ResponsiveContainer>
             </div>
 
-            {/* 안내 문구 */}
             <div className="text-center mt-4 text-xs text-gray-400">
-              {viewMode === 'week' && '이번 주 (월 ~ 일)'}
-              {viewMode === 'month' && '이번 달 (1일 ~ 말일)'}
-              {viewMode === 'year' && '올해 (1월 ~ 12월)'}
+              {viewMode === 'week' &&
+                `${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'M/dd')} - ${format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 4), 'M/dd')} (월~금)`}
+              {viewMode === 'month' &&
+                `${format(startOfMonth(new Date()), 'yyyy.MM')} (1일~${endOfMonth(new Date()).getDate()}일)`}
+              {viewMode === 'year' &&
+                `${format(startOfYear(new Date()), 'yyyy')}년 (1월~12월)`}
+            </div>
+
+            <div className="mt-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl p-4 border border-gray-100 dark:border-slate-700">
+              <div className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">
+                {selectedBucket
+                  ? selectedBucket.breakdownLabel
+                  : '작업별 집중 시간'}
+              </div>
+              {selectedBucket && Object.keys(selectedBucket.taskTotals).length > 0 ? (
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {Object.entries(selectedBucket.taskTotals)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([task, secs]) => (
+                      <span
+                        key={task}
+                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-slate-600"
+                      >
+                        {`${task}: ${formatDuration(secs)}`}
+                      </span>
+                    ))}
+                </div>
+              ) : (
+                <div className="text-gray-400 text-xs">데이터가 없습니다.</div>
+              )}
             </div>
           </div>
         </div>
