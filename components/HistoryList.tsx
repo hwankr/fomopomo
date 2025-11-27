@@ -176,7 +176,7 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                     {item.mode === 'pomo' ? '🍅' : '⏱️'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                       <div>
                         <div className="font-bold text-gray-700 dark:text-gray-200 text-sm">
                           {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
@@ -185,11 +185,9 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                           {formatDate(item.created_at)}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mt-2 text-xs text-gray-500 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       {editingId === item.id ? (
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0 text-xs text-gray-500">
                           <input
                             value={taskDraft}
                             onChange={(e) => setTaskDraft(e.target.value)}
@@ -213,7 +211,7 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-1 min-w-0 text-xs text-gray-500">
                           <span className="truncate text-gray-600 dark:text-gray-300">
                             {item.task?.trim() ? item.task : '작업 메모 없음'}
                           </span>
