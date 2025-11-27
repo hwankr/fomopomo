@@ -9,6 +9,7 @@ type StudySession = {
   mode: string;
   duration: number;
   created_at: string;
+  task?: string | null;
 };
 
 // ✨ [추가] updateTrigger를 선택적 prop으로 정의
@@ -20,6 +21,9 @@ interface HistoryListProps {
 export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
   const [history, setHistory] = useState<StudySession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [taskDraft, setTaskDraft] = useState('');
+  const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
 
   const fetchHistory = async () => {
     try {
@@ -61,10 +65,54 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
       if (error) throw error;
 
       setHistory((prev) => prev.filter((item) => item.id !== id));
+      if (editingId === id) {
+        setEditingId(null);
+        setTaskDraft('');
+      }
       toast.success('기록이 삭제되었습니다.');
     } catch (error) {
       toast.error('삭제 실패');
       console.error(error);
+    }
+  };
+
+  const startEditing = (item: StudySession) => {
+    setEditingId(item.id);
+    setTaskDraft(item.task ?? '');
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setTaskDraft('');
+    setUpdatingTaskId(null);
+  };
+
+  const handleUpdateTask = async (id: number) => {
+    setUpdatingTaskId(id);
+    try {
+      const { error } = await supabase
+        .from('study_sessions')
+        .update({ task: taskDraft.trim() || null })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setHistory((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, task: taskDraft.trim() || null } : item
+        )
+      );
+      toast.success('작업 메모를 업데이트했어요.');
+      cancelEditing();
+    } catch (error) {
+      const missingColumnMessage =
+        error instanceof Error && error.message.includes('column "task"')
+          ? 'Supabase study_sessions 테이블에 task(TEXT) 컬럼이 필요해요.'
+          : '업데이트 실패';
+      toast.error(missingColumnMessage);
+      console.error(error);
+    } finally {
+      setUpdatingTaskId(null);
     }
   };
 
@@ -117,7 +165,7 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                 key={item.id}
                 className="flex justify-between items-center p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors group"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
                       item.mode === 'pomo'
@@ -127,18 +175,62 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                   >
                     {item.mode === 'pomo' ? '🍅' : '⏱️'}
                   </div>
-                  <div>
-                    <div className="font-bold text-gray-700 dark:text-gray-200 text-sm">
-                      {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-gray-700 dark:text-gray-200 text-sm">
+                          {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {formatDate(item.created_at)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-400">
-                      {formatDate(item.created_at)}
+
+                    <div className="mt-2 text-xs text-gray-500 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      {editingId === item.id ? (
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                          <input
+                            value={taskDraft}
+                            onChange={(e) => setTaskDraft(e.target.value)}
+                            className="flex-1 min-w-0 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-rose-300 dark:focus:ring-rose-500"
+                            placeholder="작업 메모를 입력하세요"
+                          />
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => handleUpdateTask(item.id)}
+                              disabled={updatingTaskId === item.id}
+                              className="px-3 py-2 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600 disabled:opacity-60"
+                            >
+                              저장
+                            </button>
+                            <button
+                              onClick={cancelEditing}
+                              className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-slate-600"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="truncate text-gray-600 dark:text-gray-300">
+                            {item.task?.trim() ? item.task : '작업 메모 없음'}
+                          </span>
+                          <button
+                            onClick={() => startEditing(item)}
+                            className="text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 text-[11px] font-semibold"
+                          >
+                            수정
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <div className="font-mono font-bold text-gray-800 dark:text-white">
+                <div className="flex items-center gap-4 ml-3">
+                  <div className="font-mono font-bold text-gray-800 dark:text-white text-right">
                     {formatDuration(item.duration)}
                   </div>
 

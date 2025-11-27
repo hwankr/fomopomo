@@ -80,12 +80,19 @@ export default function TimerApp({
     longBreakInterval: 4,
     volume: 50,
     isMuted: false,
+    taskPopupEnabled: true,
     presets: [
       { id: '1', label: '작업1', minutes: 25 },
       { id: '2', label: '작업2', minutes: 50 },
       { id: '3', label: '작업3', minutes: 90 },
     ] as Preset[],
   });
+
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskDescription, setTaskDescription] = useState('');
+  const [pendingRecord, setPendingRecord] = useState<
+    { mode: string; duration: number; onAfterSave?: () => void } | null
+  >(null);
 
   const saveState = useCallback((
     currentTab: "timer" | "stopwatch",
@@ -125,10 +132,15 @@ export default function TimerApp({
       const savedSettings = localStorage.getItem("pomofomo_settings");
       if (savedSettings) {
         const parsed = JSON.parse(savedSettings);
-        setSettings(prev => ({ 
-            ...prev, 
-            ...parsed,
-            presets: parsed.presets && parsed.presets.length > 0 ? parsed.presets : prev.presets 
+        setSettings((prev) => ({
+          ...prev,
+          ...parsed,
+          taskPopupEnabled:
+            parsed.taskPopupEnabled ?? prev.taskPopupEnabled ?? true,
+          presets:
+            parsed.presets && parsed.presets.length > 0
+              ? parsed.presets
+              : prev.presets,
         }));
       }
 
@@ -194,6 +206,22 @@ export default function TimerApp({
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
+  const persistSettings = useCallback(async (newSettings: typeof settings) => {
+    localStorage.setItem('pomofomo_settings', JSON.stringify(newSettings));
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('user_settings')
+          .upsert({ user_id: user.id, settings: newSettings });
+      }
+    } catch (error) {
+      console.error('설정 저장 실패:', error);
+    }
+  }, []);
+
   const playAlarm = useCallback(() => {
     if (settings.isMuted) return;
     try {
@@ -207,7 +235,7 @@ export default function TimerApp({
 
   // ✨ onRecordSaved 사용
   const saveRecord = useCallback(
-    async (recordMode: string, duration: number) => {
+    async (recordMode: string, duration: number, taskText = '') => {
       if (duration < 10) return;
 
       const formatDurationForToast = (totalSeconds: number) => {
@@ -238,6 +266,7 @@ export default function TimerApp({
           mode: recordMode,
           duration,
           user_id: user.id,
+          task: taskText.trim() || null,
         });
         if (error) throw error;
 
@@ -247,13 +276,69 @@ export default function TimerApp({
         onRecordSaved();
       } catch (error) {
         console.error(error);
-        toast.error('저장 실패', { id: toastId });
+        const missingColumnMessage =
+          error instanceof Error && error.message.includes('column "task"')
+            ? 'Supabase에서 study_sessions 테이블에 task(TEXT) 컬럼을 추가해주세요.'
+            : '저장 실패';
+        toast.error(missingColumnMessage, { id: toastId });
       } finally {
         setIsSaving(false);
       }
     },
     [onRecordSaved]
   ); // ✅ 의존성 추가
+
+  const triggerSave = useCallback(
+    async (
+      recordMode: string,
+      duration: number,
+      onAfterSave?: () => void
+    ) => {
+      if (duration < 10) return;
+
+      if (settings.taskPopupEnabled) {
+        setPendingRecord({ mode: recordMode, duration, onAfterSave });
+        setTaskDescription('');
+        setTaskModalOpen(true);
+      } else {
+        await saveRecord(recordMode, duration);
+        if (onAfterSave) onAfterSave();
+      }
+    },
+    [saveRecord, settings.taskPopupEnabled]
+  );
+
+  const handleTaskSubmit = useCallback(async () => {
+    if (!pendingRecord) return;
+    await saveRecord(pendingRecord.mode, pendingRecord.duration, taskDescription);
+    if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
+    setTaskModalOpen(false);
+    setPendingRecord(null);
+    setTaskDescription('');
+  }, [pendingRecord, saveRecord, taskDescription]);
+
+  const handleTaskSkip = useCallback(async () => {
+    if (!pendingRecord) return;
+    await saveRecord(pendingRecord.mode, pendingRecord.duration);
+    if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
+    setTaskModalOpen(false);
+    setPendingRecord(null);
+    setTaskDescription('');
+  }, [pendingRecord, saveRecord]);
+
+  const handleDisableTaskPopup = useCallback(async () => {
+    const updated = { ...settings, taskPopupEnabled: false };
+    setSettings(updated);
+    await persistSettings(updated);
+    toast.success('자동 팝업을 끄고 바로 저장합니다. 설정에서 다시 켤 수 있어요.');
+    if (pendingRecord) {
+      await saveRecord(pendingRecord.mode, pendingRecord.duration, taskDescription);
+      if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
+      setPendingRecord(null);
+      setTaskDescription('');
+    }
+    setTaskModalOpen(false);
+  }, [pendingRecord, persistSettings, saveRecord, settings, taskDescription]);
 
   const savePartialProgress = useCallback(() => {
     const fullTime =
@@ -269,10 +354,10 @@ export default function TimerApp({
     const additionalSeconds = elapsed - focusLoggedSeconds;
 
     if (additionalSeconds > 0 && timeLeft > 0) {
-      saveRecord('pomo', additionalSeconds);
+      triggerSave('pomo', additionalSeconds);
       setFocusLoggedSeconds(elapsed);
     }
-  }, [timerMode, settings, timeLeft, saveRecord, focusLoggedSeconds]);
+  }, [timerMode, settings, timeLeft, triggerSave, focusLoggedSeconds]);
 
   const handleTimerSave = useCallback(() => {
     const fullTime =
@@ -288,7 +373,7 @@ export default function TimerApp({
     const additionalSeconds = elapsed - focusLoggedSeconds;
 
     if (additionalSeconds > 0) {
-      saveRecord('pomo', additionalSeconds);
+      triggerSave('pomo', additionalSeconds);
       setFocusLoggedSeconds(elapsed);
       saveState(
         tab,
@@ -303,7 +388,19 @@ export default function TimerApp({
         null
       );
     }
-  }, [tab, timerMode, settings, timeLeft, focusLoggedSeconds, saveRecord, isRunning, cycleCount, isStopwatchRunning, stopwatchTime, saveState]);
+  }, [
+    tab,
+    timerMode,
+    settings,
+    timeLeft,
+    focusLoggedSeconds,
+    triggerSave,
+    isRunning,
+    cycleCount,
+    isStopwatchRunning,
+    stopwatchTime,
+    saveState,
+  ]);
 
   const toggleTimer = useCallback((forceStart = false) => {
     if (!forceStart && isStopwatchRunning) {
@@ -346,7 +443,7 @@ export default function TimerApp({
         const remaining = duration - focusLoggedSeconds;
 
         if (remaining > 0) {
-          saveRecord('pomo', remaining);
+          triggerSave('pomo', remaining);
         }
         setFocusLoggedSeconds(0);
 
@@ -382,7 +479,7 @@ export default function TimerApp({
     cycleCount,
     playAlarm,
     toggleTimer,
-    saveRecord,
+    triggerSave,
     focusLoggedSeconds,
   ]);
 
@@ -453,13 +550,26 @@ export default function TimerApp({
   };
 
   const handleStopwatchSave = async () => {
-    await saveRecord("stopwatch", stopwatchTime);
-    setStopwatchTime(0);
     setIsStopwatchRunning(false);
     if (stopwatchRef.current) clearInterval(stopwatchRef.current);
-    
-    // 💾 저장 후 초기화 상태 반영
-    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null);
+
+    const afterSave = () => {
+      setStopwatchTime(0);
+      saveState(
+        tab,
+        timerMode,
+        isRunning,
+        timeLeft,
+        null,
+        cycleCount,
+        focusLoggedSeconds,
+        false,
+        0,
+        null
+      );
+    };
+
+    await triggerSave('stopwatch', stopwatchTime, afterSave);
   };
 
   const resetStopwatch = () => {
@@ -541,7 +651,75 @@ export default function TimerApp({
     timerMode === 'focus' && !isRunning && focusElapsed - focusLoggedSeconds > 0;
 
   return (
-    <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300">
+    <>
+      {taskModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+          <div
+            className="absolute inset-0"
+            onClick={handleTaskSkip}
+            role="button"
+            aria-label="close task memo"
+          ></div>
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 w-full max-w-md overflow-hidden">
+            <div className="flex items-start justify-between p-5 border-b border-gray-100 dark:border-slate-700">
+              <div>
+                <div className="text-sm font-bold text-gray-800 dark:text-gray-100">어떤 작업을 했나요?</div>
+                <p className="text-xs text-gray-500 mt-1">
+                  기록에 작업 메모를 남겨두면 나중에 더 쉽게 돌아볼 수 있어요.
+                </p>
+              </div>
+              <button
+                onClick={handleTaskSkip}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                aria-label="내용 없이 저장"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-gray-600 dark:text-gray-200">
+                  작업 메모
+                </label>
+                <input
+                  value={taskDescription}
+                  onChange={(e) => setTaskDescription(e.target.value)}
+                  placeholder="예: 리팩토링, 회의 준비, 계획 세우기 등"
+                  className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 px-3 py-3 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-rose-300 dark:focus:ring-rose-500"
+                />
+              </div>
+              <div className="flex items-start justify-between gap-3 text-[11px] text-gray-400">
+                <div className="space-y-1">
+                  <button
+                    onClick={handleDisableTaskPopup}
+                    className="text-[11px] text-gray-500 dark:text-gray-300 underline underline-offset-4"
+                  >
+                    자동 팝업 끄기
+                  </button>
+                  <p>자동 팝업은 설정에서 다시 킬 수 있어요.</p>
+                </div>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    onClick={handleTaskSkip}
+                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-slate-600"
+                  >
+                    내용 없이 저장
+                  </button>
+                  <button
+                    onClick={handleTaskSubmit}
+                    disabled={isSaving}
+                    className="px-3 py-2 rounded-lg bg-rose-500 text-white font-bold shadow-sm hover:bg-rose-600 disabled:opacity-60"
+                  >
+                    작업 저장
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300">
       <div className="flex p-1 bg-gray-100 dark:bg-slate-900/50 m-2 rounded-2xl">
         <button
           onClick={() => setTab('timer')}
@@ -724,5 +902,6 @@ export default function TimerApp({
         )}
       </div>
     </div>
+    </>
   );
 }

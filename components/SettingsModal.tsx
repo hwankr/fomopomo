@@ -25,6 +25,7 @@ type Settings = {
   longBreakInterval: number;
   volume: number;
   isMuted: boolean;
+  taskPopupEnabled: boolean;
   presets: Preset[];
 };
 
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS = {
   longBreakInterval: 4,
   volume: 50,
   isMuted: false, // ✨ 기본값 추가
+  taskPopupEnabled: true,
   presets: [
     { id: '1', label: '작업1', minutes: 25 },
     { id: '2', label: '작업2', minutes: 50 },
@@ -63,6 +65,9 @@ export default function SettingsModal({
   );
   const [volume, setVolume] = useState(DEFAULT_SETTINGS.volume);
   const [isMuted, setIsMuted] = useState(DEFAULT_SETTINGS.isMuted); // ✨ 상태 추가
+  const [taskPopupEnabled, setTaskPopupEnabled] = useState(
+    DEFAULT_SETTINGS.taskPopupEnabled
+  );
   const [presets, setPresets] = useState<Preset[]>(DEFAULT_SETTINGS.presets);
 
   useEffect(() => {
@@ -105,6 +110,9 @@ export default function SettingsModal({
           );
           setVolume(loadedSettings.volume ?? DEFAULT_SETTINGS.volume);
           setIsMuted(loadedSettings.isMuted ?? DEFAULT_SETTINGS.isMuted); // ✨ 로드
+          setTaskPopupEnabled(
+            loadedSettings.taskPopupEnabled ?? DEFAULT_SETTINGS.taskPopupEnabled
+          );
           if (loadedSettings.presets && loadedSettings.presets.length > 0) {
             setPresets(loadedSettings.presets);
           }
@@ -137,6 +145,7 @@ const saveToAll = async (newSettings: Settings) => {
       longBreakInterval,
       volume,
       isMuted,
+      taskPopupEnabled,
       presets,
     };
     await saveToAll(newSettings);
@@ -156,6 +165,7 @@ const saveToAll = async (newSettings: Settings) => {
     setLongBreakInterval(DEFAULT_SETTINGS.longBreakInterval);
     setVolume(DEFAULT_SETTINGS.volume);
     setIsMuted(DEFAULT_SETTINGS.isMuted);
+    setTaskPopupEnabled(DEFAULT_SETTINGS.taskPopupEnabled);
     setPresets(DEFAULT_SETTINGS.presets);
 
     await saveToAll(DEFAULT_SETTINGS);
@@ -361,7 +371,29 @@ const saveToAll = async (newSettings: Settings) => {
               >
                 <span
                   className={`${toggleDot} ${
-                    autoStartPomos ? 'translate-x-5' : 'translate-x-0'
+                  autoStartPomos ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              ></span>
+              </button>
+            </div>
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-gray-600 text-sm font-medium">
+                  저장 시 작업 메모 팝업
+                </span>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  작업 내용을 기록할지 물어보는 팝업입니다.
+                </p>
+              </div>
+              <button
+                onClick={() => setTaskPopupEnabled(!taskPopupEnabled)}
+                className={`${toggleBase} ${
+                  taskPopupEnabled ? 'bg-rose-400' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`${toggleDot} ${
+                    taskPopupEnabled ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 ></span>
               </button>
