@@ -82,7 +82,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
 
     if (viewMode === 'week') {
       start = startOfWeek(today, { weekStartsOn: 1 });
-      end = addDays(start, 4); // Monday to Friday
+      end = addDays(start, 6); // Monday to Sunday
     } else if (viewMode === 'month') {
       start = startOfMonth(today);
       end = endOfMonth(today);
@@ -135,9 +135,9 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
     > = {};
 
     if (viewMode === 'week') {
-      const dayLabels = ['월', '화', '수', '목', '금'];
-      const dayFull = ['월요일', '화요일', '수요일', '목요일', '금요일'];
-      for (let i = 0; i < 5; i++) {
+      const dayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+      const dayFull = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
+      for (let i = 0; i < 7; i++) {
         const day = addDays(start, i);
         const key = format(day, 'yyyy-MM-dd');
         buckets[key] = {
@@ -412,7 +412,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
 
             <div className="text-center mt-4 text-xs text-gray-400">
               {viewMode === 'week' &&
-                `${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'M/dd')} - ${format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 4), 'M/dd')} (월~금)`}
+                `${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'M/dd')} - ${format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 6), 'M/dd')} (월~일)`}
               {viewMode === 'month' &&
                 `${format(startOfMonth(new Date()), 'yyyy.MM')} (1일~${endOfMonth(new Date()).getDate()}일)`}
               {viewMode === 'year' &&
