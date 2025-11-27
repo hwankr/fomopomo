@@ -161,6 +161,15 @@ const saveToAll = async (newSettings: Settings) => {
     onClose();
   };
 
+  const handleCloseClick = () => {
+    const shouldSave = confirm('변경사항을 저장하고 닫을까요?');
+    if (shouldSave) {
+      handleSave();
+    } else {
+      onClose();
+    }
+  };
+
   const handleResetSettings = async () => {
     if (!confirm('설정을 초기화하시겠습니까?')) return;
 
@@ -271,7 +280,7 @@ const saveToAll = async (newSettings: Settings) => {
             ⚙️ SETTINGS
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseClick}
             className="text-gray-400 hover:text-gray-600"
           >
             ✕
@@ -296,7 +305,7 @@ const saveToAll = async (newSettings: Settings) => {
             </p>
             <div className="space-y-2">
               {tasks.map((task, index) => (
-                <div key={`${task}-${index}`} className="flex gap-2 items-center">
+                <div key={index} className="flex gap-2 items-center">
                   <input
                     type="text"
                     value={task}
