@@ -76,7 +76,7 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
         .from('study_sessions')
         .select('id, mode, duration, created_at, task')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false, nullsLast: true })
+        .order('created_at', { ascending: false, nullsFirst: false })
         .limit(20);
 
       if (error) throw error;
