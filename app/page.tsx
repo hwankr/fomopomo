@@ -10,6 +10,7 @@ import LoginModal from '@/components/LoginModal';
 import ReportModal from '@/components/ReportModal';
 import SettingsModal from '@/components/SettingsModal';
 import { Toaster } from 'react-hot-toast';
+import appIcon from './icon.png';
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
@@ -86,7 +87,14 @@ export default function Home() {
         <div className="py-4 sm:py-8 flex flex-col items-center w-full max-w-lg relative">
           <div className="w-full flex justify-between items-center mb-8 px-1">
             <div className="flex items-center gap-2 select-none">
-              <span className="text-3xl">🍅</span>
+              <Image
+                src={appIcon}
+                alt="Pomofomo icon"
+                width={32}
+                height={32}
+                className="rounded-lg"
+                priority
+              />
               <h1 className="text-2xl font-extrabold text-gray-800 dark:text-white tracking-tight">
                 Pomofomo
               </h1>
