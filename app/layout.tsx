@@ -30,6 +30,8 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
+import Footer from '../components/Footer';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,7 +39,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body className={inter.className}>{children}</body>
+      <body className={`${inter.className} flex flex-col min-h-screen`}>
+        <main className="flex-grow">{children}</main>
+        <Footer />
+      </body>
     </html>
   );
 }
