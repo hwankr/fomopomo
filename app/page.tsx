@@ -59,7 +59,7 @@ export default function Home() {
   if (isLoading) return null;
 
   const headerBtnStyle = `
-    flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap
+    flex items-center gap-2 px-2 sm:px-3 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap
     bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-900
     dark:bg-slate-800 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-white
   `;
@@ -95,7 +95,7 @@ export default function Home() {
                 className="rounded-lg"
                 priority
               />
-              <h1 className="text-2xl font-extrabold text-gray-800 dark:text-white tracking-tight">
+              <h1 className="hidden sm:block text-2xl font-extrabold text-gray-800 dark:text-white tracking-tight">
                 Pomofomo
               </h1>
             </div>

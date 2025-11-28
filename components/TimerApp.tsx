@@ -767,7 +767,7 @@ export default function TimerApp({
   }, [isRunning, isStopwatchRunning, tab, timerMode]);
 
   const modeBtnBase =
-    'px-3 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-bold border-2 transition-all whitespace-nowrap flex-1 sm:flex-none';
+    'px-2 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-bold border-2 transition-all whitespace-nowrap flex-1 sm:flex-none';
   const modeBtnInactive =
     'text-gray-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5';
 
@@ -962,7 +962,7 @@ export default function TimerApp({
               </div>
             )}
 
-            <div className="flex justify-center gap-4">
+            <div className="flex flex-wrap justify-center gap-4">
               <button
                 onClick={() => toggleTimer()}
                 className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${theme.btnMain} dark:shadow-none min-w-[140px]`}
