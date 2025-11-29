@@ -464,11 +464,25 @@ export default function TimerApp({
     saveState,
   ]);
 
+  const playClickSound = useCallback(() => {
+    if (settings.isMuted) return;
+    try {
+      const audio = new Audio('/click.mp3');
+      audio.volume = settings.volume / 100;
+      audio.play();
+    } catch (error) {
+      console.error(error);
+    }
+  }, [settings.isMuted, settings.volume]);
+
   const toggleTimer = useCallback((forceStart = false) => {
     if (!forceStart && isStopwatchRunning) {
       toast.error("스톱워치가 작동 중입니다.\n먼저 정지해주세요.");
       return;
     }
+
+    // ✨ 클릭 사운드 재생
+    playClickSound();
 
     if (!forceStart && isRunning) {
       // [정지]
@@ -491,7 +505,7 @@ export default function TimerApp({
         else setTimeLeft(diff);
       }, 200);
     }
-  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds]);
+  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds, playClickSound]);
 
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
@@ -588,6 +602,9 @@ export default function TimerApp({
       return;
     }
 
+    // ✨ 클릭 사운드 재생
+    playClickSound();
+
     if (isStopwatchRunning) {
       // [정지]
       if (stopwatchRef.current) clearInterval(stopwatchRef.current);
@@ -609,7 +626,7 @@ export default function TimerApp({
         setStopwatchTime(elapsed);
       }, 200);
     }
-  }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime]);
+  }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime, playClickSound]);
 
   const handleStopwatchSave = async () => {
     setIsStopwatchRunning(false);
