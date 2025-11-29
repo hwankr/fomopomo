@@ -98,9 +98,42 @@ export default function TimerApp({
 
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null); // ✨ [New] Selected Task ID
+  const [dbTasks, setDbTasks] = useState<{ id: string; title: string }[]>([]); // ✨ [New] Tasks from DB
   const [pendingRecord, setPendingRecord] = useState<
     { mode: string; duration: number; onAfterSave?: () => void } | null
   >(null);
+
+  // ✨ [New] Fetch tasks from DB
+  const fetchDbTasks = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const today = new Date().toISOString().split('T')[0];
+      const { data } = await supabase
+        .from('tasks')
+        .select('id, title')
+        .eq('user_id', user.id)
+        .eq('due_date', today)
+        .neq('status', 'done');
+
+      if (data) {
+        setDbTasks(data);
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchDbTasks();
+    
+    // 포커스 시 최신화 (선택 사항)
+    const onFocus = () => fetchDbTasks();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []); // ✨ Mount 시 실행
 
   const saveState = useCallback((
     currentTab: "timer" | "stopwatch",
@@ -321,6 +354,7 @@ export default function TimerApp({
           duration,
           user_id: user.id,
           task: taskText.trim() || null,
+          task_id: selectedTaskId, // ✨ [New] Save task_id
         });
         if (error) throw error;
 
@@ -358,16 +392,20 @@ export default function TimerApp({
         return;
       }
 
-      if (settings.taskPopupEnabled) {
+      // ✨ [수정] 이미 태스크가 선택되어 있다면 팝업 없이 바로 저장 (설정에 따라 다를 수 있음)
+      // 여기서는 "팝업 사용 안함" 설정이거나, 태스크가 이미 선택된 경우 바로 저장하도록 수정
+      if (settings.taskPopupEnabled && !selectedTaskId) {
         setPendingRecord({ mode: recordMode, duration, onAfterSave });
         setSelectedTask('');
+        // setSelectedTaskId(null); // 기존 선택 유지
         setTaskModalOpen(true);
       } else {
-        await saveRecord(recordMode, duration);
+        // 태스크가 선택되어 있거나 팝업이 비활성화된 경우
+        await saveRecord(recordMode, duration, selectedTask); // selectedTask에는 제목이 들어있음
         if (onAfterSave) onAfterSave();
       }
     },
-    [saveRecord, settings.taskPopupEnabled, settings.tasks]
+    [saveRecord, settings.taskPopupEnabled, selectedTaskId, selectedTask] // ✨ 의존성 추가
   );
 
   const handleTaskSubmit = useCallback(async () => {
@@ -377,7 +415,8 @@ export default function TimerApp({
     setTaskModalOpen(false);
     setPendingRecord(null);
     setSelectedTask('');
-  }, [pendingRecord, saveRecord, selectedTask]);
+    setSelectedTaskId(null);
+  }, [pendingRecord, saveRecord, selectedTask, selectedTaskId]);
 
   const handleTaskSkip = useCallback(async () => {
     if (!pendingRecord) return;
@@ -816,78 +855,97 @@ export default function TimerApp({
   return (
     <>
       {taskModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div
-            className="absolute inset-0"
-            onClick={handleTaskSkip}
-            role="button"
-            aria-label="close task memo"
-          ></div>
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 w-full max-w-md overflow-hidden">
-            <div className="flex items-start justify-between p-5 border-b border-gray-100 dark:border-slate-700">
-              <div>
-                <div className="text-sm font-bold text-gray-800 dark:text-gray-100">어떤 작업을 했나요?</div>
-                <p className="text-xs text-gray-500 mt-1">
-                  설정에서 만들어 둔 작업 목록을 선택하면 Report에서 통계가 깨끗하게 모여요.
-                </p>
-              </div>
-              <button
-                onClick={handleTaskSkip}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                aria-label="내용 없이 저장"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-600 dark:text-gray-200">
-                  작업 선택
-                </label>
-                <div className="space-y-2">
-                  <select
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden scale-100 transition-transform duration-200">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+                What did you focus on?
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Select a task from your list or enter a new one.
+              </p>
+
+              <div className="space-y-4">
+                {/* ✨ [New] DB Tasks List */}
+                {dbTasks.length > 0 && (
+                  <div className="space-y-2 mb-4">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Today's Tasks</p>
+                    <div className="grid gap-2">
+                      {dbTasks.map((task) => (
+                        <button
+                          key={task.id}
+                          onClick={() => {
+                            setSelectedTask(task.title);
+                            setSelectedTaskId(task.id);
+                          }}
+                          className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                            selectedTaskId === task.id
+                              ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
+                              : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          {task.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                    Or type manually
+                  </label>
+                  <input
+                    type="text"
                     value={selectedTask}
-                    onChange={(e) => setSelectedTask(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 px-3 py-3 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-rose-300 dark:focus:ring-rose-500"
-                  >
-                    <option value="">작업 없음</option>
-                    {settings.tasks.map((task) => (
-                      <option key={task} value={task}>
-                        {task}
-                      </option>
+                    onChange={(e) => {
+                      setSelectedTask(e.target.value);
+                      setSelectedTaskId(null); // Clear ID if typing manually
+                    }}
+                    placeholder="e.g. Reading, Coding..."
+                    className="w-full bg-gray-50 dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-700 rounded-xl px-4 py-3 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Existing Presets */}
+                {settings.tasks.length > 0 && dbTasks.length === 0 && (
+                   <div className="flex flex-wrap gap-2 mt-2">
+                    {settings.tasks.map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setSelectedTask(t)}
+                        className="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+                      >
+                        {t}
+                      </button>
                     ))}
-                  </select>
-                  <p className="text-[11px] text-gray-500">
-                    작업은 설정 &gt; 작업 목록에서 추가·수정할 수 있어요. 미리 정해 둔 이름을 써야 Report에 일관되게 집계돼요.
-                  </p>
-                </div>
+                  </div>
+                )}
               </div>
-              <div className="flex items-start justify-between gap-3 text-[11px] text-gray-400">
-                <div className="space-y-1">
-                  <button
-                    onClick={handleDisableTaskPopup}
-                    className="text-[11px] text-gray-500 dark:text-gray-300 underline underline-offset-4"
-                  >
-                    자동 팝업 끄기
-                  </button>
-                  <p>자동 팝업은 설정에서 다시 킬 수 있어요.</p>
-                </div>
-                <div className="flex gap-2 text-xs">
-                  <button
-                    onClick={handleTaskSkip}
-                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-slate-600"
-                  >
-                    내용 없이 저장
-                  </button>
-                  <button
-                    onClick={handleTaskSubmit}
-                    disabled={isSaving}
-                    className="px-3 py-2 rounded-lg bg-rose-500 text-white font-bold shadow-sm hover:bg-rose-600 disabled:opacity-60"
-                  >
-                    작업 저장
-                  </button>
-                </div>
+
+              <div className="flex gap-3 mt-8">
+                <button
+                  onClick={handleTaskSkip}
+                  className="flex-1 px-4 py-3 rounded-xl font-bold text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleTaskSubmit}
+                  disabled={!selectedTask.trim()}
+                  className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-500/30 transition-all"
+                >
+                  Save
+                </button>
               </div>
+              
+              <button
+                onClick={handleDisableTaskPopup}
+                className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline decoration-gray-300 underline-offset-2 transition-colors"
+              >
+                Don't ask me again
+              </button>
             </div>
           </div>
         </div>
@@ -965,6 +1023,51 @@ export default function TimerApp({
               >
                 긴 휴식
               </button>
+            </div>
+
+            {/* ✨ [New] Task Selector in Main View */}
+            <div className="mb-8 w-full max-w-xs mx-auto relative z-20">
+              {dbTasks.length > 0 ? (
+                <div className="relative group">
+                  <select
+                    value={selectedTaskId || ''}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (id === '') {
+                        setSelectedTaskId(null);
+                        setSelectedTask('');
+                      } else {
+                        const task = dbTasks.find((t) => t.id === id);
+                        if (task) {
+                          setSelectedTaskId(task.id);
+                          setSelectedTask(task.title);
+                        }
+                      }
+                    }}
+                    className={`w-full appearance-none cursor-pointer py-3 pl-4 pr-10 rounded-xl text-sm font-bold border-2 transition-all outline-none ${
+                      selectedTaskId
+                        ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400'
+                        : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    <option value="">작업 선택 안 함</option>
+                    {dbTasks.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.title}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-gray-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 text-center py-2">
+                  오늘의 할 일이 없습니다.
+                </div>
+              )}
             </div>
 
             <div
