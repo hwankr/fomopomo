@@ -18,6 +18,7 @@ const formatTime = (seconds: number) => {
 interface TimerAppProps {
   settingsUpdated: number;
   onRecordSaved: () => void; // ✨ [추가] 저장 완료 콜백 타입
+  isLoggedIn: boolean;
 }
 
 type Preset = {
@@ -48,6 +49,7 @@ type SavedState = {
 export default function TimerApp({
   settingsUpdated,
   onRecordSaved,
+  isLoggedIn,
 }: TimerAppProps) {
   const [tab, setTab] = useState<'timer' | 'stopwatch'>('timer');
   const [timerMode, setTimerMode] = useState<
@@ -348,6 +350,11 @@ export default function TimerApp({
     ) => {
       if (duration < 10) {
         toast.error('10초 미만은 저장되지 않습니다.');
+        return;
+      }
+
+      if (!isLoggedIn) {
+        toast.error('로그인이 필요한 기능입니다.');
         return;
       }
 

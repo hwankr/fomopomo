@@ -9,7 +9,7 @@ import HistoryList from '@/components/HistoryList';
 import LoginModal from '@/components/LoginModal';
 import ReportModal from '@/components/ReportModal';
 import SettingsModal from '@/components/SettingsModal';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import appIcon from './icon.png';
 
 export default function Home() {
@@ -109,7 +109,13 @@ export default function Home() {
               </button>
 
               <button
-                onClick={() => setIsReportModalOpen(true)}
+                onClick={() => {
+                  if (!session) {
+                    toast.error('로그인이 필요한 기능입니다.');
+                    return;
+                  }
+                  setIsReportModalOpen(true);
+                }}
                 className={headerBtnStyle}
               >
                 <svg
@@ -213,6 +219,7 @@ export default function Home() {
             <TimerApp
               settingsUpdated={settingsUpdateTrigger}
               onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
+              isLoggedIn={!!session}
             />
 
             {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
