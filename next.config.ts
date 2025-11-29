@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: '*.googleusercontent.com', // 구글 프로필 이미지 허용
       },
+      {
+        protocol: 'https',
+        hostname: 'ui-avatars.com', // 기본 아바타 생성 사이트 허용
+      },
     ],
   },
 };

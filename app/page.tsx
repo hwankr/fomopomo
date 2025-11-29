@@ -175,7 +175,9 @@ export default function Home() {
                     <Image
                       src={
                         session.user.user_metadata.avatar_url ||
-                        'https://www.svgrepo.com/show/446532/avatar.svg'
+                        `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                          session.user.email?.split('@')[0] || 'User'
+                        )}&background=random&color=fff`
                       }
                       alt="User"
                       width={36}
