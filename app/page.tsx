@@ -79,6 +79,12 @@ export default function Home() {
     dark:bg-slate-800 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-white
   `;
 
+  const planBtnStyle = `
+    flex items-center gap-2 px-2 sm:px-3 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap
+    bg-indigo-500 text-white hover:bg-indigo-600 hover:shadow-md hover:shadow-indigo-200
+    dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:shadow-none
+  `;
+
   return (
     <div className={isDarkMode ? 'dark' : ''}>
       <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 p-3 sm:p-4 overflow-y-auto font-sans text-gray-900 dark:text-gray-100">
@@ -126,7 +132,7 @@ export default function Home() {
 
               <Link
                 href="/plan"
-                className={headerBtnStyle}
+                className={planBtnStyle}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
