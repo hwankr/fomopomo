@@ -38,7 +38,7 @@
 
 ## 🤝 기여하기 (Contributing)
 
-버그 제보나 기능 제안은 [Issues](https://github.com/your-username/pomofomo/issues)를 이용해 주세요. Pull Request도 환영합니다!
+버그 제보나 기능 제안은 [Issues](https://github.com/hwankr/pomofomo/issues)를 이용해 주세요. Pull Request도 환영합니다!
 
 ---
 
