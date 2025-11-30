@@ -972,7 +972,7 @@ export default function TimerApp({
 
         <button
           onClick={() => setIsTaskSidebarOpen(true)}
-          className={`p-4 rounded-2xl transition-all shadow-sm border ${
+          className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${
             selectedTaskId
               ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50'
               : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
