@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import TaskSidebar from './TaskSidebar';
 
@@ -113,8 +114,8 @@ export default function TimerApp({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const today = new Date().toISOString().split('T')[0];
-      
+      const today = format(new Date(), 'yyyy-MM-dd');
+
       // Fetch daily tasks
       const { data: tasksData } = await supabase
         .from('tasks')
@@ -155,7 +156,7 @@ export default function TimerApp({
 
   useEffect(() => {
     fetchDbTasks();
-    
+
     // 포커스 시 최신화 (선택 사항)
     const onFocus = () => fetchDbTasks();
     window.addEventListener('focus', onFocus);
@@ -222,7 +223,7 @@ export default function TimerApp({
           // 하루(24시간) 이상 지난 기록은 무시
           if (now - state.lastUpdated < 24 * 60 * 60 * 1000) {
             setTab(state.activeTab);
-            
+
             // [타이머 복구]
             setTimerMode(state.timer.mode);
             setCycleCount(state.timer.cycleCount);
@@ -253,12 +254,12 @@ export default function TimerApp({
               setIsStopwatchRunning(true);
               stopwatchStartTimeRef.current = state.stopwatch.startTime; // Ref 복구 필수
             } else {
-            setStopwatchTime(state.stopwatch.elapsed);
-            setIsStopwatchRunning(false);
-          }
-            
+              setStopwatchTime(state.stopwatch.elapsed);
+              setIsStopwatchRunning(false);
+            }
+
             if (state.timer.isRunning || state.stopwatch.isRunning) {
-                toast.success("이전 작업을 복구했습니다.");
+              toast.success("이전 작업을 복구했습니다.");
             }
           }
         } catch (e) {
@@ -280,8 +281,8 @@ export default function TimerApp({
       timerMode === 'focus'
         ? 'Focus'
         : timerMode === 'shortBreak'
-        ? 'Short Break'
-        : 'Long Break';
+          ? 'Short Break'
+          : 'Long Break';
 
     const timerTitle = `${formatTime(timeLeft)} - ${modeLabel} | Pomofomo`;
     const stopwatchTitle = `${formatTime(stopwatchTime)} - Stopwatch | Pomofomo`;
@@ -469,8 +470,8 @@ export default function TimerApp({
       timerMode === 'focus'
         ? settings.pomoTime * 60
         : timerMode === 'shortBreak'
-        ? settings.shortBreak * 60
-        : settings.longBreak * 60;
+          ? settings.shortBreak * 60
+          : settings.longBreak * 60;
 
     if (timerMode !== 'focus') return;
 
@@ -488,8 +489,8 @@ export default function TimerApp({
       timerMode === 'focus'
         ? settings.pomoTime * 60
         : timerMode === 'shortBreak'
-        ? settings.shortBreak * 60
-        : settings.longBreak * 60;
+          ? settings.shortBreak * 60
+          : settings.longBreak * 60;
 
     if (timerMode !== 'focus') return;
 
@@ -624,11 +625,11 @@ export default function TimerApp({
   const changeTimerMode = (mode: "focus" | "shortBreak" | "longBreak") => {
     savePartialProgress();
     if (isRunning) {
-        if (timerRef.current) clearInterval(timerRef.current);
-        setIsRunning(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+      setIsRunning(false);
     }
     setTimerMode(mode);
-    
+
     // 모드 변경 시 시간 설정 및 저장
     let newTime = 0;
     if (mode === "focus") newTime = settings.pomoTime * 60;
@@ -644,10 +645,10 @@ export default function TimerApp({
 
   const handlePresetClick = (minutes: number) => {
     if (isRunning) {
-        toast.error("타이머가 작동 중입니다.\n먼저 정지해주세요.");
-        return;
+      toast.error("타이머가 작동 중입니다.\n먼저 정지해주세요.");
+      return;
     }
-    
+
     setTimerMode("focus");
     setTimeLeft(minutes * 60);
     setFocusLoggedSeconds(0);
@@ -867,8 +868,8 @@ export default function TimerApp({
     timerMode === 'focus'
       ? settings.pomoTime * 60
       : timerMode === 'shortBreak'
-      ? settings.shortBreak * 60
-      : settings.longBreak * 60;
+        ? settings.shortBreak * 60
+        : settings.longBreak * 60;
 
   const showReset = timeLeft !== currentMaxTime;
   const focusElapsed = timerMode === 'focus' ? currentMaxTime - timeLeft : 0;
@@ -901,11 +902,10 @@ export default function TimerApp({
                             setSelectedTask(task.title);
                             setSelectedTaskId(task.id);
                           }}
-                          className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                            selectedTaskId === task.id
-                              ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                              : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
-                          }`}
+                          className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
+                            ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
+                            : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
+                            }`}
                         >
                           {task.title}
                         </button>
@@ -949,7 +949,7 @@ export default function TimerApp({
                   Save
                 </button>
               </div>
-              
+
               <button
                 onClick={handleDisableTaskPopup}
                 className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline decoration-gray-300 underline-offset-2 transition-colors"
@@ -963,295 +963,287 @@ export default function TimerApp({
 
       <div className="relative w-full max-w-md mx-auto">
         <div
-          className={`absolute -inset-4 rounded-[2.5rem] blur-3xl transition-all duration-700 pointer-events-none -z-10 bg-gradient-to-br ${theme.glowFrom} ${theme.glowTo} ${
-            isAnyRunning ? 'opacity-80 scale-100' : 'opacity-0 scale-95'
-          }`}
+          className={`absolute -inset-4 rounded-[2.5rem] blur-3xl transition-all duration-700 pointer-events-none -z-10 bg-gradient-to-br ${theme.glowFrom} ${theme.glowTo} ${isAnyRunning ? 'opacity-80 scale-100' : 'opacity-0 scale-95'
+            }`}
         />
         <div
-          className={`relative w-full bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300 transform ${
-            isAnyRunning ? `ring-2 ${theme.ring} shadow-2xl scale-[1.02]` : ''
-          }`}
-        >
-      <div className="flex items-center gap-2 m-2">
-        <div className="flex-1 flex p-1 bg-gray-100 dark:bg-slate-900/50 rounded-2xl">
-          <button
-            onClick={() => setTab('timer')}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${
-              tab === 'timer'
-                ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm'
-                : 'text-gray-400 dark:text-gray-500'
+          className={`relative w-full bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300 transform ${isAnyRunning ? `ring-2 ${theme.ring} shadow-2xl scale-[1.02]` : ''
             }`}
-          >
-            타이머
-          </button>
-          <button
-            onClick={() => setTab('stopwatch')}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${
-              tab === 'stopwatch'
-                ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm'
-                : 'text-gray-400 dark:text-gray-500'
-            }`}
-          >
-            스톱워치
-          </button>
-        </div>
-
-        <button
-          onClick={() => setIsTaskSidebarOpen(true)}
-          className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${
-            selectedTaskId
-              ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50'
-              : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
-          }`}
-          title="Select Task"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-            className="w-5 h-5"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 17.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-            />
-          </svg>
-        </button>
-
-        <TaskSidebar
-          isOpen={isTaskSidebarOpen}
-          onClose={() => setIsTaskSidebarOpen(false)}
-          tasks={dbTasks}
-          weeklyPlans={weeklyPlans}
-          monthlyPlans={monthlyPlans} // ✨ [New] Pass monthly plans
-          selectedTaskId={selectedTaskId}
-          onSelectTask={(task) => {
-            if (task) {
-              setSelectedTask(task.title);
-              setSelectedTaskId(task.id);
-            } else {
-              setSelectedTask('');
-              setSelectedTaskId(null);
-            }
-          }}
-        />
-      </div>
-
-      <div
-          className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${theme.bgLight} ${theme.bgDark}`}
-      >
-        {!isLoaded ? (
-          <div className="text-gray-400 animate-pulse text-sm">
-            설정 불러오는 중...
-          </div>
-        ) : tab === 'timer' ? (
-          <div className="text-center animate-fade-in w-full">
-            <div className="flex justify-center gap-1 sm:gap-2 mb-6 w-full">
+          <div className="flex items-center gap-2 m-2">
+            <div className="flex-1 flex p-1 bg-gray-100 dark:bg-slate-900/50 rounded-2xl">
               <button
-                onClick={() => changeTimerMode('focus')}
-                className={`${modeBtnBase} ${
-                  timerMode === 'focus' ? theme.modeBtnActive : modeBtnInactive
-                }`}
+                onClick={() => setTab('timer')}
+                className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'timer'
+                  ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm'
+                  : 'text-gray-400 dark:text-gray-500'
+                  }`}
               >
-                뽀모도로
+                타이머
               </button>
               <button
-                onClick={() => changeTimerMode('shortBreak')}
-                className={`${modeBtnBase} ${
-                  timerMode === 'shortBreak'
-                    ? theme.modeBtnActive
-                    : modeBtnInactive
-                }`}
+                onClick={() => setTab('stopwatch')}
+                className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'stopwatch'
+                  ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm'
+                  : 'text-gray-400 dark:text-gray-500'
+                  }`}
               >
-                짧은 휴식
-              </button>
-              <button
-                onClick={() => changeTimerMode('longBreak')}
-                className={`${modeBtnBase} ${
-                  timerMode === 'longBreak'
-                    ? theme.modeBtnActive
-                    : modeBtnInactive
-                }`}
-              >
-                긴 휴식
+                스톱워치
               </button>
             </div>
 
-            {/* ✨ [New] Selected Task Display */}
-            <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
-              {selectedTaskId && (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in">
-                  <span className="text-sm font-medium max-w-[200px] truncate">
-                    {dbTasks.find((t) => t.id === selectedTaskId)?.title}
-                  </span>
+            <button
+              onClick={() => setIsTaskSidebarOpen(true)}
+              className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${selectedTaskId
+                ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50'
+                : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
+                }`}
+              title="Select Task"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+                className="w-5 h-5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 17.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+                />
+              </svg>
+            </button>
+
+            <TaskSidebar
+              isOpen={isTaskSidebarOpen}
+              onClose={() => setIsTaskSidebarOpen(false)}
+              tasks={dbTasks}
+              weeklyPlans={weeklyPlans}
+              monthlyPlans={monthlyPlans} // ✨ [New] Pass monthly plans
+              selectedTaskId={selectedTaskId}
+              onSelectTask={(task) => {
+                if (task) {
+                  setSelectedTask(task.title);
+                  setSelectedTaskId(task.id);
+                } else {
+                  setSelectedTask('');
+                  setSelectedTaskId(null);
+                }
+              }}
+            />
+          </div>
+
+          <div
+            className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${theme.bgLight} ${theme.bgDark}`}
+          >
+            {!isLoaded ? (
+              <div className="text-gray-400 animate-pulse text-sm">
+                설정 불러오는 중...
+              </div>
+            ) : tab === 'timer' ? (
+              <div className="text-center animate-fade-in w-full">
+                <div className="flex justify-center gap-1 sm:gap-2 mb-6 w-full">
                   <button
-                    onClick={() => {
-                      setSelectedTaskId(null);
-                      setSelectedTask('');
-                    }}
-                    className="p-0.5 hover:bg-rose-100 dark:hover:bg-rose-800/50 rounded-full transition-colors"
+                    onClick={() => changeTimerMode('focus')}
+                    className={`${modeBtnBase} ${timerMode === 'focus' ? theme.modeBtnActive : modeBtnInactive
+                      }`}
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                    </svg>
+                    뽀모도로
+                  </button>
+                  <button
+                    onClick={() => changeTimerMode('shortBreak')}
+                    className={`${modeBtnBase} ${timerMode === 'shortBreak'
+                      ? theme.modeBtnActive
+                      : modeBtnInactive
+                      }`}
+                  >
+                    짧은 휴식
+                  </button>
+                  <button
+                    onClick={() => changeTimerMode('longBreak')}
+                    className={`${modeBtnBase} ${timerMode === 'longBreak'
+                      ? theme.modeBtnActive
+                      : modeBtnInactive
+                      }`}
+                  >
+                    긴 휴식
                   </button>
                 </div>
-              )}
-            </div>
 
-            <div
-              className={`text-7xl sm:text-8xl font-bold mb-4 font-mono tracking-tighter transition-colors ${theme.textMain}`}
-            >
-              {formatTime(timeLeft)}
-            </div>
+                {/* ✨ [New] Selected Task Display */}
+                <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
+                  {selectedTaskId && (
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in">
+                      <span className="text-sm font-medium max-w-[200px] truncate">
+                        {dbTasks.find((t) => t.id === selectedTaskId)?.title}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setSelectedTaskId(null);
+                          setSelectedTask('');
+                        }}
+                        className="p-0.5 hover:bg-rose-100 dark:hover:bg-rose-800/50 rounded-full transition-colors"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="w-4 h-4"
+                        >
+                          <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-            <div className="flex flex-wrap gap-2 justify-center mb-6">
-              {settings.presets &&
-                settings.presets.map((preset) => (
+                <div
+                  className={`text-7xl sm:text-8xl font-bold mb-4 font-mono tracking-tighter transition-colors ${theme.textMain}`}
+                >
+                  {formatTime(timeLeft)}
+                </div>
+
+                <div className="flex flex-wrap gap-2 justify-center mb-6">
+                  {settings.presets &&
+                    settings.presets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        onClick={() => handlePresetClick(preset.minutes)}
+                        className="px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95 whitespace-nowrap"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                </div>
+
+                {timerMode === 'focus' && (
+                  <div className="text-sm font-bold text-gray-400 dark:text-gray-500 mb-6 opacity-90 tracking-wider">
+                    사이클 {cycleCount} / {settings.longBreakInterval}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap justify-center gap-4">
                   <button
-                    key={preset.id}
-                    onClick={() => handlePresetClick(preset.minutes)}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95 whitespace-nowrap"
+                    onClick={() => toggleTimer()}
+                    className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${theme.btnMain} dark:shadow-none min-w-[140px]`}
                   >
-                    {preset.label}
+                    {isRunning ? '일시정지' : '시작'}
                   </button>
-                ))}
-            </div>
 
-            {timerMode === 'focus' && (
-              <div className="text-sm font-bold text-gray-400 dark:text-gray-500 mb-6 opacity-90 tracking-wider">
-                사이클 {cycleCount} / {settings.longBreakInterval}
+                  {showFocusSaveButton && (
+                    <button
+                      onClick={handleTimerSave}
+                      disabled={isSaving}
+                      className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                    >
+                      저장
+                    </button>
+                  )}
+
+                  {!isRunning && showReset && (
+                    <button
+                      onClick={resetTimerManual}
+                      className="p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all animate-fade-in shadow-sm"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2.5}
+                        stroke="currentColor"
+                        className="w-6 h-6"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center animate-fade-in w-full">
+                <div className="mb-6 text-sm font-bold text-indigo-400 uppercase tracking-widest">
+                  스톱워치
+                </div>
+
+                {/* ✨ [New] Selected Task Display for Stopwatch */}
+                <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
+                  {selectedTaskId && (
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in">
+                      <span className="text-sm font-medium max-w-[200px] truncate">
+                        {dbTasks.find((t) => t.id === selectedTaskId)?.title}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setSelectedTaskId(null);
+                          setSelectedTask('');
+                        }}
+                        className="p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 rounded-full transition-colors"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="w-4 h-4"
+                        >
+                          <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-7xl sm:text-8xl font-bold mb-10 font-mono tracking-tighter text-indigo-500 dark:text-indigo-400">
+                  {formatTime(stopwatchTime)}
+                </div>
+
+                <div className="flex gap-4 justify-center items-center">
+                  <button
+                    onClick={toggleStopwatch}
+                    className="px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 min-w-[140px]"
+                  >
+                    {isStopwatchRunning ? '일시정지' : '시작'}
+                  </button>
+
+                  {!isStopwatchRunning && stopwatchTime > 0 && (
+                    <>
+                      <button
+                        onClick={handleStopwatchSave}
+                        disabled={isSaving}
+                        className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black transition-all shadow-sm"
+                      >
+                        저장
+                      </button>
+                      <button
+                        onClick={resetStopwatch}
+                        className="p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all shadow-sm"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={2.5}
+                          stroke="currentColor"
+                          className="w-6 h-6"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"
+                          />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
-
-            <div className="flex flex-wrap justify-center gap-4">
-              <button
-                onClick={() => toggleTimer()}
-                className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${theme.btnMain} dark:shadow-none min-w-[140px]`}
-              >
-                {isRunning ? '일시정지' : '시작'}
-              </button>
-
-              {showFocusSaveButton && (
-                <button
-                  onClick={handleTimerSave}
-                  disabled={isSaving}
-                  className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
-                >
-                  저장
-                </button>
-              )}
-
-              {!isRunning && showReset && (
-                <button
-                  onClick={resetTimerManual}
-                  className="p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all animate-fade-in shadow-sm"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={2.5}
-                    stroke="currentColor"
-                    className="w-6 h-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"
-                    />
-                  </svg>
-                </button>
-              )}
-            </div>
           </div>
-        ) : (
-          <div className="text-center animate-fade-in w-full">
-            <div className="mb-6 text-sm font-bold text-indigo-400 uppercase tracking-widest">
-              스톱워치
-            </div>
-
-            {/* ✨ [New] Selected Task Display for Stopwatch */}
-            <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
-              {selectedTaskId && (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in">
-                  <span className="text-sm font-medium max-w-[200px] truncate">
-                    {dbTasks.find((t) => t.id === selectedTaskId)?.title}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setSelectedTaskId(null);
-                      setSelectedTask('');
-                    }}
-                    className="p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 rounded-full transition-colors"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="text-7xl sm:text-8xl font-bold mb-10 font-mono tracking-tighter text-indigo-500 dark:text-indigo-400">
-              {formatTime(stopwatchTime)}
-            </div>
-
-            <div className="flex gap-4 justify-center items-center">
-              <button
-                onClick={toggleStopwatch}
-                className="px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 min-w-[140px]"
-              >
-                {isStopwatchRunning ? '일시정지' : '시작'}
-              </button>
-
-              {!isStopwatchRunning && stopwatchTime > 0 && (
-                <>
-                  <button
-                    onClick={handleStopwatchSave}
-                    disabled={isSaving}
-                    className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black transition-all shadow-sm"
-                  >
-                    저장
-                  </button>
-                  <button
-                    onClick={resetStopwatch}
-                    className="p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all shadow-sm"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2.5}
-                      stroke="currentColor"
-                      className="w-6 h-6"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"
-                      />
-                    </svg>
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
         </div>
       </div>
     </>
