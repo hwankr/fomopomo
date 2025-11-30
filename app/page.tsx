@@ -99,8 +99,9 @@ export default function Home() {
           onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
         />
 
-        <div className="py-4 sm:py-8 flex flex-col items-center w-full max-w-lg relative">
-          <div className="w-full flex justify-between items-center mb-8 px-1">
+        {/* Header Container - Wider for PC */}
+        <div className="w-full max-w-5xl px-4 mb-8">
+          <div className="w-full flex justify-between items-center">
             <div className="flex items-center gap-2 select-none">
               <Image
                 src={appIcon}
@@ -127,8 +128,21 @@ export default function Home() {
                 href="/plan"
                 className={headerBtnStyle}
               >
-                <span className="text-xl">📅</span>
-                <span className="hidden sm:inline">Plan</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className="w-5 h-5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+                  />
+                </svg>
+                <span className="hidden md:inline">Plan</span>
               </Link>
 
               <button
@@ -160,7 +174,7 @@ export default function Home() {
                     d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z"
                   />
                 </svg>
-                <span className="hidden sm:inline">Report</span>
+                <span className="hidden md:inline">Report</span>
               </button>
 
               <button
@@ -186,7 +200,7 @@ export default function Home() {
                     d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
-                <span className="hidden sm:inline">Setting</span>
+                <span className="hidden md:inline">Setting</span>
               </button>
 
               {session ? (
@@ -238,20 +252,21 @@ export default function Home() {
               )}
             </div>
           </div>
+        </div>
 
-          <div className="w-full flex flex-col items-center gap-8 animate-fade-in">
-            {/* ✨ TimerApp에 콜백 전달: 저장 완료 시 트리거 숫자를 증가시킴 */}
-            <TimerApp
-              settingsUpdated={settingsUpdateTrigger}
-              onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
-              isLoggedIn={!!session}
-            />
+        {/* Content Container - Narrow for Focus */}
+        <div className="w-full max-w-lg flex flex-col items-center gap-8 animate-fade-in">
+          {/* ✨ TimerApp에 콜백 전달: 저장 완료 시 트리거 숫자를 증가시킴 */}
+          <TimerApp
+            settingsUpdated={settingsUpdateTrigger}
+            onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
+            isLoggedIn={!!session}
+          />
 
-            {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
-            {session ? (
-              <HistoryList updateTrigger={historyUpdateTrigger} />
-            ) : null}
-          </div>
+          {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
+          {session ? (
+            <HistoryList updateTrigger={historyUpdateTrigger} />
+          ) : null}
         </div>
       </main>
     </div>
