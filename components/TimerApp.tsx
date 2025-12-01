@@ -154,6 +154,15 @@ export default function TimerApp({
     }
   };
 
+  // ✨ [New] Helper to get selected task title from all lists
+  const getSelectedTaskTitle = () => {
+    const task =
+      dbTasks.find((t) => t.id === selectedTaskId) ||
+      weeklyPlans.find((t) => t.id === selectedTaskId) ||
+      monthlyPlans.find((t) => t.id === selectedTaskId);
+    return task?.title || '';
+  };
+
   useEffect(() => {
     fetchDbTasks();
 
@@ -1077,7 +1086,7 @@ export default function TimerApp({
                   {selectedTaskId && (
                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in">
                       <span className="text-sm font-medium max-w-[200px] truncate">
-                        {dbTasks.find((t) => t.id === selectedTaskId)?.title}
+                        {getSelectedTaskTitle()}
                       </span>
                       <button
                         onClick={() => {
@@ -1176,7 +1185,7 @@ export default function TimerApp({
                   {selectedTaskId && (
                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in">
                       <span className="text-sm font-medium max-w-[200px] truncate">
-                        {dbTasks.find((t) => t.id === selectedTaskId)?.title}
+                        {getSelectedTaskTitle()}
                       </span>
                       <button
                         onClick={() => {
