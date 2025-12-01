@@ -80,6 +80,8 @@ export default function TimerApp({
     backgroundImage: string;
   } | null>(null);
 
+  const toastShownRef = useRef(false); // ✨ [New] Toast guard
+
   const [settings, setSettings] = useState({
     pomoTime: 25,
     shortBreak: 5,
@@ -204,25 +206,27 @@ export default function TimerApp({
     localStorage.setItem("pomofomo_full_state", JSON.stringify(state));
   }, []);
 
+  // 1. Load Settings
   useEffect(() => {
-    const load = () => {
-      // 1. 설정 불러오기
-      const savedSettings = localStorage.getItem("pomofomo_settings");
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        setSettings((prev) => ({
-          ...prev,
-          ...parsed,
-          taskPopupEnabled:
-            parsed.taskPopupEnabled ?? prev.taskPopupEnabled ?? true,
-          presets:
-            parsed.presets && parsed.presets.length > 0
-              ? parsed.presets
-              : prev.presets,
-        }));
-      }
+    const savedSettings = localStorage.getItem("pomofomo_settings");
+    if (savedSettings) {
+      const parsed = JSON.parse(savedSettings);
+      setSettings((prev) => ({
+        ...prev,
+        ...parsed,
+        taskPopupEnabled:
+          parsed.taskPopupEnabled ?? prev.taskPopupEnabled ?? true,
+        presets:
+          parsed.presets && parsed.presets.length > 0
+            ? parsed.presets
+            : prev.presets,
+      }));
+    }
+  }, [settingsUpdated]);
 
-      // 2. 타이머/스톱워치 상태 복구하기
+  // 2. Restore State (Mount only)
+  useEffect(() => {
+    const restoreState = () => {
       const savedStateJson = localStorage.getItem("pomofomo_full_state");
       if (savedStateJson) {
         try {
@@ -267,8 +271,9 @@ export default function TimerApp({
               setIsStopwatchRunning(false);
             }
 
-            if (state.timer.isRunning || state.stopwatch.isRunning) {
+            if ((state.timer.isRunning || state.stopwatch.isRunning) && !toastShownRef.current) {
               toast.success("이전 작업을 복구했습니다.");
+              toastShownRef.current = true;
             }
           }
         } catch (e) {
@@ -277,8 +282,8 @@ export default function TimerApp({
       }
       setIsLoaded(true);
     };
-    load();
-  }, [settingsUpdated]); // 의존성
+    restoreState();
+  }, []); // Run once on mount
 
   useEffect(() => {
     isRunningRef.current = isRunning;
@@ -547,6 +552,57 @@ export default function TimerApp({
     }
   }, [settings.isMuted, settings.volume]);
 
+  // ✨ [New] Timer Interval Effect
+  useEffect(() => {
+    if (isRunning) {
+      if (!timerRef.current) {
+        timerRef.current = setInterval(() => {
+          const now = Date.now();
+          const diff = Math.ceil((endTimeRef.current - now) / 1000);
+          if (diff <= 0) setTimeLeft(0);
+          else setTimeLeft(diff);
+        }, 200);
+      }
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isRunning]);
+
+  // ✨ [New] Stopwatch Interval Effect
+  useEffect(() => {
+    if (isStopwatchRunning) {
+      if (!stopwatchRef.current) {
+        stopwatchRef.current = setInterval(() => {
+          const now = Date.now();
+          const elapsed = Math.floor((now - stopwatchStartTimeRef.current) / 1000);
+          setStopwatchTime(elapsed);
+        }, 200);
+      }
+    } else {
+      if (stopwatchRef.current) {
+        clearInterval(stopwatchRef.current);
+        stopwatchRef.current = null;
+      }
+    }
+
+    return () => {
+      if (stopwatchRef.current) {
+        clearInterval(stopwatchRef.current);
+        stopwatchRef.current = null;
+      }
+    };
+  }, [isStopwatchRunning]);
+
   const toggleTimer = useCallback((forceStart = false) => {
     if (!forceStart && isStopwatchRunning) {
       toast.error("스톱워치가 작동 중입니다.\n먼저 정지해주세요.");
@@ -558,7 +614,6 @@ export default function TimerApp({
 
     if (!forceStart && isRunning) {
       // [정지]
-      if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
       // 💾 정지 상태 저장 (현재 남은 시간)
       saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
@@ -569,19 +624,11 @@ export default function TimerApp({
       setIsRunning(true);
       // 💾 실행 상태 저장 (목표 종료 시간)
       saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
-
-      timerRef.current = setInterval(() => {
-        const now = Date.now();
-        const diff = Math.ceil((endTimeRef.current - now) / 1000);
-        if (diff <= 0) setTimeLeft(0);
-        else setTimeLeft(diff);
-      }, 200);
     }
   }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds, playClickSound]);
 
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
-      if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
 
       playAlarm();
@@ -634,7 +681,6 @@ export default function TimerApp({
   const changeTimerMode = (mode: "focus" | "shortBreak" | "longBreak") => {
     savePartialProgress();
     if (isRunning) {
-      if (timerRef.current) clearInterval(timerRef.current);
       setIsRunning(false);
     }
     setTimerMode(mode);
@@ -679,7 +725,6 @@ export default function TimerApp({
 
     if (isStopwatchRunning) {
       // [정지]
-      if (stopwatchRef.current) clearInterval(stopwatchRef.current);
       setIsStopwatchRunning(false);
       // 💾 정지 상태 저장 (현재 흐른 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null);
@@ -691,18 +736,11 @@ export default function TimerApp({
       setIsStopwatchRunning(true);
       // 💾 실행 상태 저장 (시작 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start);
-
-      stopwatchRef.current = setInterval(() => {
-        const now = Date.now();
-        const elapsed = Math.floor((now - stopwatchStartTimeRef.current) / 1000);
-        setStopwatchTime(elapsed);
-      }, 200);
     }
   }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime, playClickSound]);
 
   const handleStopwatchSave = async () => {
     setIsStopwatchRunning(false);
-    if (stopwatchRef.current) clearInterval(stopwatchRef.current);
 
     const afterSave = () => {
       setStopwatchTime(0);
@@ -726,13 +764,11 @@ export default function TimerApp({
   const resetStopwatch = () => {
     setIsStopwatchRunning(false);
     setStopwatchTime(0);
-    if (stopwatchRef.current) clearInterval(stopwatchRef.current);
   };
 
   const resetTimerManual = () => {
     savePartialProgress();
     setIsRunning(false);
-    if (timerRef.current) clearInterval(timerRef.current);
 
     let resetTime = 0;
     if (timerMode === "focus") resetTime = settings.pomoTime * 60;
@@ -745,12 +781,13 @@ export default function TimerApp({
     saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
   };
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (stopwatchRef.current) clearInterval(stopwatchRef.current);
-    };
-  }, []);
+  // Cleanup intervals on unmount is handled by useEffect now
+  // useEffect(() => {
+  //   return () => {
+  //     if (timerRef.current) clearInterval(timerRef.current);
+  //     if (stopwatchRef.current) clearInterval(stopwatchRef.current);
+  //   };
+  // }, []);
 
   useEffect(() => {
     const handleSpaceToggle = (event: KeyboardEvent) => {

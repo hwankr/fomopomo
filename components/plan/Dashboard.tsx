@@ -11,6 +11,7 @@ import MonthlyPlan from './MonthlyPlan';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
+import TimerStatus from '../TimerStatus';
 
 interface DashboardProps {
   session: Session | null;
@@ -45,7 +46,7 @@ export default function Dashboard({ session }: DashboardProps) {
     };
 
     fetchFocusTime();
-    
+
     // Real-time subscription
     const channel = supabase
       .channel('dashboard-updates')
@@ -87,6 +88,9 @@ export default function Dashboard({ session }: DashboardProps) {
           </Link>
           <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
           <h1 className="text-xl font-bold tracking-tight">Planfomo</h1>
+          <div className="hidden sm:block">
+            <TimerStatus />
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-sm text-gray-500 dark:text-gray-400 hidden sm:block">
@@ -101,7 +105,7 @@ export default function Dashboard({ session }: DashboardProps) {
             </button>
           ) : (
             <button
-              onClick={() => supabase.auth.signInWithOAuth({ 
+              onClick={() => supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
                   redirectTo: window.location.origin,
@@ -126,7 +130,7 @@ export default function Dashboard({ session }: DashboardProps) {
                 onSelectDate={setSelectedDate}
               />
             </div>
-            
+
             {/* 2. Daily Focus */}
             <div className="order-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl p-6 border border-indigo-100 dark:border-indigo-800/50">
               <h3 className="text-indigo-900 dark:text-indigo-100 font-semibold mb-2">Daily Focus</h3>
@@ -136,7 +140,7 @@ export default function Dashboard({ session }: DashboardProps) {
                 on {format(selectedDate, 'MMM d')}.
               </p>
             </div>
-            
+
             {/* 4. Timeline */}
             <div className="order-4">
               <Timeline selectedDate={selectedDate} userId={session?.user?.id || ''} />
@@ -157,7 +161,7 @@ export default function Dashboard({ session }: DashboardProps) {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex-1 p-6">
                 <TaskList selectedDate={selectedDate} userId={session?.user?.id || ''} />
               </div>
