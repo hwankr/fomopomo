@@ -3,15 +3,33 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { CheckCircle2, Circle, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Trash2, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface Task {
   id: string;
   title: string;
   status: 'todo' | 'in_progress' | 'done';
   estimated_pomodoros: number;
-  duration?: number; // ✨ [New] Display duration
+  duration?: number;
+  position: number;
 }
 
 const formatDuration = (seconds: number) => {
@@ -21,6 +39,79 @@ const formatDuration = (seconds: number) => {
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 };
+
+interface SortableTaskItemProps {
+  task: Task;
+  toggleTaskStatus: (task: Task) => void;
+  deleteTask: (id: string) => void;
+}
+
+function SortableTaskItem({ task, toggleTaskStatus, deleteTask }: SortableTaskItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-transparent hover:border-gray-200 dark:hover:border-gray-700 transition-all",
+        isDragging && "shadow-lg bg-white dark:bg-gray-800 border-rose-200 dark:border-rose-900"
+      )}
+    >
+      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500">
+        <GripVertical className="w-5 h-5" />
+      </div>
+
+      <button
+        onClick={() => toggleTaskStatus(task)}
+        className={cn(
+          "flex-shrink-0 transition-colors",
+          task.status === 'done' ? "text-rose-500" : "text-gray-300 hover:text-gray-400"
+        )}
+      >
+        {task.status === 'done' ? (
+          <CheckCircle2 className="w-6 h-6" />
+        ) : (
+          <Circle className="w-6 h-6" />
+        )}
+      </button>
+
+      <span className={cn(
+        "flex-1 font-medium transition-all",
+        task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
+      )}>
+        {task.title}
+      </span>
+
+      {task.duration ? (
+        <span className="text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-md whitespace-nowrap">
+          {formatDuration(task.duration)}
+        </span>
+      ) : null}
+
+      <button
+        onClick={() => deleteTask(task.id)}
+        className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 transition-all"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
 
 interface TaskListProps {
   selectedDate: Date;
@@ -33,6 +124,13 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   const fetchTasks = useCallback(async () => {
     if (!userId) {
       setTasks([]);
@@ -42,26 +140,25 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
 
     setLoading(true);
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    
+
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
       .eq('user_id', userId)
       .eq('due_date', dateStr)
-      .order('created_at', { ascending: true });
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: true }); // Fallback if position is null/same
 
     if (error) {
       console.error('Error fetching tasks:', error);
     } else {
       const taskIds = (data || []).map((t: any) => t.id);
-      
-      // ✨ [New] Fetch ALL study sessions for these tasks to calculate total duration
+
       const { data: sessions } = await supabase
         .from('study_sessions')
         .select('task_id, duration')
         .in('task_id', taskIds);
 
-      // ✨ [New] Merge duration into tasks
       const tasksWithDuration = (data || []).map((task: any) => {
         const taskSessions = sessions?.filter((s: any) => s.task_id === task.id) || [];
         const totalDuration = taskSessions.reduce((acc: number, curr: any) => acc + curr.duration, 0);
@@ -75,17 +172,19 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
   useEffect(() => {
     fetchTasks();
 
-    // ✨ [New] Real-time subscription for study sessions
     const channel = supabase
       .channel('task-list-updates')
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*', // Listen to all events to catch updates too
           schema: 'public',
-          table: 'study_sessions',
+          table: 'tasks',
+          filter: `user_id=eq.${userId}`,
         },
         () => {
+          // We might want to be careful here not to overwrite optimistic updates while dragging
+          // For now, simple re-fetch is okay but might be jittery if multiple users edit (unlikely here)
           fetchTasks();
         }
       )
@@ -94,7 +193,38 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchTasks]);
+  }, [fetchTasks, userId]);
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setTasks((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over.id);
+        const newItems = arrayMove(items, oldIndex, newIndex);
+
+        // Update positions in DB
+        // We update all items to ensure consistency. 
+        // Optimization: only update affected range if list is huge, but for daily tasks it's fine.
+        const updates = newItems.map((task, index) => ({
+          id: task.id,
+          position: index,
+          updated_at: new Date().toISOString(),
+        }));
+
+        // Fire and forget update (or handle error quietly)
+        updates.forEach(async (update) => {
+          await supabase
+            .from('tasks')
+            .update({ position: update.position })
+            .eq('id', update.id);
+        });
+
+        return newItems;
+      });
+    }
+  };
 
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +235,11 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     }
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    
+
+    // Calculate new position (at the end)
+    const maxPosition = tasks.length > 0 ? Math.max(...tasks.map(t => t.position || 0)) : -1;
+    const newPosition = maxPosition + 1;
+
     const { data, error } = await supabase
       .from('tasks')
       .insert({
@@ -113,6 +247,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
         title: newTaskTitle,
         due_date: dateStr,
         status: 'todo',
+        position: newPosition,
       })
       .select()
       .single();
@@ -120,7 +255,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     if (error) {
       console.error('Error adding task:', error);
     } else if (data) {
-      setTasks([...tasks, data]);
+      setTasks([...tasks, { ...data, duration: 0 }]); // Add duration: 0 for consistency
       setNewTaskTitle('');
       setIsAdding(false);
     }
@@ -128,7 +263,10 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
 
   const toggleTaskStatus = async (task: Task) => {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
-    
+
+    // Optimistic update
+    setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+
     const { error } = await supabase
       .from('tasks')
       .update({ status: newStatus })
@@ -136,13 +274,16 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
 
     if (error) {
       console.error('Error updating task:', error);
-    } else {
-      setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+      // Revert if error
+      fetchTasks();
     }
   };
 
   const deleteTask = async (id: string) => {
     if (!confirm('Are you sure you want to delete this task?')) return;
+
+    // Optimistic update
+    setTasks(tasks.filter(t => t.id !== id));
 
     const { error } = await supabase
       .from('tasks')
@@ -151,15 +292,14 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
 
     if (error) {
       console.error('Error deleting task:', error);
-    } else {
-      setTasks(tasks.filter(t => t.id !== id));
+      fetchTasks();
     }
   };
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-y-auto space-y-3 min-h-[300px]">
-        {loading ? (
+        {loading && tasks.length === 0 ? (
           <div className="text-center text-gray-400 py-10">Loading tasks...</div>
         ) : tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 py-10">
@@ -167,7 +307,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
               <span className="text-2xl">📝</span>
             </div>
             <p>No tasks for this day.</p>
-            <button 
+            <button
               onClick={() => setIsAdding(true)}
               className="mt-4 text-rose-500 hover:text-rose-600 font-medium text-sm"
             >
@@ -175,47 +315,25 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
             </button>
           </div>
         ) : (
-          tasks.map((task) => (
-            <div
-              key={task.id}
-              className="group flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-transparent hover:border-gray-200 dark:hover:border-gray-700 transition-all"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={tasks.map(t => t.id)}
+              strategy={verticalListSortingStrategy}
             >
-              <button
-                onClick={() => toggleTaskStatus(task)}
-                className={cn(
-                  "flex-shrink-0 transition-colors",
-                  task.status === 'done' ? "text-rose-500" : "text-gray-300 hover:text-gray-400"
-                )}
-              >
-                {task.status === 'done' ? (
-                  <CheckCircle2 className="w-6 h-6" />
-                ) : (
-                  <Circle className="w-6 h-6" />
-                )}
-              </button>
-              
-              <span className={cn(
-                "flex-1 font-medium transition-all",
-                task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
-              )}>
-                {task.title}
-              </span>
-
-              {/* ✨ [New] Display Duration */}
-              {task.duration ? (
-                <span className="text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-md whitespace-nowrap">
-                  {formatDuration(task.duration)}
-                </span>
-              ) : null}
-
-              <button
-                onClick={() => deleteTask(task.id)}
-                className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 transition-all"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))
+              {tasks.map((task) => (
+                <SortableTaskItem
+                  key={task.id}
+                  task={task}
+                  toggleTaskStatus={toggleTaskStatus}
+                  deleteTask={deleteTask}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
