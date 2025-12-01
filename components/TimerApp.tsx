@@ -6,6 +6,8 @@ import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import TaskSidebar from './TaskSidebar';
 
+import { User } from '@supabase/supabase-js';
+
 const formatTime = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -109,6 +111,20 @@ export default function TimerApp({
   const [pendingRecord, setPendingRecord] = useState<
     { mode: string; duration: number; onAfterSave?: () => void } | null
   >(null);
+  const [user, setUser] = useState<User | null>(null);
+
+
+
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+      if (user) {
+        await supabase.from('profiles').upsert({ id: user.id, status: 'online', last_active_at: new Date().toISOString() });
+      }
+    };
+    getUser();
+  }, []);
 
   // ✨ [New] Fetch tasks from DB
   const fetchDbTasks = async () => {
@@ -165,13 +181,75 @@ export default function TimerApp({
     return task?.title || '';
   };
 
+  // ✨ [New] Update Status Helper
+  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string) => {
+    if (!user) return;
+    try {
+      // Use provided task, or selectedTask state, or fallback to empty string
+      const taskTitle = task !== undefined ? task : selectedTask;
+
+      // Check privacy setting
+      const { data } = await supabase.from('profiles').select('is_task_public').eq('id', user.id).single();
+      const isPublic = data?.is_task_public ?? true;
+
+      await supabase.from('profiles').update({
+        status,
+        current_task: isPublic ? taskTitle : null, // Hide task if private
+        last_active_at: new Date().toISOString(),
+      }).eq('id', user.id);
+    } catch (e) {
+      console.error('Failed to update status', e);
+    }
+  }, [user, selectedTask]);
+
+  // ✨ [New] Real-time task update while running
+  useEffect(() => {
+    if ((isRunning || isStopwatchRunning) && user) {
+      const timer = setTimeout(() => {
+        updateStatus('studying');
+      }, 1000); // Debounce 1s
+      return () => clearTimeout(timer);
+    }
+  }, [selectedTask, selectedTaskId, isRunning, isStopwatchRunning, updateStatus, user]);
+
   useEffect(() => {
     fetchDbTasks();
 
     // 포커스 시 최신화 (선택 사항)
     const onFocus = () => fetchDbTasks();
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+
+    // ✨ [New] Set online status on mount
+    const setOnline = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('profiles').update({
+          status: 'online',
+          last_active_at: new Date().toISOString(),
+        }).eq('id', user.id);
+      }
+    };
+    setOnline();
+
+    // ✨ [New] Set offline status on unmount/close
+    const handleUnload = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Note: This might not always complete on browser close, but works for navigation
+        await supabase.from('profiles').update({
+          status: 'offline',
+          last_active_at: new Date().toISOString(),
+        }).eq('id', user.id);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('beforeunload', handleUnload);
+      handleUnload(); // Set offline when component unmounts
+    };
   }, []); // ✨ Mount 시 실행
 
   const saveState = useCallback((
@@ -617,6 +695,7 @@ export default function TimerApp({
       setIsRunning(false);
       // 💾 정지 상태 저장 (현재 남은 시간)
       saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
+      updateStatus('paused');
     } else {
       // [시작]
       const target = Date.now() + (timeLeft * 1000);
@@ -624,6 +703,7 @@ export default function TimerApp({
       setIsRunning(true);
       // 💾 실행 상태 저장 (목표 종료 시간)
       saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
+      updateStatus('studying');
     }
   }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds, playClickSound]);
 
@@ -728,6 +808,7 @@ export default function TimerApp({
       setIsStopwatchRunning(false);
       // 💾 정지 상태 저장 (현재 흐른 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null);
+      updateStatus('paused');
     } else {
       // [시작]
       // 시작 시간 = 현재 시간 - 이미 흐른 시간
@@ -736,6 +817,7 @@ export default function TimerApp({
       setIsStopwatchRunning(true);
       // 💾 실행 상태 저장 (시작 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start);
+      updateStatus('studying');
     }
   }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime, playClickSound]);
 
@@ -1290,8 +1372,9 @@ export default function TimerApp({
               </div>
             )}
           </div>
-        </div>
-      </div>
+        </div >
+      </div >
+
     </>
   );
 }
