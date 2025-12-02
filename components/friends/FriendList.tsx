@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
-import { Pencil, Trash2, Check, X } from 'lucide-react';
+import { Pencil, Trash2, Check, X, AlertTriangle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+
 
 interface FriendListProps {
   session: Session;
@@ -30,6 +32,8 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [deletingFriend, setDeletingFriend] = useState<{ id: string; name: string; friendId: string } | null>(null);
+
 
   useEffect(() => {
     fetchFriends();
@@ -97,19 +101,30 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
     }
   };
 
-  const handleDelete = async (id: string, email: string, friendId: string) => {
-    if (!confirm(`Are you sure you want to remove ${email} from your friends?`)) return;
+  const confirmDelete = (friend: Friendship) => {
+    setDeletingFriend({
+      id: friend.id,
+      name: friend.nickname || friend.friend_email,
+      friendId: friend.friend_id
+    });
+  };
+
+  const handleDelete = async () => {
+    if (!deletingFriend) return;
 
     try {
-      const { error } = await supabase.rpc('delete_friend', { friend_uuid: friendId });
+      const { error } = await supabase.rpc('delete_friend', { friend_uuid: deletingFriend.friendId });
 
       if (error) throw error;
-      setFriends(prev => prev.filter(f => f.id !== id));
+      setFriends(prev => prev.filter(f => f.id !== deletingFriend.id));
+      toast.success('친구가 삭제되었습니다.');
+      setDeletingFriend(null);
     } catch (error) {
       console.error('Error deleting friend:', error);
-      alert('Failed to delete friend');
+      toast.error('친구 삭제에 실패했습니다.');
     }
   };
+
 
   const handleStartEdit = (friend: Friendship) => {
     setEditingId(friend.id);
@@ -134,10 +149,12 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
         f.id === id ? { ...f, nickname: editName.trim() || null } : f
       ));
       setEditingId(null);
+      toast.success('닉네임이 수정되었습니다.');
     } catch (error) {
       console.error('Error updating nickname:', error);
-      alert('Failed to update nickname');
+      toast.error('닉네임 수정에 실패했습니다.');
     }
+
   };
 
   const getStatusBadge = (status: string | null, task: string | null) => {
@@ -173,11 +190,12 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
     }
   };
 
-  if (loading) return <div className="text-gray-500">Loading friends...</div>;
+  if (loading) return <div className="text-gray-500">친구 목록을 불러오는 중...</div>;
 
   if (friends.length === 0) {
-    return <div className="text-gray-500">No friends yet. Add some!</div>;
+    return <div className="text-gray-500">아직 친구가 없습니다. 친구를 추가해보세요!</div>;
   }
+
 
   return (
     <ul className="space-y-3">
@@ -218,8 +236,9 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                 ) : (
                   <div className="flex items-center gap-2">
                     <p className="font-medium text-gray-900 dark:text-white truncate">
-                      {friend.nickname || friend.friend_email || 'Unknown User'}
+                      {friend.nickname || friend.friend_email || '알 수 없는 사용자'}
                     </p>
+
                     {friend.nickname && (
                       <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
                         ({friend.friend_email})
@@ -237,7 +256,8 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                 <div className="flex items-center gap-3 shrink-0">
                   {getStatusBadge(friend.friend?.status, friend.friend?.current_task)}
                   <button
-                    onClick={() => handleDelete(friend.id, friend.nickname || friend.friend_email, friend.friend_id)}
+                    onClick={() => confirmDelete(friend)}
+
                     className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30 rounded-lg transition-all"
                     title="Remove friend"
                   >
@@ -252,6 +272,39 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
           </div>
         </li>
       ))}
+      {/* Delete Confirmation Modal */}
+      {deletingFriend && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-2 bg-rose-50 dark:bg-rose-900/20 rounded-full">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">친구 삭제</h3>
+            </div>
+
+            <p className="text-gray-600 dark:text-gray-300">
+              정말로 <span className="font-medium text-gray-900 dark:text-white">{deletingFriend.name}</span>님을 친구 목록에서 삭제하시겠습니까?
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setDeletingFriend(null)}
+                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 rounded-xl font-medium transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex-1 px-4 py-2 text-white bg-rose-600 hover:bg-rose-700 rounded-xl font-medium transition-colors shadow-sm"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ul>
+
   );
 }

@@ -50,7 +50,7 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
       fetchRequests();
     } catch (error) {
       console.error('Error accepting request:', error);
-      alert('Failed to accept request');
+      alert('친구 요청 수락에 실패했습니다.');
     }
   };
 
@@ -66,14 +66,14 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
       fetchRequests();
     } catch (error) {
       console.error('Error rejecting request:', error);
-      alert('Failed to reject request');
+      alert('친구 요청 거절에 실패했습니다.');
     }
   };
 
-  if (loading) return <div className="text-gray-500">Loading requests...</div>;
+  if (loading) return <div className="text-gray-500">요청 목록을 불러오는 중...</div>;
 
   if (requests.length === 0) {
-    return <div className="text-gray-500">No pending friend requests.</div>;
+    return <div className="text-gray-500">받은 친구 요청이 없습니다.</div>;
   }
 
   return (
@@ -91,13 +91,13 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
               onClick={() => handleAccept(req.id)}
               className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 text-sm font-medium rounded-lg transition-colors"
             >
-              Accept
+              수락
             </button>
             <button
               onClick={() => handleReject(req.id)}
               className="px-3 py-1.5 text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 text-sm font-medium rounded-lg transition-colors"
             >
-              Reject
+              거절
             </button>
           </div>
         </li>
