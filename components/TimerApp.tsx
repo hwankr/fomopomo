@@ -120,7 +120,12 @@ export default function TimerApp({
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
       if (user) {
-        await supabase.from('profiles').upsert({ id: user.id, status: 'online', last_active_at: new Date().toISOString() });
+        await supabase.from('profiles').upsert({
+          id: user.id,
+          email: user.email,
+          status: 'online',
+          last_active_at: new Date().toISOString()
+        });
       }
     };
     getUser();
