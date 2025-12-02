@@ -5,14 +5,15 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { toast, Toaster } from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ko } from 'date-fns/locale';
 
 interface Member {
+    id: string; // group_member id
     user_id: string;
     joined_at: string;
+    nickname: string | null;
     profiles: {
         id: string;
-        email: string; // or username if available
+        email: string;
         status: string;
         current_task: string | null;
         last_active_at: string;
@@ -34,6 +35,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     const [members, setMembers] = useState<Member[]>([]);
     const [currentUser, setCurrentUser] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [editingNickname, setEditingNickname] = useState(false);
+    const [tempNickname, setTempNickname] = useState('');
 
     const fetchGroupData = async () => {
         try {
@@ -58,35 +61,22 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             const { data: membersData, error: membersError } = await supabase
                 .from('group_members')
                 .select(`
-          user_id,
-          joined_at,
-          profiles:user_id (
-            id,
-            status,
-            current_task,
-            last_active_at
-          )
-        `)
+                    id,
+                    user_id,
+                    joined_at,
+                    nickname,
+                    profiles:user_id (
+                        id,
+                        email,
+                        status,
+                        current_task,
+                        last_active_at
+                    )
+                `)
                 .eq('group_id', id);
 
             if (membersError) throw membersError;
 
-            // Need to fetch emails manually if not in profiles or use a different way?
-            // Assuming profiles might not have email, but we can try to get it from auth if possible?
-            // Actually, we can't join auth.users easily.
-            // Let's assume profiles has what we need or we just show "User".
-            // Wait, the user wants to see "who" is studying.
-            // If profiles doesn't have name/email, we need to fetch it.
-            // Usually profiles table is a mirror of auth.users or linked.
-            // Let's check if profiles has display_name or email.
-            // I'll assume it does or I'll just use a placeholder if missing.
-            // Actually, I can fetch emails via a separate query if I have admin rights, but I don't.
-            // I'll assume profiles has `email` or `username`.
-            // Let's check `TimerApp.tsx`... it doesn't show reading profile name.
-            // `HistoryList.tsx` might?
-            // I'll just use `profiles` and if it's missing name, I'll show "Member".
-
-            // For now, let's map the data.
             // @ts-ignore
             setMembers(membersData || []);
 
@@ -113,7 +103,6 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     table: 'profiles',
                 },
                 (payload) => {
-                    // Update member status if the updated profile is in our list
                     setMembers((prev) =>
                         prev.map((member) => {
                             if (member.user_id === payload.new.id) {
@@ -130,6 +119,32 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     );
                 }
             )
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'group_members',
+                    filter: `group_id=eq.${id}`,
+                },
+                () => {
+                    // Refresh members on any change to group_members (join, leave, kick, nickname update)
+                    fetchGroupData();
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'DELETE',
+                    schema: 'public',
+                    table: 'groups',
+                    filter: `id=eq.${id}`,
+                },
+                () => {
+                    toast.error('Group has been deleted');
+                    router.push('/groups');
+                }
+            )
             .subscribe();
 
         return () => {
@@ -141,6 +156,77 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
         if (group?.code) {
             navigator.clipboard.writeText(group.code);
             toast.success('Code copied to clipboard!');
+        }
+    };
+
+    const handleUpdateNickname = async () => {
+        if (!tempNickname.trim()) return;
+        try {
+            const { error } = await supabase
+                .from('group_members')
+                .update({ nickname: tempNickname.trim() })
+                .eq('group_id', id)
+                .eq('user_id', currentUser.id);
+
+            if (error) throw error;
+
+            toast.success('Nickname updated');
+            setEditingNickname(false);
+            fetchGroupData();
+        } catch (error) {
+            console.error('Error updating nickname:', error);
+            toast.error('Failed to update nickname');
+        }
+    };
+
+    const handleKickMember = async (memberId: string, memberName: string) => {
+        if (!confirm(`Are you sure you want to remove ${memberName}?`)) return;
+        try {
+            const { error } = await supabase
+                .from('group_members')
+                .delete()
+                .eq('id', memberId);
+
+            if (error) throw error;
+            toast.success('Member removed');
+        } catch (error) {
+            console.error('Error removing member:', error);
+            toast.error('Failed to remove member');
+        }
+    };
+
+    const handleLeaveGroup = async () => {
+        if (!confirm('Are you sure you want to leave this group?')) return;
+        try {
+            const { error } = await supabase
+                .from('group_members')
+                .delete()
+                .eq('group_id', id)
+                .eq('user_id', currentUser.id);
+
+            if (error) throw error;
+            toast.success('Left group');
+            router.push('/groups');
+        } catch (error) {
+            console.error('Error leaving group:', error);
+            toast.error('Failed to leave group');
+        }
+    };
+
+    const handleDeleteGroup = async () => {
+        if (!confirm('Are you sure you want to delete this group? This action cannot be undone.')) return;
+        try {
+            const { error } = await supabase
+                .from('groups')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            toast.success('Group deleted');
+            router.push('/groups');
+        } catch (error) {
+            console.error('Error deleting group:', error);
+            toast.error('Failed to delete group');
         }
     };
 
@@ -177,21 +263,39 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                 </p>
                             </div>
 
-                            {isLeader && (
-                                <div className="flex items-center gap-3 bg-gray-100 dark:bg-slate-700 px-4 py-2 rounded-xl">
-                                    <span className="text-sm font-medium text-gray-500 dark:text-gray-300">Group Code:</span>
-                                    <code className="text-lg font-bold text-rose-500 font-mono tracking-wider">{group.code}</code>
+                            <div className="flex flex-wrap items-center gap-3">
+                                {isLeader && (
+                                    <div className="flex items-center gap-3 bg-gray-100 dark:bg-slate-700 px-4 py-2 rounded-xl">
+                                        <span className="text-sm font-medium text-gray-500 dark:text-gray-300">Code:</span>
+                                        <code className="text-lg font-bold text-rose-500 font-mono tracking-wider">{group.code}</code>
+                                        <button
+                                            onClick={copyCode}
+                                            className="p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400"
+                                            title="Copy Code"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                )}
+
+                                {isLeader ? (
                                     <button
-                                        onClick={copyCode}
-                                        className="p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400"
-                                        title="Copy Code"
+                                        onClick={handleDeleteGroup}
+                                        className="px-4 py-2 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors font-medium text-sm"
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                                        </svg>
+                                        Delete Group
                                     </button>
-                                </div>
-                            )}
+                                ) : (
+                                    <button
+                                        onClick={handleLeaveGroup}
+                                        className="px-4 py-2 bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors font-medium text-sm"
+                                    >
+                                        Leave Group
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -200,10 +304,12 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     {members.map((member) => {
                         const isOnline = member.profiles.status === 'online' || member.profiles.status === 'studying';
                         const isStudying = member.profiles.status === 'studying';
+                        const isCurrentUser = member.user_id === currentUser.id;
+                        const displayName = member.nickname || (member.profiles.email ? member.profiles.email.split('@')[0] : 'Member');
 
                         return (
                             <div
-                                key={member.user_id}
+                                key={member.id}
                                 className={`bg-white dark:bg-slate-800 rounded-xl p-4 flex items-center justify-between shadow-sm border transition-all ${isStudying
                                     ? 'border-rose-200 dark:border-rose-900 ring-1 ring-rose-100 dark:ring-rose-900/30'
                                     : 'border-gray-100 dark:border-slate-700'
@@ -212,14 +318,51 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                 <div className="flex items-center gap-4">
                                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white ${isStudying ? 'bg-rose-500 animate-pulse' : 'bg-gray-300 dark:bg-slate-600'
                                         }`}>
-                                        {/* Avatar placeholder */}
-                                        {member.profiles.email ? member.profiles.email[0].toUpperCase() : 'U'}
+                                        {displayName[0].toUpperCase()}
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <h3 className="font-semibold text-gray-900 dark:text-white">
-                                                {member.profiles.email ? member.profiles.email.split('@')[0] : 'Member'}
-                                            </h3>
+                                            {isCurrentUser && editingNickname ? (
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={tempNickname}
+                                                        onChange={(e) => setTempNickname(e.target.value)}
+                                                        className="px-2 py-1 text-sm border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                                                        placeholder="Nickname"
+                                                        autoFocus
+                                                    />
+                                                    <button onClick={handleUpdateNickname} className="text-green-500 hover:text-green-600">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                                            <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                        </svg>
+                                                    </button>
+                                                    <button onClick={() => setEditingNickname(false)} className="text-red-500 hover:text-red-600">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                                    {displayName}
+                                                    {isCurrentUser && (
+                                                        <button
+                                                            onClick={() => {
+                                                                setTempNickname(member.nickname || '');
+                                                                setEditingNickname(true);
+                                                            }}
+                                                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                                                <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+                                                                <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
+                                                </h3>
+                                            )}
+
                                             {member.user_id === group.leader_id && (
                                                 <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 text-xs rounded-full font-medium">
                                                     Leader
@@ -240,11 +383,23 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                     </div>
                                 </div>
 
-                                <div className="text-right">
+                                <div className="flex items-center gap-3">
                                     {isStudying && (
                                         <div className="inline-flex items-center px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-sm font-medium">
                                             Focusing
                                         </div>
+                                    )}
+
+                                    {isLeader && !isCurrentUser && (
+                                        <button
+                                            onClick={() => handleKickMember(member.id, displayName)}
+                                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                            title="Remove member"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                                            </svg>
+                                        </button>
                                     )}
                                 </div>
                             </div>
