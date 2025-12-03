@@ -175,7 +175,7 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
 
               <button
                 onClick={() => deletePlan(plan.id)}
-                className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 transition-all"
+                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 transition-all"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
