@@ -5,6 +5,7 @@ import Footer from '../components/Footer';
 import { Toaster } from 'react-hot-toast';
 import FriendNotificationListener from '@/components/FriendNotificationListener';
 import InstallPrompt from '@/components/InstallPrompt';
+import { ThemeProvider } from '@/components/ThemeProvider';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -42,11 +43,13 @@ export default function RootLayout({
   return (
     <html lang="ko" suppressHydrationWarning>
       <body className={`${inter.className} flex flex-col min-h-screen`}>
-        <Toaster position="top-center" />
-        <FriendNotificationListener />
-        <main className="flex-grow">{children}</main>
-        <InstallPrompt />
-        <Footer />
+        <ThemeProvider>
+          <Toaster position="top-center" />
+          <FriendNotificationListener />
+          <main className="flex-grow">{children}</main>
+          <InstallPrompt />
+          <Footer />
+        </ThemeProvider>
       </body>
     </html>
   );

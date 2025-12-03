@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
 
@@ -13,6 +13,7 @@ import { toast } from 'react-hot-toast';
 
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 import Navbar from '@/components/Navbar';
+import { useTheme } from '@/components/ThemeProvider';
 
 export default function Home() {
   const { session, loading: isLoading } = useAuthSession();
@@ -22,20 +23,11 @@ export default function Home() {
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, toggleDarkMode } = useTheme();
   const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
 
   // ✨ [추가] 기록 목록 새로고침을 위한 트리거 상태
   const [historyUpdateTrigger, setHistoryUpdateTrigger] = useState(0);
-
-  useEffect(() => {
-    if (
-      window.matchMedia &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches
-    ) {
-      setTimeout(() => setIsDarkMode(true), 0);
-    }
-  }, []);
 
   const handleGoogleLogin = async () => {
     if (isInAppBrowser()) {
@@ -59,53 +51,47 @@ export default function Home() {
 
   if (isLoading) return null;
 
-
-
   return (
-    <div className={isDarkMode ? 'dark' : ''}>
-      <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
+    <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onGoogleLogin={handleGoogleLogin}
+      />
+      <ReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+      />
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
+      />
 
+      <Navbar
+        session={session}
+        isDarkMode={isDarkMode}
+        toggleDarkMode={toggleDarkMode}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenReport={() => setIsReportModalOpen(true)}
+        onOpenLogin={() => setIsLoginModalOpen(true)}
+        onLogout={() => supabase.auth.signOut()}
+      />
 
-        <LoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-          onGoogleLogin={handleGoogleLogin}
+      {/* Content Container - Narrow for Focus */}
+      <div className="w-full max-w-lg flex flex-col items-center gap-8 animate-fade-in p-3 sm:p-4 mt-4">
+        {/* ✨ TimerApp에 콜백 전달: 저장 완료 시 트리거 숫자를 증가시킴 */}
+        <TimerApp
+          settingsUpdated={settingsUpdateTrigger}
+          onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
+          isLoggedIn={!!session}
         />
-        <ReportModal
-          isOpen={isReportModalOpen}
-          onClose={() => setIsReportModalOpen(false)}
-        />
-        <SettingsModal
-          isOpen={isSettingsModalOpen}
-          onClose={() => setIsSettingsModalOpen(false)}
-          onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
-        />
 
-        <Navbar
-          session={session}
-          isDarkMode={isDarkMode}
-          toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-          onOpenSettings={() => setIsSettingsModalOpen(true)}
-          onOpenReport={() => setIsReportModalOpen(true)}
-          onOpenLogin={() => setIsLoginModalOpen(true)}
-          onLogout={() => supabase.auth.signOut()}
-        />
-
-        {/* Content Container - Narrow for Focus */}
-        <div className="w-full max-w-lg flex flex-col items-center gap-8 animate-fade-in p-3 sm:p-4 mt-4">
-          {/* ✨ TimerApp에 콜백 전달: 저장 완료 시 트리거 숫자를 증가시킴 */}
-          <TimerApp
-            settingsUpdated={settingsUpdateTrigger}
-            onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
-            isLoggedIn={!!session}
-          />
-
-          {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
-          {session ? (
-            <HistoryList updateTrigger={historyUpdateTrigger} />
-          ) : null}
-        </div>
-      </main>
-    </div>
+        {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
+        {session ? (
+          <HistoryList updateTrigger={historyUpdateTrigger} />
+        ) : null}
+      </div>
+    </main>
   );
 }
