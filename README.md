@@ -1,5 +1,5 @@
 
-👉 **라이브 서비스**: [https://pomofomo.vercel.app](https://pomofomo.vercel.app)
+👉 **라이브 서비스**: [https://fomopomo.com/)
 
 ---
 
