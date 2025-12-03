@@ -10,6 +10,7 @@ type StudySession = {
   duration: number;
   created_at: string;
   task?: string | null;
+  group_id?: string | null; // ✨ [New]
 };
 
 // ✨ [추가] updateTrigger를 선택적 prop으로 정의
@@ -74,13 +75,39 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
 
       const { data, error } = await supabase
         .from('study_sessions')
-        .select('id, mode, duration, created_at, task')
+        .select('id, mode, duration, created_at, task, group_id') // ✨ Select group_id
         .eq('user_id', user.id)
         .order('created_at', { ascending: false, nullsFirst: false })
-        .limit(5);
+        .limit(20); // ✨ Increase limit to handle split sessions
 
       if (error) throw error;
-      setHistory(data ?? []);
+
+      // ✨ [New] Grouping Logic
+      const groupedHistory: StudySession[] = [];
+      const processedGroupIds = new Set<string>();
+
+      (data || []).forEach((session) => {
+        if (session.group_id) {
+          if (processedGroupIds.has(session.group_id)) return;
+
+          // Find all segments with this group_id
+          const segments = (data || []).filter(s => s.group_id === session.group_id);
+          const totalDuration = segments.reduce((sum, s) => sum + s.duration, 0);
+
+          // Use the most recent segment's created_at and other info
+          // (Since we ordered by created_at desc, the first one encountered is the latest)
+          groupedHistory.push({
+            ...session,
+            duration: totalDuration,
+          });
+          processedGroupIds.add(session.group_id);
+        } else {
+          // Legacy or single sessions without group_id
+          groupedHistory.push(session);
+        }
+      });
+
+      setHistory(groupedHistory.slice(0, 5)); // Show top 5 grouped sessions
     } catch (error) {
       const message =
         error instanceof Error && error.message.includes('permission denied')
@@ -97,10 +124,23 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
     if (!confirm('이 기록을 삭제하시겠습니까?')) return;
 
     try {
-      const { error } = await supabase
-        .from('study_sessions')
-        .delete()
-        .eq('id', id);
+      // ✨ [New] Delete by group_id if exists
+      const targetItem = history.find(h => h.id === id);
+
+      let error;
+      if (targetItem?.group_id) {
+        const { error: delError } = await supabase
+          .from('study_sessions')
+          .delete()
+          .eq('group_id', targetItem.group_id);
+        error = delError;
+      } else {
+        const { error: delError } = await supabase
+          .from('study_sessions')
+          .delete()
+          .eq('id', id);
+        error = delError;
+      }
 
       if (error) throw error;
 
@@ -133,10 +173,23 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
   const handleUpdateTask = async (id: number) => {
     setUpdatingTaskId(id);
     try {
-      const { error } = await supabase
-        .from('study_sessions')
-        .update({ task: taskDraft.trim() || null })
-        .eq('id', id);
+      const targetItem = history.find(h => h.id === id);
+
+      // ✨ [New] Update by group_id if exists
+      let error;
+      if (targetItem?.group_id) {
+        const { error: upError } = await supabase
+          .from('study_sessions')
+          .update({ task: taskDraft.trim() || null })
+          .eq('group_id', targetItem.group_id);
+        error = upError;
+      } else {
+        const { error: upError } = await supabase
+          .from('study_sessions')
+          .update({ task: taskDraft.trim() || null })
+          .eq('id', id);
+        error = upError;
+      }
 
       if (error) throw error;
 
@@ -220,8 +273,8 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
                 <div className="flex items-start gap-3 flex-1 min-w-0">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${item.mode === 'pomo'
-                        ? 'bg-rose-100 text-rose-500 dark:bg-rose-900/30'
-                        : 'bg-indigo-100 text-indigo-500 dark:bg-indigo-900/30'
+                      ? 'bg-rose-100 text-rose-500 dark:bg-rose-900/30'
+                      : 'bg-indigo-100 text-indigo-500 dark:bg-indigo-900/30'
                       }`}
                   >
                     {item.mode === 'pomo' ? '🍅' : '⏱️'}

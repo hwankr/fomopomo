@@ -19,6 +19,17 @@ const formatTime = (seconds: number) => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+// ✨ [New] UUID Generator Helper
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 interface TimerAppProps {
   settingsUpdated: number;
   onRecordSaved: () => void; // ✨ [추가] 저장 완료 콜백 타입
@@ -46,6 +57,7 @@ type SavedState = {
     elapsed: number;           // 일시정지 시 저장할 '흐른 시간'
     isRunning: boolean;
   };
+  intervals: { start: number; end: number }[]; // ✨ [New] Save intervals
   lastUpdated: number;
 };
 
@@ -73,6 +85,10 @@ export default function TimerApp({
   const [stopwatchTime, setStopwatchTime] = useState(0);
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
   const stopwatchRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ✨ [New] Interval Tracking
+  const [intervals, setIntervals] = useState<{ start: number; end: number }[]>([]);
+  const currentIntervalStartRef = useRef<number | null>(null);
 
   const endTimeRef = useRef<number>(0);
   const stopwatchStartTimeRef = useRef<number>(0);
@@ -284,6 +300,7 @@ export default function TimerApp({
         elapsed: sElapsed,
         startTime: sStart,
       },
+      intervals: intervals, // ✨ Save intervals
       lastUpdated: Date.now(),
     };
     localStorage.setItem("fomopomo_full_state", JSON.stringify(state));
@@ -352,6 +369,25 @@ export default function TimerApp({
             } else {
               setStopwatchTime(state.stopwatch.elapsed);
               setIsStopwatchRunning(false);
+            }
+
+            // ✨ [New] Restore Intervals
+            if (state.intervals) {
+              setIntervals(state.intervals);
+            }
+
+            // ✨ [New] Restore Current Interval Start if running
+            if (state.timer.isRunning) {
+              // For timer, we need to calculate when it started based on target time
+              // But simpler is to just set start time to now for the new interval segment
+              currentIntervalStartRef.current = Date.now();
+            } else if (state.stopwatch.isRunning && state.stopwatch.startTime) {
+              currentIntervalStartRef.current = state.stopwatch.startTime; // Or last resume time? 
+              // Actually for stopwatch, if it's running, the start time of current interval is when it was resumed.
+              // But we don't have that exact timestamp in simple state. 
+              // Let's assume it continues from now for the sake of interval tracking to avoid huge gaps if browser closed.
+              // OR better: use the saved startTime if it's recent.
+              currentIntervalStartRef.current = Date.now();
             }
 
             if ((state.timer.isRunning || state.stopwatch.isRunning) && !toastShownRef.current) {
@@ -480,6 +516,9 @@ export default function TimerApp({
         return `${minutes}분 ${seconds}초`;
       };
 
+      // ✨ [New] Generate Group ID
+      const groupId = generateUUID();
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -496,13 +535,44 @@ export default function TimerApp({
       });
 
       try {
-        const { error } = await supabase.from('study_sessions').insert({
+        // ✨ [New] Save Intervals
+        const now = Date.now();
+        let currentSessionIntervals = [...intervals];
+
+        // If currently running, add the final segment
+        if (currentIntervalStartRef.current) {
+          currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: now });
+        }
+
+        // If no intervals (e.g. very short run), just use total duration
+        if (currentSessionIntervals.length === 0) {
+          currentSessionIntervals.push({ start: now - duration * 1000, end: now });
+        }
+
+        const rowsToInsert = currentSessionIntervals.map(interval => ({
           mode: recordMode,
-          duration,
+          duration: Math.round((interval.end - interval.start) / 1000),
           user_id: user.id,
           task: taskText.trim() || null,
-          task_id: selectedTaskId, // ✨ [New] Save task_id
-        });
+          task_id: selectedTaskId,
+          created_at: new Date(interval.end).toISOString(), // Use interval end time
+          group_id: groupId, // ✨ Link them together
+        })).filter(row => row.duration > 0); // Filter out 0s intervals
+
+        if (rowsToInsert.length === 0) {
+          // Fallback if something went wrong with intervals
+          rowsToInsert.push({
+            mode: recordMode,
+            duration,
+            user_id: user.id,
+            task: taskText.trim() || null,
+            task_id: selectedTaskId,
+            created_at: new Date().toISOString(),
+            group_id: groupId,
+          });
+        }
+
+        const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
         if (error) throw error;
 
         toast.success(`${formatDurationForToast(duration)} 기록 저장 완료!`, { id: toastId });
@@ -511,13 +581,16 @@ export default function TimerApp({
         onRecordSaved();
       } catch (error) {
         console.error(error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         const missingColumnMessage =
-          error instanceof Error && error.message.includes('column "task"')
+          errorMessage.includes('column "task"')
             ? 'Supabase에서 study_sessions 테이블에 task(TEXT) 컬럼을 추가해주세요.'
-            : '저장 실패';
-        toast.error(missingColumnMessage, { id: toastId });
+            : `저장 실패: ${errorMessage}`;
+        toast.error(missingColumnMessage, { id: toastId, duration: 5000 });
       } finally {
         setIsSaving(false);
+        setIntervals([]); // ✨ Reset intervals after save
+        currentIntervalStartRef.current = null;
       }
     },
     [onRecordSaved]
@@ -724,6 +797,13 @@ export default function TimerApp({
     if (!forceStart && isRunning) {
       // [정지]
       setIsRunning(false);
+
+      // ✨ [New] Record Interval
+      if (currentIntervalStartRef.current) {
+        setIntervals(prev => [...prev, { start: currentIntervalStartRef.current!, end: Date.now() }]);
+        currentIntervalStartRef.current = null;
+      }
+
       // 💾 정지 상태 저장 (현재 남은 시간)
       saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
       updateStatus('paused');
@@ -732,11 +812,15 @@ export default function TimerApp({
       const target = Date.now() + (timeLeft * 1000);
       endTimeRef.current = target;
       setIsRunning(true);
+
+      // ✨ [New] Start Interval
+      currentIntervalStartRef.current = Date.now();
+
       // 💾 실행 상태 저장 (목표 종료 시간)
       saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
       updateStatus('studying');
     }
-  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds, playClickSound]);
+  }, [isStopwatchRunning, isRunning, timeLeft, timerMode, cycleCount, saveState, tab, stopwatchTime, focusLoggedSeconds, playClickSound, intervals]);
 
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
@@ -837,6 +921,13 @@ export default function TimerApp({
     if (isStopwatchRunning) {
       // [정지]
       setIsStopwatchRunning(false);
+
+      // ✨ [New] Record Interval
+      if (currentIntervalStartRef.current) {
+        setIntervals(prev => [...prev, { start: currentIntervalStartRef.current!, end: Date.now() }]);
+        currentIntervalStartRef.current = null;
+      }
+
       // 💾 정지 상태 저장 (현재 흐른 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null);
       updateStatus('paused');
@@ -846,17 +937,23 @@ export default function TimerApp({
       const start = Date.now() - (stopwatchTime * 1000);
       stopwatchStartTimeRef.current = start;
       setIsStopwatchRunning(true);
+
+      // ✨ [New] Start Interval
+      currentIntervalStartRef.current = Date.now();
+
       // 💾 실행 상태 저장 (시작 시간)
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start);
       updateStatus('studying');
     }
-  }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime, playClickSound]);
+  }, [isRunning, isStopwatchRunning, saveState, tab, timerMode, timeLeft, cycleCount, focusLoggedSeconds, stopwatchTime, playClickSound, intervals]);
 
   const handleStopwatchSave = async () => {
     setIsStopwatchRunning(false);
 
     const afterSave = () => {
       setStopwatchTime(0);
+      setIntervals([]); // ✨ Reset intervals
+      currentIntervalStartRef.current = null;
       saveState(
         tab,
         timerMode,
@@ -877,6 +974,8 @@ export default function TimerApp({
   const resetStopwatch = () => {
     setIsStopwatchRunning(false);
     setStopwatchTime(0);
+    setIntervals([]); // ✨ Reset intervals
+    currentIntervalStartRef.current = null;
     saveState(
       tab,
       timerMode,
@@ -902,6 +1001,8 @@ export default function TimerApp({
 
     setTimeLeft(resetTime);
     if (timerMode === 'focus') setFocusLoggedSeconds(0);
+    setIntervals([]); // ✨ Reset intervals
+    currentIntervalStartRef.current = null;
     // 💾 초기화 상태 저장
     saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null);
   };
