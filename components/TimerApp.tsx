@@ -363,10 +363,36 @@ export default function TimerApp({
           console.error("상태 복구 실패:", e);
         }
       }
+
+      // ✨ [New] Restore Task State
+      const savedTaskState = localStorage.getItem("fomopomo_task_state");
+      if (savedTaskState) {
+        try {
+          const { taskId, taskTitle } = JSON.parse(savedTaskState);
+          if (taskId) setSelectedTaskId(taskId);
+          if (taskTitle) setSelectedTask(taskTitle);
+        } catch (e) {
+          console.error("태스크 상태 복구 실패:", e);
+        }
+      }
+
       setIsLoaded(true);
     };
     restoreState();
   }, []); // Run once on mount
+
+  // ✨ [New] Persist Task State
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem(
+        "fomopomo_task_state",
+        JSON.stringify({
+          taskId: selectedTaskId,
+          taskTitle: selectedTask,
+        })
+      );
+    }
+  }, [selectedTaskId, selectedTask, isLoaded]);
 
   useEffect(() => {
     isRunningRef.current = isRunning;
