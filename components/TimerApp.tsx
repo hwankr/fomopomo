@@ -1007,7 +1007,7 @@ export default function TimerApp({
   };
 
   const resetTimerManual = () => {
-    savePartialProgress();
+    // savePartialProgress(); // ✨ [Modified] Reset without saving
     setIsRunning(false);
 
     let resetTime = 0;
