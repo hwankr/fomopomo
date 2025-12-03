@@ -105,7 +105,7 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask }: SortableTaskIt
 
       <button
         onClick={() => deleteTask(task.id)}
-        className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 transition-all"
+        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 transition-all"
       >
         <Trash2 className="w-4 h-4" />
       </button>

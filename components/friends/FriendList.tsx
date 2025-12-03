@@ -279,7 +279,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                           e.stopPropagation();
                           handleStartEdit(friend);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
                         title="Edit nickname"
                       >
                         <Pencil className="w-3.5 h-3.5" />
@@ -303,7 +303,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                         e.stopPropagation();
                         confirmDelete(friend);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30 rounded-lg transition-all"
+                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30 rounded-lg transition-all"
                       title="Remove friend"
                     >
                       <Trash2 className="w-4 h-4" />

@@ -1424,7 +1424,7 @@ export default function TimerApp({
                     <button
                       onClick={handleTimerSave}
                       disabled={isSaving}
-                      className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                      className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm whitespace-nowrap"
                     >
                       저장
                     </button>
@@ -1503,7 +1503,7 @@ export default function TimerApp({
                       <button
                         onClick={handleStopwatchSave}
                         disabled={isSaving}
-                        className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black transition-all shadow-sm"
+                        className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black transition-all shadow-sm whitespace-nowrap"
                       >
                         저장
                       </button>
