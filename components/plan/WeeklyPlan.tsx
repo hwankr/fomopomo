@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
-import { CheckCircle2, Circle, Plus, Trash2, Calendar as CalendarIcon } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Trash2, Calendar as CalendarIcon, ChevronUp, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface WeeklyPlan {
@@ -23,6 +23,7 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
   const [loading, setLoading] = useState(true);
   const [newPlanTitle, setNewPlanTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   // Calculate current week range
   const today = new Date();
@@ -121,7 +122,10 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 flex flex-col transition-all duration-300">
-      <div className="flex justify-between items-center mb-6">
+      <div 
+        className="flex justify-between items-center mb-6 cursor-pointer lg:cursor-default"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <div>
           <h2 className="text-lg font-bold flex items-center gap-2">
             <CalendarIcon className="w-5 h-5 text-indigo-500" />
@@ -131,7 +135,12 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
             {format(start, 'MMM d')} - {format(end, 'MMM d')}
           </p>
         </div>
+        <div className="lg:hidden text-gray-400">
+          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </div>
       </div>
+
+      <div className={cn("flex-1 flex flex-col transition-all duration-300", !isExpanded && "hidden lg:flex")}>
 
       <div className="flex-1 overflow-y-auto space-y-3 max-h-[300px] min-h-[100px] custom-scrollbar">
         {loading ? (
@@ -223,6 +232,7 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
             Add Weekly Goal
           </button>
         )}
+      </div>
       </div>
     </div>
   );

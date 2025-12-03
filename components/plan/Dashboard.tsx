@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { format } from 'date-fns';
 import Calendar from './Calendar';
+import { cn } from '@/lib/utils';
 import TaskList from './TaskList';
 import Timeline from './Timeline';
 import WeeklyPlan from './WeeklyPlan';
 import MonthlyPlan from './MonthlyPlan';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronUp, ChevronDown } from 'lucide-react';
 import TimerStatus from '../TimerStatus';
 
 interface DashboardProps {
@@ -20,6 +21,7 @@ interface DashboardProps {
 export default function Dashboard({ session }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [focusTime, setFocusTime] = useState(0);
+  const [isDailyTasksExpanded, setIsDailyTasksExpanded] = useState(true);
 
   useEffect(() => {
     if (!session) return;
@@ -150,8 +152,14 @@ export default function Dashboard({ session }: DashboardProps) {
           {/* Right Column Wrapper */}
           <div className="contents lg:flex lg:flex-col lg:col-span-8 lg:space-y-6">
             {/* 3. Daily Task */}
-            <div className="order-3 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 min-h-[600px] flex flex-col">
-              <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+            <div className={cn(
+              "order-3 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col transition-all duration-300",
+              isDailyTasksExpanded ? "min-h-[600px]" : "min-h-0"
+            )}>
+              <div 
+                className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center cursor-pointer lg:cursor-default"
+                onClick={() => setIsDailyTasksExpanded(!isDailyTasksExpanded)}
+              >
                 <div>
                   <h2 className="text-2xl font-bold">
                     {format(selectedDate, 'MMMM d, yyyy')}
@@ -160,9 +168,12 @@ export default function Dashboard({ session }: DashboardProps) {
                     {format(selectedDate, 'EEEE')}
                   </p>
                 </div>
+                <div className="lg:hidden text-gray-400">
+                  {isDailyTasksExpanded ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
+                </div>
               </div>
 
-              <div className="flex-1 p-6">
+              <div className={cn("flex-1 p-6", !isDailyTasksExpanded && "hidden lg:block")}>
                 <TaskList selectedDate={selectedDate} userId={session?.user?.id || ''} />
               </div>
             </div>

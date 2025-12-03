@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, subSeconds, getHours, getMinutes } from 'date-fns';
+import { ChevronUp, ChevronDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface TimelineProps {
   selectedDate: Date;
@@ -31,6 +33,7 @@ const formatDuration = (seconds: number) => {
 export default function Timeline({ selectedDate, userId }: TimelineProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   const fetchSessions = async () => {
     if (!userId) return;
@@ -95,7 +98,15 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-      <h3 className="text-lg font-bold mb-6 text-gray-900 dark:text-gray-100">Timeline</h3>
+      <div 
+        className="flex justify-between items-center mb-6 cursor-pointer lg:cursor-default"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Timeline</h3>
+        <div className="lg:hidden text-gray-400">
+          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </div>
+      </div>
       
       {/* Day Bar Visualization */}
       <div className="mb-8">
@@ -147,7 +158,7 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
       </div>
 
       {/* List Visualization */}
-      <div className="relative border-l-2 border-gray-200 dark:border-gray-700 ml-3 space-y-6">
+      <div className={cn("relative border-l-2 border-gray-200 dark:border-gray-700 ml-3 space-y-6 transition-all duration-300", !isExpanded && "hidden lg:block")}>
         {sessions.map((session) => {
           const endTime = new Date(session.created_at);
           const startTime = subSeconds(endTime, session.duration);
