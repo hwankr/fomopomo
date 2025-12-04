@@ -1361,18 +1361,23 @@ export default function TimerApp({
                 </div>
 
                 {/* ✨ [New] Selected Task Display */}
-                <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
-                  {selectedTaskId && (
-                    <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in">
-                      <span className="text-sm font-medium max-w-[200px] truncate">
-                        {getSelectedTaskTitle()}
-                      </span>
+                {/* ✨ [New] Selected Task Display */}
+                <div className="w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 mb-6 min-h-[24px]">
+                  <div
+                    onClick={() => setIsTaskSidebarOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in cursor-pointer hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
+                  >
+                    <span className="text-sm font-medium max-w-[200px] truncate">
+                      {selectedTaskId ? getSelectedTaskTitle() : '작업 지정 없음'}
+                    </span>
+                    {selectedTaskId && (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedTaskId(null);
                           setSelectedTask('');
                         }}
-                        className="p-0.5 hover:bg-rose-100 dark:hover:bg-rose-800/50 rounded-full transition-colors"
+                        className="p-0.5 hover:bg-rose-200 dark:hover:bg-rose-800 rounded-full transition-colors"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -1383,8 +1388,8 @@ export default function TimerApp({
                           <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
                         </svg>
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 <div
@@ -1460,18 +1465,22 @@ export default function TimerApp({
                 </div>
 
                 {/* ✨ [New] Selected Task Display for Stopwatch */}
-                <div className={`w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 ${selectedTaskId ? 'mb-6 min-h-[24px]' : 'mb-0 h-0'}`}>
-                  {selectedTaskId && (
-                    <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in">
-                      <span className="text-sm font-medium max-w-[200px] truncate">
-                        {getSelectedTaskTitle()}
-                      </span>
+                <div className="w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 mb-6 min-h-[24px]">
+                  <div
+                    onClick={() => setIsTaskSidebarOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors"
+                  >
+                    <span className="text-sm font-medium max-w-[200px] truncate">
+                      {selectedTaskId ? getSelectedTaskTitle() : '작업 지정 없음'}
+                    </span>
+                    {selectedTaskId && (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedTaskId(null);
                           setSelectedTask('');
                         }}
-                        className="p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 rounded-full transition-colors"
+                        className="p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded-full transition-colors"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -1482,8 +1491,8 @@ export default function TimerApp({
                           <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
                         </svg>
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 <div className="text-7xl sm:text-8xl font-bold mb-10 font-mono tracking-tighter text-indigo-500 dark:text-indigo-400">
