@@ -38,6 +38,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     const [isLoading, setIsLoading] = useState(true);
     const [editingNickname, setEditingNickname] = useState(false);
     const [tempNickname, setTempNickname] = useState('');
+    const [isEditingGroupName, setIsEditingGroupName] = useState(false);
+    const [tempGroupName, setTempGroupName] = useState('');
     const [selectedMemberForReport, setSelectedMemberForReport] = useState<{ id: string; name: string } | null>(null);
 
     const fetchGroupData = async () => {
@@ -181,6 +183,25 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
         }
     };
 
+    const handleUpdateGroupName = async () => {
+        if (!tempGroupName.trim()) return;
+        try {
+            const { error } = await supabase
+                .from('groups')
+                .update({ name: tempGroupName.trim() })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            toast.success('그룹 이름이 업데이트되었습니다');
+            setIsEditingGroupName(false);
+            setGroup(prev => prev ? { ...prev, name: tempGroupName.trim() } : null);
+        } catch (error) {
+            console.error('Error updating group name:', error);
+            toast.error('그룹 이름 업데이트에 실패했습니다');
+        }
+    };
+
     const handleKickMember = async (memberId: string, memberName: string) => {
         if (!confirm(`${memberName}님을 정말로 추방하시겠습니까?`)) return;
         try {
@@ -259,7 +280,51 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-slate-700">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h1>
+                                {isEditingGroupName ? (
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <input
+                                            type="text"
+                                            value={tempGroupName}
+                                            onChange={(e) => setTempGroupName(e.target.value)}
+                                            className="text-3xl font-bold text-gray-900 dark:text-white bg-transparent border-b-2 border-rose-500 focus:outline-none px-1"
+                                            autoFocus
+                                        />
+                                        <button
+                                            onClick={handleUpdateGroupName}
+                                            className="p-2 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={() => setIsEditingGroupName(false)}
+                                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{group.name}</h1>
+                                        {isLeader && (
+                                            <button
+                                                onClick={() => {
+                                                    setTempGroupName(group.name);
+                                                    setIsEditingGroupName(true);
+                                                }}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                                                title="그룹 이름 수정"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                                 <p className="text-gray-500 dark:text-gray-400">
                                     {members.length}명의 멤버
                                 </p>
