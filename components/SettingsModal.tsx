@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
+import NotificationManager from './NotificationManager';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -519,6 +520,14 @@ export default function SettingsModal({
               </div>
             </section>
 
+            <hr className="border-gray-100" />
+            <section>
+              <h3 className="text-gray-400 text-xs font-bold mb-3 flex items-center gap-2">
+                🔔 알림 설정
+              </h3>
+              <NotificationManager mode="inline" />
+            </section>
+            
             <hr className="border-gray-100" />
             <section>
               <h3 className="text-red-400 text-xs font-bold mb-3 flex items-center gap-2">

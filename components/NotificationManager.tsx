@@ -21,11 +21,12 @@ function urlBase64ToUint8Array(base64String: string) {
     return outputArray;
 }
 
-export default function NotificationPermission() {
+export default function NotificationManager({ mode = 'floating' }: { mode?: 'floating' | 'inline' }) {
     const [permission, setPermission] = useState<NotificationPermission>('default');
     const [isSubscribed, setIsSubscribed] = useState(false);
     const [debugLog, setDebugLog] = useState<string[]>([]);
     const [isOpen, setIsOpen] = useState(false);
+    const [isVisible, setIsVisible] = useState(false);
 
     const addLog = (msg: string) => {
         setDebugLog(prev => [msg, ...prev].slice(0, 10));
@@ -38,6 +39,18 @@ export default function NotificationPermission() {
             const registration = await navigator.serviceWorker.ready;
             const subscription = await registration.pushManager.getSubscription();
             setIsSubscribed(!!subscription);
+            
+            if (subscription) {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    await supabase.from('push_subscriptions').upsert({
+                        user_id: user.id,
+                        endpoint: subscription.endpoint,
+                        keys: subscription.toJSON().keys,
+                    }, { onConflict: 'endpoint' });
+                }
+            }
+            
             addLog(subscription ? 'Subscription active' : 'No subscription found');
         } catch (e) {
             addLog(`Error checking subscription: ${e}`);
@@ -45,6 +58,12 @@ export default function NotificationPermission() {
     };
 
     useEffect(() => {
+        // Check dismissal state
+        const isDismissed = localStorage.getItem('fomopomo_notification_dismissed') === 'true';
+        if (!isDismissed) {
+            setIsVisible(true);
+        }
+
         const registerSwAndCheckPermission = async () => {
             if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
                 try {
@@ -124,12 +143,22 @@ export default function NotificationPermission() {
             return;
         }
 
+        // 이미 거부된 상태라면 바로 안내
+        if (permission === 'denied') {
+            toast.error('알림이 차단되어 있습니다.\n브라우저 주소창 옆 자물쇠 버튼을 눌러\n알림 권한을 허용해주세요.', {
+                duration: 5000,
+            });
+            return;
+        }
+
         const result = await Notification.requestPermission();
         setPermission(result);
         addLog(`Permission result: ${result}`);
 
         if (result === 'granted') {
             await subscribeUser();
+        } else if (result === 'denied') {
+            toast.error('알림 권한이 거부되었습니다.\n설정에서 직접 허용해야 합니다.');
         }
     };
 
@@ -147,42 +176,94 @@ export default function NotificationPermission() {
         }
     };
 
+    const handleDismiss = () => {
+        setIsVisible(false);
+        localStorage.setItem('fomopomo_notification_dismissed', 'true');
+    };
+
+    // ✨ Floating Mode: 권한이 이미 있거나 사용자가 닫았으면 숨김
+    if (mode === 'floating') {
+        if (permission === 'granted' || !isVisible) return null;
+
+        return (
+            <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 animate-bounce">
+                <button
+                    onClick={requestPermission}
+                    className="bg-rose-500 text-white px-4 py-2 rounded-full shadow-lg hover:opacity-90 transition-all text-sm font-medium flex items-center gap-2"
+                >
+                    <span>🔔</span>
+                    <span>알림 켜기</span>
+                </button>
+                <button 
+                    onClick={handleDismiss}
+                    className="bg-white text-gray-400 hover:text-gray-600 rounded-full p-1 shadow-md w-6 h-6 flex items-center justify-center text-xs"
+                    aria-label="닫기"
+                >
+                    ✕
+                </button>
+            </div>
+        );
+    }
+
+    // ✨ Inline Mode: 설정 페이지용 UI
     return (
-        <div className="fixed bottom-20 right-4 z-50 flex flex-col items-end gap-2">
-            {isOpen && (
-                <div className="bg-black/80 text-white p-4 rounded-lg text-xs w-64 mb-2 backdrop-blur-sm border border-gray-700">
-                    <div className="flex justify-between items-center mb-2">
-                        <span className="font-bold">Debug Info</span>
-                        <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-white">✕</button>
-                    </div>
-                    <div className="space-y-1 mb-3">
-                        <p>Permission: <span className={permission === 'granted' ? 'text-green-400' : 'text-red-400'}>{permission}</span></p>
-                        <p>Subscribed: <span className={isSubscribed ? 'text-green-400' : 'text-red-400'}>{isSubscribed ? 'Yes' : 'No'}</span></p>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                        <button onClick={subscribeUser} className="bg-blue-600 px-2 py-1 rounded hover:bg-blue-500">
-                            Force Resubscribe
-                        </button>
-                        <button onClick={sendTestNotification} className="bg-gray-600 px-2 py-1 rounded hover:bg-gray-500">
-                            Test Notification
-                        </button>
-                    </div>
-                    <div className="mt-3 pt-2 border-t border-gray-700">
-                        <p className="font-bold mb-1">Logs:</p>
-                        {debugLog.map((log, i) => (
-                            <p key={i} className="truncate opacity-70">- {log}</p>
-                        ))}
-                    </div>
+        <div className="space-y-3">
+            <div className="flex justify-between items-center">
+                <span className="text-gray-600 text-sm font-medium">알림 권한 상태</span>
+                <span className={`text-xs font-bold px-2 py-1 rounded ${
+                    permission === 'granted' ? 'bg-green-100 text-green-600' : 
+                    permission === 'denied' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
+                }`}>
+                    {permission === 'granted' ? '허용됨' : 
+                     permission === 'denied' ? '거부됨' : '미설정'}
+                </span>
+            </div>
+
+            {permission !== 'granted' && (
+                 <button 
+                    onClick={requestPermission}
+                    className="w-full py-2 bg-rose-500 text-white rounded-lg text-sm font-bold hover:bg-rose-600 transition-colors"
+                >
+                    알림 권한 요청하기
+                </button>
+            )}
+
+            {permission === 'granted' && (
+                <div className="grid grid-cols-2 gap-2">
+                    <button 
+                        onClick={subscribeUser}
+                        className="py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors"
+                    >
+                        🔄 연결 새로고침
+                    </button>
+                    <button 
+                        onClick={sendTestNotification}
+                        className="py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
+                    >
+                        🔔 테스트 알림 발송
+                    </button>
                 </div>
             )}
-            
-            <button
-                onClick={() => permission === 'granted' ? setIsOpen(!isOpen) : requestPermission()}
-                className={`${permission === 'granted' ? 'bg-gray-800' : 'bg-rose-500 animate-bounce'} text-white px-4 py-2 rounded-full shadow-lg hover:opacity-90 transition-all text-sm font-medium flex items-center gap-2`}
-            >
-                <span>🔔</span>
-                <span>{permission === 'granted' ? '알림 설정' : '알림 켜기'}</span>
-            </button>
+
+            {/* 디버그 로그 토글 (옵션) */}
+            <div className="pt-2">
+                <button 
+                    onClick={() => setIsOpen(!isOpen)} 
+                    className="text-[10px] text-gray-400 underline hover:text-gray-600"
+                >
+                    {isOpen ? '디버그 로그 숨기기' : '디버그 로그 보기'}
+                </button>
+                
+                {isOpen && (
+                    <div className="mt-2 p-2 bg-gray-900 text-green-400 rounded text-[10px] font-mono h-32 overflow-y-auto">
+                        {debugLog.map((log, i) => (
+                            <div key={i} className="border-b border-gray-800 last:border-0 py-0.5">
+                                &gt; {log}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
