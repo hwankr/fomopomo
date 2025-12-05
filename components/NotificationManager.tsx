@@ -81,7 +81,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                 await checkSubscription();
                 
                 if (currentPermission === 'granted') {
-                    subscribeUser();
+                    subscribeUser(false);
                 }
             }
         };
@@ -89,7 +89,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
         registerSwAndCheckPermission();
     }, []);
 
-    const subscribeUser = async () => {
+    const subscribeUser = async (showToast = true) => {
         if (!('serviceWorker' in navigator)) return;
 
         try {
@@ -127,7 +127,9 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                 throw error;
             }
 
-            toast.success('알림이 설정되었습니다!');
+            if (showToast) {
+                toast.success('알림이 설정되었습니다!');
+            }
             setPermission('granted');
             setIsSubscribed(true);
             addLog('Subscription saved to DB');
@@ -231,7 +233,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
             {permission === 'granted' && (
                 <div className="grid grid-cols-2 gap-2">
                     <button 
-                        onClick={subscribeUser}
+                        onClick={() => subscribeUser(true)}
                         className="py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors"
                     >
                         🔄 연결 새로고침

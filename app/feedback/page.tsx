@@ -448,7 +448,7 @@ export default function FeedbackPage() {
                                 </div>
                             </div>
                         ) : (
-                            <h2 className="font-bold text-xl ml-2">나의 피드백</h2>
+                            <h2 className="font-bold text-xl ml-2">피드백</h2>
                         )}
                         
                         {view === 'list' && (
