@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   format,
   startOfMonth,
@@ -16,6 +16,7 @@ import {
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getKoreanHolidays } from '@/actions/holidays';
 
 interface CalendarProps {
   selectedDate: Date;
@@ -24,6 +25,16 @@ interface CalendarProps {
 
 export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [holidayDates, setHolidayDates] = useState<number[]>([]);
+
+  useEffect(() => {
+    const fetchHolidays = async () => {
+      const year = currentMonth.getFullYear();
+      const dates = await getKoreanHolidays(year.toString());
+      setHolidayDates(dates);
+    };
+    fetchHolidays();
+  }, [currentMonth]);
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
@@ -100,10 +111,10 @@ export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) 
                 !isCurrentMonth && 'text-gray-300 dark:text-gray-600',
                 isCurrentMonth && 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50',
                 // Weekend colors
-                (day.getDay() === 0 && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-300',
+                ((day.getDay() === 0 || holidayDates.includes(parseInt(format(day, 'yyyyMMdd')))) && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-300',
                 (day.getDay() === 6 && isCurrentMonth && !isSelected) && 'bg-blue-50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-300',
                 isSelected && 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 shadow-md scale-105 z-10',
-                isDayToday && !isSelected && 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400 font-bold'
+                isDayToday && !isSelected && 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100 font-bold'
               )}
             >
               <span className="text-sm">{format(day, 'd')}</span>
