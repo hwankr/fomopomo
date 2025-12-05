@@ -111,8 +111,8 @@ export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) 
                 !isCurrentMonth && 'text-gray-300 dark:text-gray-600',
                 isCurrentMonth && 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50',
                 // Weekend colors
-                ((day.getDay() === 0 || holidayDates.includes(parseInt(format(day, 'yyyyMMdd')))) && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-300',
-                (day.getDay() === 6 && isCurrentMonth && !isSelected) && 'bg-blue-50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-300',
+                ((day.getDay() === 0 || holidayDates.includes(parseInt(format(day, 'yyyyMMdd')))) && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-500/20 text-red-700 dark:text-red-200',
+                (day.getDay() === 6 && isCurrentMonth && !isSelected) && 'bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200',
                 isSelected && 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 shadow-md scale-105 z-10',
                 isDayToday && !isSelected && 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100 font-bold'
               )}
