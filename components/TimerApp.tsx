@@ -5,8 +5,8 @@ import toast from 'react-hot-toast';
 import TaskSidebar from './TaskSidebar';
 
 // Hooks
-import { useSettings } from './timer/hooks/useSettings';
-import { useSound } from './timer/hooks/useSound';
+import { useSettings, type Settings } from '@/components/timer/hooks/useSettings';
+import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
@@ -399,7 +399,7 @@ export default function TimerApp({
     setTimerMode("focus");
     setTimeLeft(minutes * 60);
     setFocusLoggedSeconds(0);
-    setSettings(prev => ({ ...prev, pomoTime: minutes }));
+    setSettings((prev: Settings) => ({ ...prev, pomoTime: minutes }));
     setIntervals([]);
     saveState(tab, "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, []);
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);

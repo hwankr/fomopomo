@@ -268,6 +268,15 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     const handleDeleteGroup = async () => {
         if (!confirm('정말로 이 그룹을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
         try {
+            // 1. Delete all members first (manual cascade)
+            const { error: membersError } = await supabase
+                .from('group_members')
+                .delete()
+                .eq('group_id', id);
+
+            if (membersError) throw membersError;
+
+            // 2. Delete the group
             const { error } = await supabase
                 .from('groups')
                 .delete()
