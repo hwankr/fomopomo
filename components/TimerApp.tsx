@@ -1185,17 +1185,17 @@ export default function TimerApp({
           <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden scale-100 transition-transform duration-200">
             <div className="p-6">
               <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
-                What did you focus on?
+                무엇에 집중하셨나요?
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                Select a task from your list or enter a new one.
+                목록에서 작업을 선택하거나 직접 입력하세요.
               </p>
 
               <div className="space-y-4">
                 {/* ✨ [New] DB Tasks List */}
                 {dbTasks.length > 0 && (
                   <div className="space-y-2 mb-4">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Today's Tasks</p>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">오늘의 할 일</p>
                     <div className="grid gap-2">
                       {dbTasks.map((task) => (
                         <button
@@ -1218,7 +1218,7 @@ export default function TimerApp({
 
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                    Or type manually
+                    직접 입력
                   </label>
                   <input
                     type="text"
@@ -1227,7 +1227,7 @@ export default function TimerApp({
                       setSelectedTask(e.target.value);
                       setSelectedTaskId(null); // Clear ID if typing manually
                     }}
-                    placeholder="e.g. Reading, Coding..."
+                    placeholder="예: 독서, 코딩..."
                     className="w-full bg-gray-50 dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-700 rounded-xl px-4 py-3 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
                     autoFocus
                   />
@@ -1241,14 +1241,14 @@ export default function TimerApp({
                   onClick={handleTaskSkip}
                   className="flex-1 px-4 py-3 rounded-xl font-bold text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 transition-colors"
                 >
-                  Skip
+                  건너뛰기
                 </button>
                 <button
                   onClick={handleTaskSubmit}
                   disabled={!selectedTask.trim()}
                   className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-500/30 transition-all"
                 >
-                  Save
+                  저장
                 </button>
               </div>
 
@@ -1256,7 +1256,7 @@ export default function TimerApp({
                 onClick={handleDisableTaskPopup}
                 className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline decoration-gray-300 underline-offset-2 transition-colors"
               >
-                Don't ask me again
+                다시 보지 않기
               </button>
             </div>
           </div>
