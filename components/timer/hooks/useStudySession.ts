@@ -157,21 +157,33 @@ export const useStudySession = ({
     };
     setOnline();
 
-    const handleUnload = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        navigator.sendBeacon && navigator.sendBeacon('/api/status', JSON.stringify({ status: 'offline' }));
-         // Or simple supabase call if supported in unload, usually redundant with keepalive
-        await supabase.from('profiles').update({
-          status: 'offline',
-          last_active_at: new Date().toISOString(),
-        }).eq('id', user.id);
+    const handleUnload = () => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const projectId = supabaseUrl.split('//')[1]?.split('.')[0];
+      const currentSessionString = projectId 
+        ? localStorage.getItem(`sb-${projectId}-auth-token`)
+        : null;
+      
+      if (currentSessionString) {
+        try {
+          const session = JSON.parse(currentSessionString);
+          if (session?.access_token && session?.user?.id) {
+            const blob = new Blob([JSON.stringify({ 
+              status: 'offline', 
+              user_id: session.user.id,
+              access_token: session.access_token 
+            })], { type: 'application/json' });
+            
+            navigator.sendBeacon('/api/status', blob);
+          }
+        } catch (e) {
+          console.error('Error parsing session for beacon', e);
+        }
       }
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => {
         window.removeEventListener('beforeunload', handleUnload);
-        handleUnload();
     }
   }, []);
 
