@@ -7,6 +7,7 @@ import { Session } from '@supabase/supabase-js';
 import { Menu, X, Sun, Moon, Settings, Flag, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 import appIcon from '@/app/icon.png';
 import { usePathname } from 'next/navigation';
+import { useFriendRequestCount } from '@/hooks/useFriendRequestCount';
 
 interface NavbarProps {
     session: Session | null;
@@ -31,6 +32,7 @@ export default function Navbar({
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
     const pathname = usePathname();
+    const friendRequestCount = useFriendRequestCount(session);
 
     // Scroll effect for glassmorphism intensity
     useEffect(() => {
@@ -84,12 +86,18 @@ export default function Navbar({
                                         <Link
                                             key={link.href}
                                             href={link.href}
-                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${isActive
+                                            className={`relative px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${isActive
                                                 ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
                                                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50 dark:text-gray-300 dark:hover:text-white dark:hover:bg-slate-800/50'
                                                 }`}
                                         >
                                             {link.label}
+                                            {link.href === '/friends' && friendRequestCount > 0 && (
+                                                <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                                                </span>
+                                            )}
                                         </Link>
                                     );
                                 })}
@@ -217,12 +225,19 @@ export default function Navbar({
                                         key={link.href}
                                         href={link.href}
                                         onClick={() => setIsMenuOpen(false)}
-                                        className={`block px-4 py-3 rounded-xl text-base font-medium transition-all ${isActive
+                                        className={`relative block px-4 py-3 rounded-xl text-base font-medium transition-all ${isActive
                                             ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
                                             : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-slate-800 dark:hover:text-white'
                                             }`}
                                     >
-                                        {link.label}
+                                        <span className="flex items-center justify-between">
+                                            {link.label}
+                                            {link.href === '/friends' && friendRequestCount > 0 && (
+                                                <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                                    {friendRequestCount}
+                                                </span>
+                                            )}
+                                        </span>
                                     </Link>
                                 );
                             })}
