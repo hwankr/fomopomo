@@ -192,7 +192,8 @@ export default function TimerApp({
     sRunning: boolean,
     sElapsed: number,
     sStart: number | null,
-    currentIntervals: { start: number; end: number }[]
+    currentIntervals: { start: number; end: number }[],
+    currentStart: number | null // NEW PARAMETER
   ) => {
     const state = {
       activeTab: currentTab,
@@ -210,6 +211,7 @@ export default function TimerApp({
         startTime: sStart,
       },
       intervals: currentIntervals,
+      currentIntervalStart: currentStart, // SAVE IT
       lastUpdated: Date.now(),
     };
     localStorage.setItem("fomopomo_full_state", JSON.stringify(state));
@@ -368,12 +370,12 @@ export default function TimerApp({
         setIntervals(newIntervals);
         currentIntervalStartRef.current = null;
       }
-      saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, newIntervals);
+      saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, newIntervals, null);
     } else {
       // Starting
       const target = Date.now() + (timeLeft * 1000);
       currentIntervalStartRef.current = Date.now();
-      saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, intervals);
+      saveState(tab, timerMode, true, timeLeft, target, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, intervals, currentIntervalStartRef.current);
     }
     toggleTimer();
   };
@@ -395,12 +397,12 @@ export default function TimerApp({
         setIntervals(newIntervals);
         currentIntervalStartRef.current = null;
       }
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null, newIntervals);
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null, newIntervals, null);
     } else {
       // Starting
       const start = Date.now() - (stopwatchTime * 1000);
       currentIntervalStartRef.current = Date.now();
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start, intervals);
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start, intervals, currentIntervalStartRef.current);
     }
     toggleStopwatch();
   };
@@ -417,7 +419,7 @@ export default function TimerApp({
 
     changeTimerMode(mode);
     setIntervals([]);
-    saveState(tab, mode, false, timeLeft, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, []);
+    saveState(tab, mode, false, timeLeft, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null);
   };
 
   const handlePresetClick = (minutes: number) => {
@@ -434,7 +436,7 @@ export default function TimerApp({
     setFocusLoggedSeconds(0);
     setSettings((prev: Settings) => ({ ...prev, pomoTime: minutes }));
     setIntervals([]);
-    saveState(tab, "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, []);
+    saveState(tab, "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null);
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
   };
 
@@ -447,7 +449,7 @@ export default function TimerApp({
       const afterSave = () => {
         resetTimerManual();
         setIntervals([]);
-        saveState(tab, timerMode, false, fullTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, []);
+        saveState(tab, timerMode, false, fullTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null);
       };
       triggerSave('pomo', additional, afterSave);
     }
@@ -459,7 +461,7 @@ export default function TimerApp({
       setStopwatchTime(0);
       setIntervals([]);
       currentIntervalStartRef.current = null;
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, []);
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null);
     };
     await triggerSave('stopwatch', stopwatchTime, afterSave);
   };
@@ -468,7 +470,7 @@ export default function TimerApp({
     resetStopwatch();
     setIntervals([]);
     currentIntervalStartRef.current = null;
-    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, []);
+    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null);
   };
 
   const handleDisableTaskPopup = async () => {
@@ -553,6 +555,14 @@ export default function TimerApp({
 
             if (state.intervals) {
               setIntervals(state.intervals.filter((i: any) => i.start > 0 && i.end > 0));
+            }
+            
+            // Restore current interval start if available
+            if (state.currentIntervalStart) {
+              currentIntervalStartRef.current = state.currentIntervalStart;
+            } else if ((state.timer.isRunning || state.stopwatch.isRunning) && !currentIntervalStartRef.current) {
+              // Fallback for migration or if missing but running
+              currentIntervalStartRef.current = Date.now();
             }
           }
         } catch (e) { console.error(e); }
@@ -657,7 +667,7 @@ export default function TimerApp({
                 showSaveButton={timerMode === 'focus' && !isRunning && (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60)) - timeLeft - focusLoggedSeconds > 0}
                 showResetButton={!isRunning && timeLeft !== (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60))}
                 onToggleTimer={handleToggleTimer}
-                onResetTimer={() => { resetTimerManual(); setIntervals([]); saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, []); }}
+                onResetTimer={() => { resetTimerManual(); setIntervals([]); saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null); }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
                 selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={() => setIsTaskSidebarOpen(true)} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }}
               />
