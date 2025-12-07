@@ -402,6 +402,28 @@ export default function FeedbackPage() {
         }
     };
 
+    const handleStatusUpdate = async (e: React.ChangeEvent<HTMLSelectElement>, feedbackId: string) => {
+        e.stopPropagation();
+        const newStatus = e.target.value as 'pending' | 'reviewed' | 'implemented';
+        
+        try {
+            const { error } = await supabase
+                .from('feedbacks')
+                .update({ status: newStatus })
+                .eq('id', feedbackId);
+
+            if (error) throw error;
+
+            setFeedbacks(prev => prev.map(f => 
+                f.id === feedbackId ? { ...f, status: newStatus } : f
+            ));
+            toast.success('상태가 변경되었습니다');
+        } catch (error) {
+            console.error('Error updating status:', error);
+            toast.error('상태 변경 실패');
+        }
+    };
+
     const { isDarkMode, toggleDarkMode } = useTheme();
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
@@ -475,16 +497,34 @@ export default function FeedbackPage() {
                             ) : (
                                 <div className="divide-y divide-gray-100 dark:divide-slate-800">
                                     {feedbacks.map(feedback => (
-                                        <button
+                                        <div
                                             key={feedback.id}
                                             onClick={() => openChat(feedback)}
-                                            className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors flex items-start gap-4"
+                                            className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors flex items-start gap-4 cursor-pointer"
                                         >
-                                            <div className={`
-                                                mt-1 w-2 h-2 rounded-full flex-shrink-0
-                                                ${feedback.status === 'pending' ? 'bg-yellow-400' : 
-                                                    feedback.status === 'reviewed' ? 'bg-blue-400' : 'bg-green-400'}
-                                            `} />
+                                            {userRole === 'admin' ? (
+                                                <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0 pt-0.5">
+                                                    <select
+                                                        value={feedback.status}
+                                                        onChange={(e) => handleStatusUpdate(e, feedback.id)}
+                                                        className={`
+                                                            text-xs font-bold rounded-lg px-2 py-1 border-none focus:ring-0 cursor-pointer text-center outline-none transition-colors
+                                                            ${feedback.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 
+                                                              feedback.status === 'reviewed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'}
+                                                        `}
+                                                    >
+                                                        <option value="pending">대기중</option>
+                                                        <option value="reviewed">검토완료</option>
+                                                        <option value="implemented">구현완료</option>
+                                                    </select>
+                                                </div>
+                                            ) : (
+                                                <div className={`
+                                                    mt-1 w-2 h-2 rounded-full flex-shrink-0
+                                                    ${feedback.status === 'pending' ? 'bg-yellow-400' : 
+                                                        feedback.status === 'reviewed' ? 'bg-blue-400' : 'bg-green-400'}
+                                                `} />
+                                            )}
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-gray-900 dark:text-white font-medium truncate mb-1">
                                                     {feedback.content}
@@ -507,7 +547,7 @@ export default function FeedbackPage() {
                                                     <Trash2 className="w-5 h-5" />
                                                 </div>
                                             )}
-                                        </button>
+                                        </div>
                                     ))}
                                 </div>
                             )
