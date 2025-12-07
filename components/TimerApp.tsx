@@ -218,7 +218,7 @@ export default function TimerApp({
   // --- Handlers ---
 
   // Saving Logic Helper
-  const triggerSave = useCallback(async (recordMode: string, duration: number, onAfterSave?: () => void) => {
+  const triggerSave = useCallback(async (recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number) => {
     if (duration < 10) {
       toast.error('10초 미만은 저장되지 않습니다.');
       return;
@@ -232,7 +232,7 @@ export default function TimerApp({
       setPendingRecord({ mode: recordMode, duration, onAfterSave });
       setTaskModalOpen(true);
     } else {
-      await saveRecord(recordMode, duration, selectedTask);
+      await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
       if (onAfterSave) onAfterSave();
     }
   }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
@@ -246,7 +246,9 @@ export default function TimerApp({
       const remaining = duration - focusLoggedSeconds;
 
       if (remaining > 0) {
-        triggerSave('pomo', remaining);
+        // Pass endTimeRef.current as forcedEndTime to ensure exact recording time
+        const forcedEndTime = endTimeRef.current > 0 ? endTimeRef.current : undefined;
+        triggerSave('pomo', remaining, undefined, forcedEndTime);
       }
       setFocusLoggedSeconds(0);
 

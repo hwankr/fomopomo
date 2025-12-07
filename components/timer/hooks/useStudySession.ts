@@ -54,7 +54,7 @@ export const useStudySession = ({
   }, [selectedTaskTitle]);
 
   const saveRecord = useCallback(
-    async (recordMode: string, duration: number, taskText = '') => {
+    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number) => {
       if (duration < 10) {
         toast.error('10초 미만은 저장되지 않습니다.');
         return;
@@ -90,17 +90,19 @@ export const useStudySession = ({
 
       try {
         const now = Date.now();
+        const endTimeToUse = forcedEndTime || now; // Use forced time if provided
+        
         let currentSessionIntervals = [...intervals];
 
         if (currentIntervalStartRef.current) {
-          currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: now });
+          currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: endTimeToUse });
         }
 
         currentSessionIntervals = currentSessionIntervals.filter(i => i.start > 0 && i.end > 0);
 
         if (currentSessionIntervals.length === 0) {
           if (duration > 0 && duration < 24 * 60 * 60) {
-            currentSessionIntervals.push({ start: now - duration * 1000, end: now });
+            currentSessionIntervals.push({ start: endTimeToUse - duration * 1000, end: endTimeToUse });
           }
         }
 
@@ -121,7 +123,7 @@ export const useStudySession = ({
             user_id: user.id,
             task: taskText.trim() || null,
             task_id: selectedTaskId,
-            created_at: new Date().toISOString(),
+            created_at: new Date(endTimeToUse).toISOString(),
             group_id: groupId,
           });
         }
