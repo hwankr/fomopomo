@@ -18,7 +18,7 @@ export const useTimerLogic = ({
   updateStatus,
 }: UseTimerLogicProps) => {
   const [timerMode, setTimerMode] = useState<TimerMode>('focus');
-  const [timeLeft, setTimeLeft] = useState(25 * 60);
+  const [timeLeft, setTimeLeft] = useState(settings.pomoTime * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [cycleCount, setCycleCount] = useState(0);
   const [focusLoggedSeconds, setFocusLoggedSeconds] = useState(0);
