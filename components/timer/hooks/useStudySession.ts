@@ -131,7 +131,9 @@ export const useStudySession = ({
         const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
         if (error) throw error;
 
-        toast.success(`${formatDurationForToast(duration)} 기록 저장 완료!`, { id: toastId });
+        // Calculate actual saved duration from rowsToInsert
+        const actualSavedDuration = rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
+        toast.success(`${formatDurationForToast(actualSavedDuration)} 기록 저장 완료!`, { id: toastId });
         onRecordSaved();
       } catch (error) {
         console.error(error);

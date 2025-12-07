@@ -456,6 +456,13 @@ export default function TimerApp({
   };
 
   const handleSaveStopwatch = async () => {
+    // Capture current interval before stopping (if running)
+    if (isStopwatchRunning && currentIntervalStartRef.current) {
+      const newInterval = { start: currentIntervalStartRef.current, end: Date.now() };
+      setIntervals(prev => [...prev, newInterval]);
+      currentIntervalStartRef.current = null;
+    }
+    
     setIsStopwatchRunning(false);
     const afterSave = () => {
       setStopwatchTime(0);
@@ -530,7 +537,9 @@ export default function TimerApp({
                 currentIntervalStartRef.current = Date.now();
               } else {
                 setTimeLeft(0);
-                setIsRunning(true);
+                setIsRunning(false);
+                endTimeRef.current = state.timer.targetTime;
+                // Timer was already completed while away - will handle in restore complete logic
               }
             } else {
               setTimeLeft(state.timer.timeLeft);
@@ -579,6 +588,8 @@ export default function TimerApp({
     };
     restoreState();
   }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask]);
+
+
 
   // Persist Task
   useEffect(() => {
