@@ -575,7 +575,7 @@ export default function TimerApp({
 
     if (tab === 'timer') {
       timeString = formatTimeForTitle(timeLeft);
-      if (timerMode === 'focus') modeString = '집중';
+      if (timerMode === 'focus') modeString = '뽀모도로';
       else if (timerMode === 'shortBreak') modeString = '짧은 휴식';
       else if (timerMode === 'longBreak') modeString = '긴 휴식';
     } else {
@@ -583,10 +583,10 @@ export default function TimerApp({
       modeString = '스톱워치';
     }
 
-    document.title = `(${timeString} | ${modeString})`;
+    document.title = `${timeString} | ${modeString}`;
 
     return () => {
-      document.title = 'fomopomo';
+      document.title = 'Fomopomo';
     };
   }, [tab, timerMode, timeLeft, stopwatchTime]);
 
