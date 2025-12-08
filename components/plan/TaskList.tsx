@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { CheckCircle2, Circle, Plus, Trash2, GripVertical } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Trash2, GripVertical, Pencil, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
 import {
@@ -45,9 +45,13 @@ interface SortableTaskItemProps {
   task: Task;
   toggleTaskStatus: (task: Task) => void;
   deleteTask: (id: string) => void;
+  updateTask: (id: string, title: string) => void;
 }
 
-function SortableTaskItem({ task, toggleTaskStatus, deleteTask }: SortableTaskItemProps) {
+function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask }: SortableTaskItemProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTitle, setEditedTitle] = useState(task.title);
+
   const {
     attributes,
     listeners,
@@ -62,6 +66,26 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask }: SortableTaskIt
     transition,
     zIndex: isDragging ? 10 : 1,
     opacity: isDragging ? 0.5 : 1,
+  };
+
+  const handleSave = () => {
+    if (editedTitle.trim() && editedTitle !== task.title) {
+      updateTask(task.id, editedTitle.trim());
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditedTitle(task.title);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave();
+    } else if (e.key === 'Escape') {
+      handleCancel();
+    }
   };
 
   return (
@@ -91,18 +115,52 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask }: SortableTaskIt
         )}
       </button>
 
-      <span className={cn(
-        "flex-1 font-medium transition-all",
-        task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
-      )}>
-        {task.title}
-      </span>
+      {isEditing ? (
+        <div className="flex-1 flex items-center gap-2">
+          <input
+            type="text"
+            value={editedTitle}
+            onChange={(e) => setEditedTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-white text-sm"
+            autoFocus
+          />
+          <button
+            onClick={handleSave}
+            className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+          >
+            <Check className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleCancel}
+            className="p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <span className={cn(
+          "flex-1 font-medium transition-all",
+          task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
+        )}>
+          {task.title}
+        </span>
+      )}
 
       {task.duration ? (
         <span className="text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-md whitespace-nowrap">
           {formatDuration(task.duration)}
         </span>
       ) : null}
+
+      {!isEditing && (
+        <button
+          onClick={() => setIsEditing(true)}
+          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-gray-400 hover:text-rose-500 transition-all"
+        >
+          <Pencil className="w-4 h-4" />
+        </button>
+      )}
 
       <button
         onClick={() => deleteTask(task.id)}
@@ -285,6 +343,22 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     setDeletingTaskId(id);
   };
 
+  const updateTask = async (id: string, title: string) => {
+    // Optimistic update
+    setTasks(tasks.map(t => t.id === id ? { ...t, title } : t));
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({ title })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating task:', error);
+      // Revert if error
+      fetchTasks();
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deletingTaskId) return;
 
@@ -338,6 +412,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
                   task={task}
                   toggleTaskStatus={toggleTaskStatus}
                   deleteTask={deleteTask}
+                  updateTask={updateTask}
                 />
               ))}
             </SortableContext>
