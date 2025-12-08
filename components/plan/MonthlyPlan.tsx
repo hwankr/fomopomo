@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { CheckCircle2, Circle, Plus, Trash2, Calendar as CalendarIcon, ChevronUp, ChevronDown } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Trash2, Calendar as CalendarIcon, ChevronUp, ChevronDown, Pencil, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -28,6 +28,8 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = usePersistedState('monthly_plan_expanded', true);
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [editedTitle, setEditedTitle] = useState('');
 
   // Calculate current month and year
   const today = new Date();
@@ -111,6 +113,52 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
     setDeletingPlanId(id);
   };
 
+  const startEditing = (plan: MonthlyPlan) => {
+    setEditingPlanId(plan.id);
+    setEditedTitle(plan.title);
+  };
+
+  const cancelEditing = () => {
+    setEditingPlanId(null);
+    setEditedTitle('');
+  };
+
+  const updatePlan = async () => {
+    if (!editingPlanId || !editedTitle.trim()) {
+      cancelEditing();
+      return;
+    }
+
+    const originalPlan = plans.find(p => p.id === editingPlanId);
+    if (originalPlan && editedTitle.trim() === originalPlan.title) {
+      cancelEditing();
+      return;
+    }
+
+    // Optimistic update
+    setPlans(plans.map(p => p.id === editingPlanId ? { ...p, title: editedTitle.trim() } : p));
+    const planId = editingPlanId;
+    cancelEditing();
+
+    const { error } = await supabase
+      .from('monthly_plans')
+      .update({ title: editedTitle.trim() })
+      .eq('id', planId);
+
+    if (error) {
+      console.error('Error updating plan:', error);
+      fetchPlans();
+    }
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      updatePlan();
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deletingPlanId) return;
 
@@ -185,12 +233,46 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
                   )}
                 </button>
 
-                <span className={cn(
-                  "flex-1 text-sm font-medium transition-all",
-                  plan.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
-                )}>
-                  {plan.title}
-                </span>
+                {editingPlanId === plan.id ? (
+                  <div className="flex-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onKeyDown={handleEditKeyDown}
+                      className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white text-sm"
+                      autoFocus
+                    />
+                    <button
+                      onClick={updatePlan}
+                      className="p-1 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={cancelEditing}
+                      className="p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <span className={cn(
+                    "flex-1 text-sm font-medium transition-all",
+                    plan.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
+                  )}>
+                    {plan.title}
+                  </span>
+                )}
+
+                {editingPlanId !== plan.id && (
+                  <button
+                    onClick={() => startEditing(plan)}
+                    className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-purple-500 transition-all"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                )}
 
                 <button
                   onClick={() => deletePlan(plan.id)}
