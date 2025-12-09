@@ -95,16 +95,21 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             setMembers(membersData || []);
 
             // 3. Fetch Study Times
-            const today = new Date().toISOString().split('T')[0];
+            // Get today's start and end time in local timezone
+            const now = new Date();
+            const start = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+            const end = new Date(now.setHours(23, 59, 59, 999)).toISOString();
+
             const { data: studyTimeData, error: studyTimeError } = await supabase
-                .rpc('get_group_study_time_v2', {
-                    p_date: today,
-                    p_group_id: id
+                .rpc('get_group_study_time_v3', {
+                    p_group_id: id,
+                    p_start_time: start,
+                    p_end_time: end
                 });
 
             if (studyTimeError) {
                 console.error('Error fetching study times:', JSON.stringify(studyTimeError, null, 2));
-                console.error('Params:', { p_group_id: id, p_date: today });
+                console.error('Params:', { p_group_id: id, p_start_time: start, p_end_time: end });
             } else {
                 const timeMap: Record<string, number> = {};
                 studyTimeData.forEach((item: { user_id: string; total_seconds: number }) => {
