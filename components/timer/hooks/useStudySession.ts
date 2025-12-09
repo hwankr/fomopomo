@@ -13,6 +13,34 @@ const generateUUID = () => {
   });
 };
 
+// Helper to split an interval at midnight boundaries
+// Returns an array of intervals, each within a single day
+const splitIntervalAtMidnight = (interval: { start: number; end: number }): { start: number; end: number }[] => {
+  const result: { start: number; end: number }[] = [];
+  let currentStart = interval.start;
+  const finalEnd = interval.end;
+
+  while (currentStart < finalEnd) {
+    // Get the start of the next day (midnight)
+    const startDate = new Date(currentStart);
+    const nextMidnight = new Date(startDate);
+    nextMidnight.setDate(nextMidnight.getDate() + 1);
+    nextMidnight.setHours(0, 0, 0, 0);
+
+    // If the interval ends before next midnight, use the actual end
+    const currentEnd = nextMidnight.getTime() <= finalEnd ? nextMidnight.getTime() : finalEnd;
+
+    // Only add if there's meaningful duration (at least 1 second)
+    if (currentEnd - currentStart >= 1000) {
+      result.push({ start: currentStart, end: currentEnd });
+    }
+
+    currentStart = currentEnd;
+  }
+
+  return result;
+};
+
 interface UseStudySessionProps {
   isLoggedIn: boolean;
   onRecordSaved: () => void;
@@ -121,15 +149,20 @@ export const useStudySession = ({
           }
         }
 
-        const rowsToInsert = currentSessionIntervals.map(interval => ({
-          mode: recordMode,
-          duration: Math.round((interval.end - interval.start) / 1000),
-          user_id: user.id,
-          task: taskText.trim() || null,
-          task_id: selectedTaskId,
-          created_at: new Date(interval.end).toISOString(),
-          group_id: groupId,
-        })).filter(row => row.duration > 0 && row.duration < 24 * 60 * 60);
+        const rowsToInsert = currentSessionIntervals
+          // First, split each interval at midnight boundaries
+          .flatMap(interval => splitIntervalAtMidnight(interval))
+          // Then, convert each split interval to a row
+          .map(interval => ({
+            mode: recordMode,
+            duration: Math.round((interval.end - interval.start) / 1000),
+            user_id: user.id,
+            task: taskText.trim() || null,
+            task_id: selectedTaskId,
+            created_at: new Date(interval.end).toISOString(),
+            group_id: groupId,
+          }))
+          .filter(row => row.duration > 0 && row.duration < 24 * 60 * 60);
 
         if (rowsToInsert.length === 0) {
           rowsToInsert.push({

@@ -21,42 +21,87 @@ interface Session {
   task_id: string | null;
 }
 
+// Extended session interface with display-adjusted times for cross-midnight sessions
+interface ProcessedSession extends Session {
+  _displayStart: Date;
+  _displayEnd: Date;
+  _displayDuration: number;
+}
+
 const formatDuration = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  
+
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
 };
 
 export default function Timeline({ selectedDate, userId }: TimelineProps) {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<ProcessedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [isExpanded, setIsExpanded] = usePersistedState('timeline_expanded', true);
 
   const fetchSessions = async () => {
     if (!userId) return;
-    
+
     setLoading(true);
-    const start = new Date(selectedDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(selectedDate);
-    end.setHours(23, 59, 59, 999);
+
+    // Define the selected day's boundaries
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(selectedDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Query from one day before to catch cross-midnight sessions
+    const queryStart = new Date(selectedDate);
+    queryStart.setDate(queryStart.getDate() - 1);
+    queryStart.setHours(0, 0, 0, 0);
 
     const { data, error } = await supabase
       .from('study_sessions')
       .select('*')
       .eq('user_id', userId)
-      .gte('created_at', start.toISOString())
-      .lte('created_at', end.toISOString())
+      .gte('created_at', queryStart.toISOString())
+      .lte('created_at', dayEnd.toISOString())
       .order('created_at', { ascending: true });
 
     if (error) {
       console.error('Error fetching sessions:', error);
+      setSessions([]);
     } else {
-      setSessions(data || []);
+      // Process sessions to handle cross-midnight cases
+      const processedSessions: ProcessedSession[] = (data || [])
+        .map((session: Session) => {
+          const endTime = new Date(session.created_at);
+          const startTime = subSeconds(endTime, session.duration);
+
+          // Check if session overlaps with the selected day
+          if (endTime < dayStart || startTime > dayEnd) {
+            return null;
+          }
+
+          // Adjust display times to fit within the selected day
+          const displayStart = startTime < dayStart ? dayStart : startTime;
+          const displayEnd = endTime > dayEnd ? dayEnd : endTime;
+          const displayDuration = Math.floor((displayEnd.getTime() - displayStart.getTime()) / 1000);
+
+          // Only include if there's meaningful duration to display
+          if (displayDuration < 1) {
+            return null;
+          }
+
+          return {
+            ...session,
+            _displayStart: displayStart,
+            _displayEnd: displayEnd,
+            _displayDuration: displayDuration,
+          };
+        })
+        .filter((s): s is ProcessedSession => s !== null);
+
+      setSessions(processedSessions);
     }
     setLoading(false);
   };
@@ -99,7 +144,7 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-      <div 
+      <div
         className="flex justify-between items-center mb-6 cursor-pointer lg:cursor-default"
         onClick={() => setIsExpanded(!isExpanded)}
       >
@@ -108,14 +153,14 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
           {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </div>
       </div>
-      
+
       {/* Day Bar Visualization */}
       <div className="mb-8">
         <div className="relative h-4 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden w-full flex">
           {/* Hour Markers (Optional, simplified for now) */}
           {[0, 6, 12, 18, 24].map(hour => (
-            <div 
-              key={hour} 
+            <div
+              key={hour}
               className="absolute top-0 bottom-0 border-l border-gray-300 dark:border-gray-600 z-10"
               style={{ left: `${(hour / 24) * 100}%` }}
             />
@@ -123,13 +168,14 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 
           {/* Session Blocks */}
           {sessions.map((session) => {
-            const endTime = new Date(session.created_at);
-            const startTime = subSeconds(endTime, session.duration);
-            
+            // Use processed display times for cross-midnight support
+            const startTime = session._displayStart;
+            const durationSeconds = session._displayDuration;
+
             // Calculate position in day (0-1440 minutes)
             const startMinutes = getHours(startTime) * 60 + getMinutes(startTime);
-            const durationMinutes = session.duration / 60;
-            
+            const durationMinutes = durationSeconds / 60;
+
             const leftPercent = (startMinutes / 1440) * 100;
             const widthPercent = (durationMinutes / 1440) * 100;
 
@@ -140,8 +186,8 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
               <div
                 key={session.id}
                 className={`absolute h-full ${colorClass} opacity-80 hover:opacity-100 transition-opacity cursor-help`}
-                style={{ 
-                  left: `${leftPercent}%`, 
+                style={{
+                  left: `${leftPercent}%`,
                   width: `${Math.max(widthPercent, 0.5)}%` // Min width for visibility
                 }}
                 title={`${format(startTime, 'HH:mm')} - ${session.task || (isFocus ? 'Focus' : 'Break')}`}
@@ -161,12 +207,14 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
       {/* List Visualization */}
       <div className={cn("relative border-l-2 border-gray-200 dark:border-gray-700 ml-3 space-y-6 transition-all duration-300", !isExpanded && "hidden lg:block")}>
         {sessions.map((session) => {
-          const endTime = new Date(session.created_at);
-          const startTime = subSeconds(endTime, session.duration);
-          
+          // Use processed display times for cross-midnight support
+          const startTime = session._displayStart;
+          const endTime = session._displayEnd;
+          const displayDuration = session._displayDuration;
+
           const isFocus = session.mode === 'focus' || session.mode === 'pomo';
           const isBreak = session.mode === 'shortBreak' || session.mode === 'longBreak';
-          
+
           let dotColor = 'bg-gray-300';
           let cardBg = 'bg-gray-50 dark:bg-gray-700/50';
           let textColor = 'text-gray-700 dark:text-gray-300';
@@ -186,14 +234,14 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 
           return (
             <div key={session.id} className="relative pl-6">
-              <div 
+              <div
                 className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${dotColor}`}
               />
-              
+
               <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
                 {format(startTime, 'HH:mm')} - {format(endTime, 'HH:mm')}
                 <span className="ml-2 text-gray-400">
-                  ({formatDuration(session.duration)})
+                  ({formatDuration(displayDuration)})
                 </span>
               </div>
 
