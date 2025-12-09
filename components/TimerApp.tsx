@@ -480,6 +480,8 @@ export default function TimerApp({
       setIntervals([]);
       currentIntervalStartRef.current = null;
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null);
+      // Clear server state
+      updateStatus('online', undefined, undefined, 0);
     };
     await triggerSave('stopwatch', stopwatchTime, afterSave);
   };
@@ -489,6 +491,8 @@ export default function TimerApp({
     setIntervals([]);
     currentIntervalStartRef.current = null;
     saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null);
+    // Clear server state
+    updateStatus('online', undefined, undefined, 0);
   };
 
   const handleDisableTaskPopup = async () => {
