@@ -46,6 +46,7 @@ export default function Navbar({
     }, []);
 
     const navLinks = [
+        { href: '/', label: '타이머', mobileOnly: true },
         { href: '/plan', label: '계획' },
         { href: '/friends', label: '친구' },
         { href: '/groups', label: '그룹' },
@@ -82,7 +83,7 @@ export default function Navbar({
 
                             {/* Desktop Navigation Links */}
                             <div className="hidden md:flex space-x-1">
-                                {navLinks.map((link) => {
+                                {navLinks.filter(link => !link.mobileOnly).map((link) => {
                                     const isActive = pathname === link.href;
                                     return (
                                         <Link

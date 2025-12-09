@@ -7,6 +7,7 @@ import FriendNotificationListener from '@/components/FriendNotificationListener'
 import InstallPrompt from '@/components/InstallPrompt';
 import NotificationManager from '@/components/NotificationManager';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import FloatingTimerButton from '@/components/FloatingTimerButton';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -48,6 +49,7 @@ export default function RootLayout({
           <Toaster position="top-center" />
           <FriendNotificationListener />
           <main className="flex-grow">{children}</main>
+          <FloatingTimerButton />
           <InstallPrompt />
           <NotificationManager />
           <Footer />
