@@ -221,6 +221,12 @@ export default function TimerApp({
 
   // Saving Logic Helper
   const triggerSave = useCallback(async (recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number) => {
+    // Prevent duplicate trigger if already saving
+    if (isSaving) {
+      console.log('[triggerSave] Already saving, ignoring duplicate request');
+      return;
+    }
+
     if (duration < 10) {
       toast.error('10초 미만은 저장되지 않습니다.');
       return;
@@ -237,7 +243,7 @@ export default function TimerApp({
       await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
       if (onAfterSave) onAfterSave();
     }
-  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
+  }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
 
   const handleTimerComplete = useCallback(() => {
     // Play alarm (handled in useEffect/hook but let's make sure)
@@ -293,10 +299,10 @@ export default function TimerApp({
     if ('serviceWorker' in navigator && Notification.permission === 'granted') {
       navigator.serviceWorker.ready.then(registration => {
         const title = timerMode === 'focus' ? '집중 시간 종료! ☕' : '휴식 종료! 다시 집중해볼까요? 🔥';
-        const body = timerMode === 'focus' 
-          ? '수고하셨습니다. 잠시 머리를 식히세요.' 
+        const body = timerMode === 'focus'
+          ? '수고하셨습니다. 잠시 머리를 식히세요.'
           : '휴식이 끝났습니다. 목표를 향해 다시 달려봐요!';
-        
+
         registration.showNotification(title, {
           body,
           icon: '/icon-192x192.png',
@@ -462,7 +468,7 @@ export default function TimerApp({
       setIntervals(prev => [...prev, newInterval]);
       currentIntervalStartRef.current = null;
     }
-    
+
     setIsStopwatchRunning(false);
     const afterSave = () => {
       setStopwatchTime(0);
@@ -565,7 +571,7 @@ export default function TimerApp({
             if (state.intervals) {
               setIntervals(state.intervals.filter((i: any) => i.start > 0 && i.end > 0));
             }
-            
+
             // Restore current interval start if available
             if (state.currentIntervalStart) {
               currentIntervalStartRef.current = state.currentIntervalStart;

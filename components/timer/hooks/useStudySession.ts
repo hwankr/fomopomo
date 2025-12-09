@@ -30,6 +30,9 @@ export const useStudySession = ({
   const [intervals, setIntervals] = useState<{ start: number; end: number }[]>([]);
   const currentIntervalStartRef = useRef<number | null>(null);
 
+  // Ref-based lock to prevent duplicate saves (sync check, unlike useState)
+  const isSavingRef = useRef(false);
+
   // Update status (online/offline/studying)
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string) => {
     try {
@@ -55,15 +58,24 @@ export const useStudySession = ({
 
   const saveRecord = useCallback(
     async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number) => {
+      // Prevent duplicate saves using ref (synchronous check)
+      if (isSavingRef.current) {
+        console.log('[saveRecord] Already saving, ignoring duplicate request');
+        return;
+      }
+
       if (duration < 10) {
         toast.error('10초 미만은 저장되지 않습니다.');
         return;
       }
 
       if (!isLoggedIn) {
-          toast.error('로그인이 필요한 기능입니다.');
-          return;
+        toast.error('로그인이 필요한 기능입니다.');
+        return;
       }
+
+      // Set ref immediately (synchronous) to block rapid duplicate calls
+      isSavingRef.current = true;
 
       const formatDurationForToast = (totalSeconds: number) => {
         const minutes = Math.floor(totalSeconds / 60);
@@ -76,7 +88,10 @@ export const useStudySession = ({
       const groupId = generateUUID();
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        isSavingRef.current = false;
+        return;
+      }
 
       setIsSaving(true);
       const toastId = toast.loading('기록 저장 중...', {
@@ -91,7 +106,7 @@ export const useStudySession = ({
       try {
         const now = Date.now();
         const endTimeToUse = forcedEndTime || now; // Use forced time if provided
-        
+
         let currentSessionIntervals = [...intervals];
 
         if (currentIntervalStartRef.current) {
@@ -140,6 +155,7 @@ export const useStudySession = ({
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         toast.error(`저장 실패: ${errorMessage}`, { id: toastId, duration: 5000 });
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
         setIntervals([]);
         currentIntervalStartRef.current = null;
@@ -147,7 +163,7 @@ export const useStudySession = ({
     },
     [onRecordSaved, intervals, selectedTaskId, isLoggedIn]
   );
-  
+
   // Set online on mount / offline on unmount
   useEffect(() => {
     const setOnline = async () => {
@@ -164,20 +180,20 @@ export const useStudySession = ({
     const handleUnload = () => {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const projectId = supabaseUrl.split('//')[1]?.split('.')[0];
-      const currentSessionString = projectId 
+      const currentSessionString = projectId
         ? localStorage.getItem(`sb-${projectId}-auth-token`)
         : null;
-      
+
       if (currentSessionString) {
         try {
           const session = JSON.parse(currentSessionString);
           if (session?.access_token && session?.user?.id) {
-            const blob = new Blob([JSON.stringify({ 
-              status: 'offline', 
+            const blob = new Blob([JSON.stringify({
+              status: 'offline',
               user_id: session.user.id,
-              access_token: session.access_token 
+              access_token: session.access_token
             })], { type: 'application/json' });
-            
+
             navigator.sendBeacon('/api/status', blob);
           }
         } catch (e) {
@@ -187,7 +203,7 @@ export const useStudySession = ({
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => {
-        window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('beforeunload', handleUnload);
     }
   }, []);
 
