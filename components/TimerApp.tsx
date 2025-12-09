@@ -286,6 +286,10 @@ export default function TimerApp({
         }, 1000);
       }
     } else {
+      // 긴 휴식 완료 후 focus로 돌아올 때 사이클 리셋
+      if (timerMode === 'longBreak') {
+        setCycleCount(0);
+      }
       setTimerMode('focus');
       setTimeLeft(settings.pomoTime * 60);
       setFocusLoggedSeconds(0);
