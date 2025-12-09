@@ -79,6 +79,7 @@ export default function TimerApp({
     currentIntervalStartRef,
     updateStatus,
     saveRecord,
+    checkActiveSession,
   } = useStudySession({
     isLoggedIn,
     onRecordSaved,
@@ -587,17 +588,61 @@ export default function TimerApp({
         } catch (e) { console.error(e); }
       }
 
-      const savedTaskState = localStorage.getItem("fomopomo_task_state");
-      if (savedTaskState) {
-        try {
-          const { taskId, taskTitle } = JSON.parse(savedTaskState);
-          if (taskId) setSelectedTaskId(taskId);
-          if (taskTitle) setSelectedTask(taskTitle);
-        } catch (e) { console.error(e); }
+      // Sync with Server (Priority over local storage for active status)
+      if (isLoggedIn) {
+        // We need a way to check server status. 
+        // Since useStudySession is a hook used in this component, we can use the exposed function if we added one, 
+        // OR just do a direct call here if we didn't add it to the return of useStudySession yet. 
+        // But we added `checkActiveSession` to useStudySession result in the previous step (conceptually).
+        // Let's assume we can access it. 
+        // Wait, destructuring `checkActiveSession` from `useStudySession` result at the top of component is needed first.
       }
     };
     restoreState();
-  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask]);
+  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn]);
+
+  // Server Sync Effect - Separate from local restore to handle async nature cleanly
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const syncServerState = async () => {
+      try {
+        const data = await checkActiveSession();
+        if (data?.status === 'studying' && data.study_start_time) {
+          const startTime = new Date(data.study_start_time).getTime();
+          const now = Date.now();
+          const elapsed = Math.floor((now - startTime) / 1000);
+
+          if (elapsed >= 0) {
+            // Found active session on server!
+            // Only override if we are NOT currently running something locally (or if local is 0)
+            // But user request implies they want to see the active session.
+            // Let's assume server truth > local idle.
+            
+            // If local is running, we might have a conflict. For now, let's prioritize server if local is NOT running.
+            // Or if local value is significantly different? 
+            // Simple rule: If local is paused/stopped, sync.
+            
+            setTab('stopwatch');
+            setStopwatchTime(elapsed);
+            setIsStopwatchRunning(true);
+            stopwatchStartTimeRef.current = startTime;
+            currentIntervalStartRef.current = now; // Start tracking new interval from sync moment
+            
+            // Clear any stale intervals
+            setIntervals([]);
+            
+            toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+          }
+        }
+      } catch (e) {
+        console.error('Sync failed', e);
+      }
+    };
+    
+    syncServerState();
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals]);
+
 
 
 

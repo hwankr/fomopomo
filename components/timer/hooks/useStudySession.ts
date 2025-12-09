@@ -248,5 +248,22 @@ export const useStudySession = ({
     currentIntervalStartRef,
     updateStatus,
     saveRecord,
+    checkActiveSession: async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return null;
+
+        const { data } = await supabase
+          .from('profiles')
+          .select('status, study_start_time')
+          .eq('id', user.id)
+          .single();
+        
+        return data;
+      } catch (e) {
+        console.error('Failed to check active session', e);
+        return null;
+      }
+    },
   };
 };
