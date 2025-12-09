@@ -56,12 +56,11 @@ export const useStudySession = ({
 }: UseStudySessionProps) => {
   const [isSaving, setIsSaving] = useState(false);
   const [intervals, setIntervals] = useState<{ start: number; end: number }[]>([]);
-  const currentIntervalStartRef = useRef<number | null>(null);
-
   // Ref-based lock to prevent duplicate saves (sync check, unlike useState)
   const isSavingRef = useRef(false);
+  const currentIntervalStartRef = useRef<number | null>(null);
 
-  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number) => {
+  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -77,6 +76,9 @@ export const useStudySession = ({
         current_task: isPublic ? taskTitle : null,
         last_active_at: new Date().toISOString(),
         study_start_time: startTime || null,
+        timer_type: timerType,
+        timer_mode: timerMode,
+        timer_duration: timerDuration,
       };
 
       if (elapsedTime !== undefined) {
@@ -260,7 +262,7 @@ export const useStudySession = ({
 
         const { data } = await supabase
           .from('profiles')
-          .select('status, study_start_time, total_stopwatch_time')
+          .select('status, study_start_time, total_stopwatch_time, timer_type, timer_mode, timer_duration')
           .eq('id', user.id)
           .single();
         

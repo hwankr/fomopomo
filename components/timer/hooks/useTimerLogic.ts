@@ -8,7 +8,7 @@ interface UseTimerLogicProps {
   settings: Settings;
   onTimerCompleteRef: React.MutableRefObject<() => void>;
   playClickSound: () => void;
-  updateStatus: (status: 'studying' | 'paused', task?: string, startTime?: string) => void;
+  updateStatus: (status: 'studying' | 'paused', task?: string, startTime?: string, elapsed?: number, timerType?: 'timer' | 'stopwatch', timerMode?: 'focus' | 'shortBreak' | 'longBreak', timerDuration?: number) => void;
 }
 
 export const useTimerLogic = ({
@@ -62,22 +62,35 @@ export const useTimerLogic = ({
   const toggleTimer = useCallback((forceStart = false) => {
     playClickSound();
 
+    // Calculate duration for the current mode
+    const duration = timerMode === 'focus'
+      ? settings.pomoTime * 60
+      : timerMode === 'shortBreak'
+        ? settings.shortBreak * 60
+        : settings.longBreak * 60;
+
     if (!forceStart && isRunning) {
       // Pause
       setIsRunning(false);
-      updateStatus('paused');
+      updateStatus('paused', undefined, undefined, duration - timeLeft, 'timer', timerMode, duration);
     } else {
       // Start
       const target = Date.now() + (timeLeft * 1000);
       endTimeRef.current = target;
       setIsRunning(true);
-      updateStatus('studying', undefined, new Date(target - (timeLeft * 1000) + (settings.pomoTime * 60 - timeLeft) * 1000).toISOString()); // Approximate start time? No wait.
-      // Current start time based on end time:
-       const fullDuration = timerMode === 'focus' ? settings.pomoTime * 60 : timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60;
-       const startTime = new Date(target - fullDuration * 1000).toISOString();
-       updateStatus('studying', undefined, startTime);
+      // We don't store "start time" for countdown timer in the same way as stopwatch (Date.now() - elapsed),
+      // but we can pass the "logical start time" if we wanted to calculate drift, 
+      // OR just rely on "duration - elapsed" sync. 
+      // For sync, we need: startTime = Date.now() - (duration - timeLeft)? 
+      // If we want the client to calc elapsed: Date.now() - startTime.
+      // So logical startTime = Date.now() - (elapsed).
+      // elapsed = duration - timeLeft.
+      const elapsed = duration - timeLeft;
+      const logicalStart = Date.now() - (elapsed * 1000);
+      
+      updateStatus('studying', undefined, new Date(logicalStart).toISOString(), undefined, 'timer', timerMode, duration);
     }
-  }, [isRunning, timeLeft, playClickSound, updateStatus, timerMode, settings]);
+  }, [isRunning, timeLeft, timerMode, settings, playClickSound, updateStatus]);
 
   const resetTimerManual = useCallback(() => {
     setIsRunning(false);

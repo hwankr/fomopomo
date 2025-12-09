@@ -112,7 +112,7 @@ export default function TimerApp({
     settings,
     onTimerCompleteRef: onTimerCompleteCallback,
     playClickSound,
-    updateStatus: (status, task) => updateStatus(status, task),
+    updateStatus: (status, task, startTime, elapsed, timerType, timerMode, timerDuration) => updateStatus(status, task, startTime, elapsed, timerType, timerMode, timerDuration),
   });
 
   // 6. Stopwatch Logic Hook
@@ -461,6 +461,7 @@ export default function TimerApp({
         resetTimerManual();
         setIntervals([]);
         saveState(tab, timerMode, false, fullTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null);
+        updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
       };
       triggerSave('pomo', additional, afterSave);
     }
@@ -619,25 +620,61 @@ export default function TimerApp({
 
           if (elapsed >= 0) {
             // Found active session on server!
-            setTab('stopwatch');
-            setStopwatchTime(elapsed);
-            setIsStopwatchRunning(true);
-            stopwatchStartTimeRef.current = startTime;
-            currentIntervalStartRef.current = now; // Start tracking new interval from sync moment
-            
-            setIntervals([]);
-            toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+            if (data.timer_type === 'timer') {
+              // Sync Pomodoro Timer
+              const mode = (data.timer_mode as any) || 'focus';
+              const duration = data.timer_duration || (mode === 'focus' ? settings.pomoTime * 60 : mode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60);
+              
+              const remaining = duration - elapsed;
+              if (remaining > 0) {
+                 setTab('timer');
+                 setTimerMode(mode);
+                 setTimeLeft(remaining);
+                 setIsRunning(true);
+                 endTimeRef.current = now + (remaining * 1000);
+                 
+                 // If we switched modes, we might need to reset logged seconds for consistency if fresh start
+                 if (mode === 'focus' && elapsed === 0) setFocusLoggedSeconds(0);
+                 // If resuming, we technically should know how much was logged? 
+                 // We don't track "logged seconds" in profiles, only elapsed. 
+                 // So we assume elapsed == logged? 
+                 if (mode === 'focus') setFocusLoggedSeconds(elapsed);
+                 
+                 toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
+              }
+            } else {
+              // Sync Stopwatch (Default)
+              setTab('stopwatch');
+              setStopwatchTime(elapsed);
+              setIsStopwatchRunning(true);
+              stopwatchStartTimeRef.current = startTime;
+              currentIntervalStartRef.current = now; 
+              
+              setIntervals([]);
+              toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+            }
           }
         } else if (data?.total_stopwatch_time && data.total_stopwatch_time > 0) {
-          // Found paused session on server
-          // Only restore if we don't have a local active session (which we shouldn't on fresh load if we prioritize server)
-          // But check if local storage has something newer? 
-          // For now, assume server 'paused' state with time > 0 is worth restoring.
-          
-          setTab('stopwatch');
-          setStopwatchTime(data.total_stopwatch_time);
-          setIsStopwatchRunning(false);
-          setIntervals([]);
+          // Found paused session
+          if (data.timer_type === 'timer') {
+             const mode = (data.timer_mode as any) || 'focus';
+             const duration = data.timer_duration || 0; 
+             const elapsed = data.total_stopwatch_time; // Reusing this column for elapsed
+             const remaining = duration - elapsed;
+             
+             if (remaining > 0) {
+               setTab('timer');
+               setTimerMode(mode);
+               setTimeLeft(remaining);
+               setIsRunning(false);
+               if (mode === 'focus') setFocusLoggedSeconds(elapsed);
+             }
+          } else {
+             setTab('stopwatch');
+             setStopwatchTime(data.total_stopwatch_time);
+             setIsStopwatchRunning(false);
+             setIntervals([]);
+          }
         }
       } catch (e) {
         console.error('Sync failed', e);
@@ -737,7 +774,12 @@ export default function TimerApp({
                 showSaveButton={timerMode === 'focus' && !isRunning && (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60)) - timeLeft - focusLoggedSeconds > 0}
                 showResetButton={!isRunning && timeLeft !== (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60))}
                 onToggleTimer={handleToggleTimer}
-                onResetTimer={() => { resetTimerManual(); setIntervals([]); saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null); }}
+                onResetTimer={() => { 
+                  resetTimerManual(); 
+                  setIntervals([]); 
+                  saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null); 
+                  updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
+                }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
                 selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={() => setIsTaskSidebarOpen(true)} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }}
               />

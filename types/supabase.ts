@@ -24,6 +24,9 @@ export type Database = {
           nickname: string | null
           study_start_time: string | null
           total_stopwatch_time: number | null
+          timer_type: string | null
+          timer_mode: string | null
+          timer_duration: number | null
         }
         Insert: {
           id: string
@@ -39,6 +42,9 @@ export type Database = {
           nickname?: string | null
           study_start_time?: string | null
           total_stopwatch_time?: number | null
+          timer_type?: string | null
+          timer_mode?: string | null
+          timer_duration?: number | null
         }
         Update: {
           id?: string
@@ -54,18 +60,13 @@ export type Database = {
           nickname?: string | null
           study_start_time?: string | null
           total_stopwatch_time?: number | null
+          timer_type?: string | null
+          timer_mode?: string | null
+          timer_duration?: number | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "profiles_id_fkey"
-            columns: ["id"]
-            isOneToOne: true
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
+        // ... relationships ...
       }
-      // ... truncated for brevity ...
+      // ... truncated ...
     }
   }
 }
