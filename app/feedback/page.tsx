@@ -1,28 +1,16 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { ko } from 'date-fns/locale';
-import { Send, Plus, MessageSquare, ChevronLeft, Loader2, User as UserIcon, Trash2, AlertTriangle, Image as ImageIcon, X } from 'lucide-react';
+import { Send, Plus, MessageSquare, ChevronLeft, Loader2, User as UserIcon, AlertTriangle, Image as ImageIcon, X, List, History } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@supabase/supabase-js';
 import toast from 'react-hot-toast';
 import Navbar from '@/components/Navbar';
 import { useTheme } from '@/components/ThemeProvider';
-
-interface Feedback {
-    id: string;
-    content: string;
-    status: 'pending' | 'reviewed' | 'implemented';
-    user_id: string | null;
-    created_at: string;
-    author?: {
-        nickname: string | null;
-        email: string | null;
-    };
-    images?: string[];
-}
+import FeedbackItem, { Feedback } from '@/components/feedback/FeedbackItem';
+import ChangelogList from '@/components/feedback/ChangelogList';
 
 interface Reply {
     id: string;
@@ -45,10 +33,17 @@ const isMyMessage = (msgUserId: string | null, currentUserId: string) => {
 
 export default function FeedbackPage() {
     const [view, setView] = useState<'list' | 'chat' | 'new'>('list');
+    const [activeTab, setActiveTab] = useState<'feedback' | 'changelog'>('feedback');
     const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
     const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null);
     const [replies, setReplies] = useState<Reply[]>([]);
     const [newMessage, setNewMessage] = useState('');
+    const [newCategory, setNewCategory] = useState<'bug' | 'feature' | 'other'>('bug');
+
+    // Filters & Sort
+    const [sortBy, setSortBy] = useState<'latest' | 'popular'>('latest');
+    const [filterCategory, setFilterCategory] = useState<'all' | 'bug' | 'feature' | 'other'>('all');
+
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -57,8 +52,9 @@ export default function FeedbackPage() {
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
-    
+
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    const [userRole, setUserRole] = useState<string | null>(null);
 
     const scrollToBottom = () => {
         if (chatContainerRef.current) {
@@ -68,34 +64,31 @@ export default function FeedbackPage() {
 
     useEffect(() => {
         if (view === 'chat') {
-            // Small timeout to ensure rendering is complete
             setTimeout(scrollToBottom, 100);
         }
     }, [replies, view]);
-
-    const [userRole, setUserRole] = useState<string | null>(null);
 
     useEffect(() => {
         const init = async () => {
             const { data: { session } } = await supabase.auth.getSession();
             setSession(session);
             if (session) {
-                // Fetch user role
                 const { data: profile } = await supabase
                     .from('profiles')
                     .select('role')
                     .eq('id', session.user.id)
                     .single();
                 setUserRole(profile?.role || null);
-
-                fetchFeedbacks();
+                if (activeTab === 'feedback') {
+                    fetchFeedbacks(session.user.id);
+                }
             }
             setLoading(false);
         };
         init();
-    }, []);
+    }, [activeTab]); // Refetch when tab changes
 
-    // Real-time subscription for replies in the active chat
+    // Real-time subscription for replies
     useEffect(() => {
         if (view === 'chat' && selectedFeedback) {
             const channel = supabase
@@ -110,31 +103,8 @@ export default function FeedbackPage() {
                     },
                     async (payload) => {
                         const newReply = payload.new as Reply;
+                        if (session && newReply.user_id === session.user.id) return;
 
-                        // Avoid duplicate if optimistic update already added it (check by ID if possible, but optimistic usually has temp ID or we just rely on this)
-                        // Actually, simplified: If it's my message, I might have optimistically added it. 
-                        // But since I don't have the real ID yet in optimistic, it's tricky. 
-                        // Strategy: 
-                        // 1. Optimistic update adds item with temp-id.
-                        // 2. Realtime comes in. 
-                        // If I am the author, I should treat the realtime event as the "confirmation" and replace/dedupe.
-                        // For now, let's just ignore realtime events from 'me' if we do optimistic updates, 
-                        // OR simpler: invalidating and refetching is safest but slow. 
-                        // Let's do: Fetch author info and append.
-                        
-                        // If it's me, we might normally skip if we did optimistic. 
-                        // But let's check `session`.
-                        if (session && newReply.user_id === session.user.id) {
-                            // It's me. If we did optimistic update, we might have a duplicate if we just append.
-                            // However, since we cleared optimistic state on success in handleSendReply, 
-                            // we rely on the state update there. 
-                            // WAIT: `handleSendReply` awaits the insert. So the list update happens THEN. 
-                            // The realtime event might arrive Before or After.
-                            // If we update state in handleSendReply, we should ignore this event if it's me.
-                            return; 
-                        }
-
-                        // It's someone else (or me on another device). Fetch author.
                         let authorData = { nickname: 'unknown', email: 'unknown' };
                         if (newReply.user_id) {
                             const { data: profile } = await supabase
@@ -145,12 +115,7 @@ export default function FeedbackPage() {
                             if (profile) authorData = profile;
                         }
 
-                        const replyWithAuthor = {
-                            ...newReply,
-                            author: authorData
-                        };
-
-                        setReplies(prev => [...prev, replyWithAuthor]);
+                        setReplies(prev => [...prev, { ...newReply, author: authorData }]);
                     }
                 )
                 .subscribe();
@@ -161,33 +126,47 @@ export default function FeedbackPage() {
         }
     }, [view, selectedFeedback, session]);
 
-    const fetchFeedbacks = async () => {
-        const { data: feedbacksData } = await supabase
+    const fetchFeedbacks = async (userId: string) => {
+        // Fetch feedbacks with likes count
+        // Note: Supabase JS select with count on relations
+        const { data: feedbacksData, error } = await supabase
             .from('feedbacks')
-            .select('*')
+            .select('*, feedback_likes(count)')
             .order('created_at', { ascending: false });
 
-        if (feedbacksData) {
-            const userIds = Array.from(new Set(feedbacksData.map(f => f.user_id).filter(Boolean))) as string[];
-            
-            if (userIds.length > 0) {
-                const { data: profiles } = await supabase
-                    .from('profiles')
-                    .select('id, nickname, email')
-                    .in('id', userIds);
-                
-                const profileMap = new Map(profiles?.map(p => [p.id, p]));
-                
-                const feedbacksWithAuthor = feedbacksData.map(f => ({
-                    ...f,
-                    author: f.user_id ? profileMap.get(f.user_id) : undefined
-                }));
-                
-                setFeedbacks(feedbacksWithAuthor as Feedback[]);
-            } else {
-                setFeedbacks(feedbacksData as Feedback[]);
-            }
+        if (error || !feedbacksData) {
+            console.error(error);
+            return;
         }
+
+        // Fetch my likes
+        const { data: myLikes } = await supabase
+            .from('feedback_likes')
+            .select('feedback_id')
+            .eq('user_id', userId);
+
+        const myLikedIds = new Set(myLikes?.map(l => l.feedback_id));
+
+        // Fetch authors
+        const userIds = Array.from(new Set(feedbacksData.map(f => f.user_id).filter(Boolean))) as string[];
+        let profileMap = new Map();
+
+        if (userIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, nickname, email')
+                .in('id', userIds);
+            profileMap = new Map(profiles?.map(p => [p.id, p]));
+        }
+
+        const enrichedFeedbacks: Feedback[] = feedbacksData.map(f => ({
+            ...f,
+            author: f.user_id ? profileMap.get(f.user_id) : undefined,
+            likes_count: f.feedback_likes[0]?.count || 0,
+            user_has_liked: myLikedIds.has(f.id)
+        }));
+
+        setFeedbacks(enrichedFeedbacks);
     };
 
     const fetchReplies = async (feedbackId: string) => {
@@ -199,23 +178,15 @@ export default function FeedbackPage() {
 
         if (repliesData) {
             const userIds = Array.from(new Set(repliesData.map(r => r.user_id).filter(Boolean))) as string[];
-            
             if (userIds.length > 0) {
                 const { data: profiles } = await supabase
                     .from('profiles')
                     .select('id, nickname, email')
                     .in('id', userIds);
-                
                 const profileMap = new Map(profiles?.map(p => [p.id, p]));
-                
-                const repliesWithAuthor = repliesData.map(r => ({
-                    ...r,
-                    author: r.user_id ? profileMap.get(r.user_id) : undefined
-                }));
-
-                setReplies(repliesWithAuthor as Reply[]);
+                setReplies(repliesData.map(r => ({ ...r, author: r.user_id ? profileMap.get(r.user_id) : undefined })));
             } else {
-                 setReplies(repliesData as Reply[]);
+                setReplies(repliesData as Reply[]);
             }
         }
     };
@@ -225,52 +196,48 @@ export default function FeedbackPage() {
         if (!newMessage.trim() || !session) return;
         setSubmitting(true);
         try {
-            // 1. Upload Image if exists
             let imageUrls: string[] = [];
             if (imageFile) {
                 const url = await uploadImage(imageFile);
                 imageUrls.push(url);
             }
 
-            // 2. Create Feedback Ticket
             const { data, error } = await supabase
                 .from('feedbacks')
                 .insert([
-                    { 
-                        content: newMessage, 
-                        user_id: session.user.id, 
+                    {
+                        content: newMessage,
+                        user_id: session.user.id,
                         status: 'pending',
+                        category: newCategory,
                         images: imageUrls
                     }
                 ])
                 .select()
                 .single();
-            
+
             if (error) throw error;
             if (data) {
-                setFeedbacks([data, ...feedbacks]);
-                // Automatically enter chat view
-                setSelectedFeedback(data);
-                setReplies([]); // No replies yet (except the initial content depending on design, but schema treats initial content as header)
-                // Actually, let's treat the initial content as the "Subject" or first message.
-                // Our schema has 'content' in feedbacks. Let's visualize that as a message too?
-                // Or just show it as the title.
-                setView('chat');
+                await fetchFeedbacks(session.user.id); // Refresh to get correct structure
+                setView('list');
+                toast.success('피드백이 등록되었습니다.');
             }
             setNewMessage('');
             setImageFile(null);
             setImagePreview(null);
         } catch (error) {
             console.error(error);
+            toast.error('등록 실패');
         } finally {
             setSubmitting(false);
         }
     };
 
+    // ... Image handling functions (same as before) ...
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+            if (file.size > 5 * 1024 * 1024) {
                 toast.error('이미지 크기는 5MB 이하여야 합니다.');
                 return;
             }
@@ -316,19 +283,18 @@ export default function FeedbackPage() {
             user_id: session.user.id,
             content: newMessage,
             created_at: new Date().toISOString(),
-            images: imagePreview ? [imagePreview] : [], // Use preview blob for optimistic
-            author: { // Optimistic author
-                nickname: session.user.user_metadata?.nickname || '나', // fallback
+            images: imagePreview ? [imagePreview] : [],
+            author: {
+                nickname: session.user.user_metadata?.nickname || '나',
                 email: session.user.email
             }
         };
 
-        // Optimistic Update
         setReplies(prev => [...prev, optimisticReply]);
         const currentMessage = newMessage;
-        setNewMessage(''); // Clear input immediately
+        setNewMessage('');
         const currentImageFile = imageFile;
-        removeImage(); // Clear image input immediately
+        removeImage();
 
         try {
             let imageUrls: string[] = [];
@@ -340,27 +306,25 @@ export default function FeedbackPage() {
             const { data, error } = await supabase
                 .from('feedback_replies')
                 .insert([
-                    { 
-                        feedback_id: selectedFeedback.id, 
-                        user_id: session.user.id, 
+                    {
+                        feedback_id: selectedFeedback.id,
+                        user_id: session.user.id,
                         content: currentMessage,
                         images: imageUrls
                     }
                 ])
                 .select()
                 .single();
-            
+
             if (error) throw error;
-            
-            // Replace optimistic with real
+
             setReplies(prev => prev.map(r => r.id === tempId ? { ...data, author: optimisticReply.author } : r));
-            
+
         } catch (error) {
-            console.error('Error sending reply:', JSON.stringify(error, null, 2));
+            console.error('Error sending reply:', error);
             toast.error('메시지 전송 실패');
-            // Revert optimistic
             setReplies(prev => prev.filter(r => r.id !== tempId));
-            setNewMessage(currentMessage); // Restore message
+            setNewMessage(currentMessage);
         } finally {
             setSubmitting(false);
         }
@@ -373,8 +337,7 @@ export default function FeedbackPage() {
     };
 
     const handleDeleteFeedback = (e: React.MouseEvent, feedbackId: string) => {
-        e.stopPropagation();
-        setDeleteConfirmationId(feedbackId);
+        e.stopPropagation(); // Should trigger from Item component, but if needed from here
     };
 
     const confirmDelete = async () => {
@@ -385,9 +348,9 @@ export default function FeedbackPage() {
                 .from('feedbacks')
                 .delete()
                 .eq('id', deleteConfirmationId);
-            
+
             if (error) throw error;
-            
+
             setFeedbacks(prev => prev.filter(f => f.id !== deleteConfirmationId));
             if (selectedFeedback?.id === deleteConfirmationId) {
                 setView('list');
@@ -402,29 +365,38 @@ export default function FeedbackPage() {
         }
     };
 
-    const handleStatusUpdate = async (e: React.ChangeEvent<HTMLSelectElement>, feedbackId: string) => {
-        e.stopPropagation();
-        const newStatus = e.target.value as 'pending' | 'reviewed' | 'implemented';
-        
+    const handleStatusUpdate = async (id: string, newStatus: 'pending' | 'reviewed' | 'implemented') => {
         try {
             const { error } = await supabase
                 .from('feedbacks')
                 .update({ status: newStatus })
-                .eq('id', feedbackId);
+                .eq('id', id);
 
             if (error) throw error;
-
-            setFeedbacks(prev => prev.map(f => 
-                f.id === feedbackId ? { ...f, status: newStatus } : f
-            ));
+            setFeedbacks(prev => prev.map(f => f.id === id ? { ...f, status: newStatus } : f));
             toast.success('상태가 변경되었습니다');
         } catch (error) {
-            console.error('Error updating status:', error);
+            console.error(error);
             toast.error('상태 변경 실패');
         }
     };
 
     const { isDarkMode, toggleDarkMode } = useTheme();
+
+    // Derived filtered feedbacks
+    const filteredFeedbacks = useMemo(() => {
+        let result = [...feedbacks];
+        if (filterCategory !== 'all') {
+            result = result.filter(f => f.category === filterCategory);
+        }
+        if (sortBy === 'popular') {
+            result.sort((a, b) => (b.likes_count || 0) - (a.likes_count || 0));
+        } else {
+            // Default latest (created_at desc) - already fetched that way, but safety
+            result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        }
+        return result;
+    }, [feedbacks, filterCategory, sortBy]);
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
 
@@ -447,306 +419,325 @@ export default function FeedbackPage() {
                 </div>
             ) : (
                 <div className="max-w-4xl mx-auto h-[calc(100vh-6rem)] md:h-[calc(100vh-8rem)] bg-white dark:bg-slate-900 md:rounded-2xl shadow-xl overflow-hidden flex flex-col border border-gray-200 dark:border-slate-800">
-                    
+
                     {/* Header */}
-                    <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
-                        {view !== 'list' ? (
-                            <div className="flex items-center gap-3">
-                                <button 
-                                    onClick={() => setView('list')}
-                                    className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                                >
-                                    <ChevronLeft className="w-5 h-5" />
-                                </button>
-                                <div>
-                                    <h2 className="font-bold text-lg">
-                                        {view === 'new' ? '새 문의하기' : '문의 내역'}
-                                    </h2>
-                                    {view === 'chat' && (
-                                        <span className="text-xs text-gray-500">
-                                            {format(new Date(selectedFeedback!.created_at), 'yyyy.MM.dd')}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <h2 className="font-bold text-xl ml-2">피드백</h2>
-                        )}
-                        
-                        {view === 'list' && (
-                            <div className="flex gap-2">
+                    <div className="border-b border-gray-100 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10 flex flex-col">
+                        <div className="p-4 flex items-center justify-between">
+                            {view !== 'list' ? (
+                                <div className="flex items-center gap-3">
                                     <button
+                                        onClick={() => setView('list')}
+                                        className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                                    >
+                                        <ChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <div>
+                                        <h2 className="font-bold text-lg">
+                                            {view === 'new' ? '새 문의하기' : '문의 상세'}
+                                        </h2>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-4">
+                                    <h2 className="font-bold text-xl ml-2 hidden md:block">문의함</h2>
+                                    {/* Tabs */}
+                                    <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
+                                        <button
+                                            onClick={() => setActiveTab('feedback')}
+                                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700'}`}
+                                        >
+                                            피드백
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('changelog')}
+                                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'changelog' ? 'bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700'}`}
+                                        >
+                                            변경 내역
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {view === 'list' && activeTab === 'feedback' && (
+                                <button
                                     onClick={() => { setView('new'); setNewMessage(''); }}
                                     className="bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-opacity"
                                 >
                                     <Plus className="w-4 h-4" />
-                                    <span>문의하기</span>
+                                    <span className="hidden md:inline">문의하기</span>
                                 </button>
+                            )}
+                        </div>
+
+                        {/* Filters & Sort for Feedback List */}
+                        {view === 'list' && activeTab === 'feedback' && (
+                            <div className="px-4 pb-2 flex gap-2 overflow-x-auto no-scrollbar">
+                                <select
+                                    value={filterCategory}
+                                    onChange={(e) => setFilterCategory(e.target.value as any)}
+                                    className="bg-gray-50 dark:bg-slate-800 border-none text-xs rounded-lg px-3 py-1.5 focus:ring-0 cursor-pointer"
+                                >
+                                    <option value="all">전체 카테고리</option>
+                                    <option value="bug">버그</option>
+                                    <option value="feature">기능 제안</option>
+                                    <option value="other">기타</option>
+                                </select>
+                                <select
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value as any)}
+                                    className="bg-gray-50 dark:bg-slate-800 border-none text-xs rounded-lg px-3 py-1.5 focus:ring-0 cursor-pointer"
+                                >
+                                    <option value="latest">최신순</option>
+                                    <option value="popular">인기순 (좋아요)</option>
+                                </select>
                             </div>
                         )}
                     </div>
 
                     {/* Content Area */}
                     <div ref={chatContainerRef} className="flex-1 overflow-y-auto bg-gray-50/30 dark:bg-slate-950/30 relative">
-                        {view === 'list' && (
-                            feedbacks.length === 0 ? (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
-                                    <MessageSquare className="w-12 h-12 mb-4 opacity-50" />
-                                    <p>등록된 피드백이 없습니다.</p>
-                                </div>
-                            ) : (
-                                <div className="divide-y divide-gray-100 dark:divide-slate-800">
-                                    {feedbacks.map(feedback => (
-                                        <div
-                                            key={feedback.id}
-                                            onClick={() => openChat(feedback)}
-                                            className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors flex items-start gap-4 cursor-pointer"
-                                        >
-                                            {userRole === 'admin' ? (
-                                                <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0 pt-0.5">
-                                                    <select
-                                                        value={feedback.status}
-                                                        onChange={(e) => handleStatusUpdate(e, feedback.id)}
-                                                        className={`
-                                                            text-xs font-bold rounded-lg px-2 py-1 border-none focus:ring-0 cursor-pointer text-center outline-none transition-colors
-                                                            ${feedback.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 
-                                                              feedback.status === 'reviewed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'}
-                                                        `}
+                        {activeTab === 'changelog' && view === 'list' ? (
+                            <ChangelogList isAdmin={userRole === 'admin'} />
+                        ) : (
+                            <>
+                                {view === 'list' && (
+                                    filteredFeedbacks.length === 0 ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+                                            <MessageSquare className="w-12 h-12 mb-4 opacity-50" />
+                                            <p>등록된 피드백이 없습니다.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y divide-gray-100 dark:divide-slate-800">
+                                            {filteredFeedbacks.map(feedback => (
+                                                <FeedbackItem
+                                                    key={feedback.id}
+                                                    feedback={feedback}
+                                                    currentUserId={session?.user?.id}
+                                                    isAdmin={userRole === 'admin'}
+                                                    onClick={() => openChat(feedback)}
+                                                    onDelete={(id) => setDeleteConfirmationId(id)}
+                                                    onStatusChange={handleStatusUpdate}
+                                                />
+                                            ))}
+                                        </div>
+                                    )
+                                )}
+
+                                {view === 'new' && (
+                                    <div className="p-6">
+                                        <form onSubmit={handleCreateFeedback} className="space-y-4">
+                                            {/* Category Selection */}
+                                            <div className="flex gap-2 mb-2">
+                                                {(['bug', 'feature', 'other'] as const).map(cat => (
+                                                    <button
+                                                        key={cat}
+                                                        type="button"
+                                                        onClick={() => setNewCategory(cat)}
+                                                        className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${newCategory === cat
+                                                                ? 'border-rose-500 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
+                                                                : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500'
+                                                            }`}
                                                     >
-                                                        <option value="pending">대기중</option>
-                                                        <option value="reviewed">검토완료</option>
-                                                        <option value="implemented">구현완료</option>
-                                                    </select>
-                                                </div>
-                                            ) : (
-                                                <div className={`
-                                                    mt-1 w-2 h-2 rounded-full flex-shrink-0
-                                                    ${feedback.status === 'pending' ? 'bg-yellow-400' : 
-                                                        feedback.status === 'reviewed' ? 'bg-blue-400' : 'bg-green-400'}
-                                                `} />
-                                            )}
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-gray-900 dark:text-white font-medium truncate mb-1">
-                                                    {feedback.content}
-                                                </p>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                                    <span className="font-semibold text-gray-700 dark:text-gray-300">
-                                                        {feedback.author?.email?.split('@')[0] || feedback.author?.nickname || '익명'}
-                                                    </span>
-                                                    <span>•</span>
-                                                    <span>{format(new Date(feedback.created_at), 'yyyy.MM.dd HH:mm')}</span>
-                                                    <span>•</span>
-                                                    <span className="capitalize">{feedback.status}</span>
-                                                </div>
+                                                        {cat === 'bug' ? '버그 신고' : cat === 'feature' ? '기능 제안' : '기타 문의'}
+                                                    </button>
+                                                ))}
                                             </div>
-                                            {(userRole === 'admin' || feedback.user_id === session?.user?.id) && (
-                                                <div 
-                                                    onClick={(e) => handleDeleteFeedback(e, feedback.id)}
-                                                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors flex-shrink-0"
+
+                                            <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm focus-within:ring-2 focus-within:ring-rose-500 transition-all">
+                                                <textarea
+                                                    value={newMessage}
+                                                    onChange={(e) => setNewMessage(e.target.value)}
+                                                    placeholder="내용을 입력해주세요."
+                                                    rows={8}
+                                                    className="w-full bg-transparent border-none focus:ring-0 text-base resize-none"
+                                                    autoFocus
+                                                />
+                                            </div>
+
+                                            {/* Image Preview */}
+                                            {imagePreview && (
+                                                <div className="relative inline-block">
+                                                    <img src={imagePreview} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
+                                                    <button
+                                                        type="button"
+                                                        onClick={removeImage}
+                                                        className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-gray-700 transition-colors"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="file"
+                                                    ref={fileInputRef}
+                                                    onChange={handleFileSelect}
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    className="p-3.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
                                                 >
-                                                    <Trash2 className="w-5 h-5" />
+                                                    <ImageIcon className="w-5 h-5" />
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={!newMessage.trim() || submitting}
+                                                    className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white py-3.5 rounded-xl font-medium shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                                >
+                                                    {submitting ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
+                                                    등록하기
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
+                                {view === 'chat' && selectedFeedback && (
+                                    <div className="flex flex-col min-h-full">
+                                        <div className="flex-1 p-4 space-y-6">
+                                            {/* Initial Feedback Message */}
+                                            {(() => {
+                                                const isMe = isMyMessage(selectedFeedback.user_id, session.user.id);
+                                                return (
+                                                    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                        {!isMe && (
+                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
+                                                                <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                                                            </div>
+                                                        )}
+                                                        <div className={`
+                                                            rounded-2xl p-3 max-w-[80%] shadow-sm
+                                                            ${isMe
+                                                                ? 'bg-rose-500 text-white rounded-tr-sm'
+                                                                : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
+                                                            }
+                                                        `}>
+                                                            <div className="text-xs opacity-70 mb-1 font-bold">
+                                                                {selectedFeedback.category === 'bug' ? 'BUG' : selectedFeedback.category === 'feature' ? 'FEATURE' : 'OTHER'}
+                                                            </div>
+                                                            <p className="whitespace-pre-wrap">{selectedFeedback.content}</p>
+                                                            {selectedFeedback.images && selectedFeedback.images.length > 0 && (
+                                                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                                                    {selectedFeedback.images.map((img, idx) => (
+                                                                        <img
+                                                                            key={idx}
+                                                                            src={img}
+                                                                            alt="attached"
+                                                                            className="rounded-lg max-w-full h-auto object-cover max-h-64"
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
+                                                                <span className="text-[10px]">
+                                                                    {selectedFeedback.author?.email?.split('@')[0] || selectedFeedback.author?.nickname || '익명'}
+                                                                </span>
+                                                                <span className="text-[10px]">
+                                                                    {format(new Date(selectedFeedback.created_at), 'HH:mm')}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            {/* Replies */}
+                                            {replies.map((reply) => {
+                                                const isMe = isMyMessage(reply.user_id, session.user.id);
+                                                return (
+                                                    <div key={reply.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                        {!isMe && (
+                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
+                                                                <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                                                            </div>
+                                                        )}
+                                                        <div className={`
+                                                            rounded-2xl p-3 max-w-[80%] shadow-sm
+                                                            ${isMe
+                                                                ? 'bg-rose-500 text-white rounded-tr-sm'
+                                                                : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
+                                                            }
+                                                        `}>
+                                                            <p className="whitespace-pre-wrap text-sm md:text-base">{reply.content}</p>
+                                                            {reply.images && reply.images.length > 0 && (
+                                                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                                                    {reply.images.map((img, idx) => (
+                                                                        <img
+                                                                            key={idx}
+                                                                            src={img}
+                                                                            alt="attached"
+                                                                            className="rounded-lg max-w-full h-auto object-cover max-h-64"
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
+                                                                <span className="text-[10px]">
+                                                                    {reply.author?.email?.split('@')[0] || reply.author?.nickname || '익명'}
+                                                                </span>
+                                                                <span className="text-[10px]">
+                                                                    {format(new Date(reply.created_at), 'HH:mm')}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                        </div>
+
+                                        {/* Chat Input */}
+                                        <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 p-4">
+                                            {imagePreview && (
+                                                <div className="mb-2 relative inline-block">
+                                                    <img src={imagePreview} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
+                                                    <button
+                                                        type="button"
+                                                        onClick={removeImage}
+                                                        className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-gray-700 transition-colors"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
                                                 </div>
                                             )}
+                                            <form onSubmit={handleSendReply} className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={newMessage}
+                                                    onChange={(e) => setNewMessage(e.target.value)}
+                                                    placeholder="메시지 입력..."
+                                                    className="flex-1 rounded-full border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 px-4 py-2 text-sm focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
+                                                />
+                                                <input
+                                                    type="file"
+                                                    ref={fileInputRef}
+                                                    onChange={handleFileSelect}
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0 ${imagePreview ? 'text-rose-500' : 'text-gray-400'}`}
+                                                >
+                                                    <ImageIcon className="w-5 h-5" />
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={!newMessage.trim() || submitting}
+                                                    className="bg-rose-500 text-white p-2 rounded-full hover:bg-rose-600 disabled:opacity-50 transition-colors flex-shrink-0"
+                                                >
+                                                    <Send className="w-5 h-5" />
+                                                </button>
+                                            </form>
                                         </div>
-                                    ))}
-                                </div>
-                            )
-                        )}
-
-                        {view === 'new' && (
-                            <div className="p-6">
-                                <form onSubmit={handleCreateFeedback} className="space-y-4">
-                                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm focus-within:ring-2 focus-within:ring-rose-500 transition-all">
-                                        <textarea
-                                            value={newMessage}
-                                            onChange={(e) => setNewMessage(e.target.value)}
-                                            placeholder="어떤 점이 불편하거나 개선되었으면 좋겠나요?"
-                                            rows={8}
-                                            className="w-full bg-transparent border-none focus:ring-0 text-base resize-none"
-                                            autoFocus
-                                        />
                                     </div>
-                                    
-                                    {/* Image Preview in New View */}
-                                    {imagePreview && (
-                                        <div className="relative inline-block">
-                                            <img src={imagePreview} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
-                                            <button
-                                                type="button"
-                                                onClick={removeImage}
-                                                className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-gray-700 transition-colors"
-                                            >
-                                                <X className="w-3 h-3" />
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="file"
-                                            ref={fileInputRef}
-                                            onChange={handleFileSelect}
-                                            accept="image/*"
-                                            className="hidden"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => fileInputRef.current?.click()}
-                                            className="p-3.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-                                        >
-                                            <ImageIcon className="w-5 h-5" />
-                                        </button>
-                                    <button
-                                        type="submit"
-                                        disabled={!newMessage.trim() || submitting}
-                                        className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white py-3.5 rounded-xl font-medium shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                    >
-                                        {submitting ? <Loader2 className="animate-spin w-5 h-5" /> : <Send className="w-5 h-5" />}
-                                        보내기
-                                    </button>
-                                    </div>
-                                </form>
-                            </div>
-                        )}
-
-                        {view === 'chat' && selectedFeedback && (
-                            <div className="flex flex-col min-h-full">
-                                <div className="flex-1 p-4 space-y-6">
-                                    {/* Initial Feedback Message */}
-                                    {(() => {
-                                        const isMe = isMyMessage(selectedFeedback.user_id, session.user.id);
-                                        return (
-                                            <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                                {!isMe && (
-                                                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
-                                                        <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                                                    </div>
-                                                )}
-                                                <div className={`
-                                                    rounded-2xl p-3 max-w-[80%] shadow-sm
-                                                    ${isMe 
-                                                        ? 'bg-rose-500 text-white rounded-tr-sm' 
-                                                        : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
-                                                    }
-                                                `}>
-                                                    <p className="whitespace-pre-wrap">{selectedFeedback.content}</p>
-                                                    {selectedFeedback.images && selectedFeedback.images.length > 0 && (
-                                                        <div className="mt-2 grid grid-cols-2 gap-2">
-                                                            {selectedFeedback.images.map((img, idx) => (
-                                                                <img 
-                                                                    key={idx} 
-                                                                    src={img} 
-                                                                    alt="attached" 
-                                                                    className="rounded-lg max-w-full h-auto object-cover max-h-64"
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                    <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
-                                                        <span className="text-[10px]">
-                                                            {selectedFeedback.author?.email?.split('@')[0] || selectedFeedback.author?.nickname || '익명'}
-                                                        </span>
-                                                        <span className="text-[10px]">
-                                                            {format(new Date(selectedFeedback.created_at), 'HH:mm')}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* Replies */}
-                                    {replies.map((reply) => {
-                                        const isMe = isMyMessage(reply.user_id, session.user.id);
-                                        return (
-                                            <div key={reply.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                                {!isMe && (
-                                                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
-                                                        <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                                                    </div>
-                                                )}
-                                                <div className={`
-                                                    rounded-2xl p-3 max-w-[80%] shadow-sm
-                                                    ${isMe 
-                                                        ? 'bg-rose-500 text-white rounded-tr-sm' 
-                                                        : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
-                                                    }
-                                                `}>
-                                                    <p className="whitespace-pre-wrap text-sm md:text-base">{reply.content}</p>
-                                                    {reply.images && reply.images.length > 0 && (
-                                                        <div className="mt-2 grid grid-cols-2 gap-2">
-                                                            {reply.images.map((img, idx) => (
-                                                                <img 
-                                                                    key={idx} 
-                                                                    src={img} 
-                                                                    alt="attached" 
-                                                                    className="rounded-lg max-w-full h-auto object-cover max-h-64"
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                    <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
-                                                        <span className="text-[10px]">
-                                                            {reply.author?.email?.split('@')[0] || reply.author?.nickname || '익명'}
-                                                        </span>
-                                                        <span className="text-[10px]">
-                                                            {format(new Date(reply.created_at), 'HH:mm')}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                </div>
-
-                                {/* Chat Input */}
-                                <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 p-4">
-                                    {/* Image Preview in Chat View */}
-                                    {imagePreview && (
-                                        <div className="mb-2 relative inline-block">
-                                            <img src={imagePreview} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
-                                            <button
-                                                type="button"
-                                                onClick={removeImage}
-                                                className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-gray-700 transition-colors"
-                                            >
-                                                <X className="w-3 h-3" />
-                                            </button>
-                                        </div>
-                                    )}
-                                    <form onSubmit={handleSendReply} className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            value={newMessage}
-                                            onChange={(e) => setNewMessage(e.target.value)}
-                                            placeholder="메시지 입력..."
-                                            className="flex-1 rounded-full border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 px-4 py-2 text-sm focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
-                                        />
-                                        <input
-                                            type="file"
-                                            ref={fileInputRef}
-                                            onChange={handleFileSelect}
-                                            accept="image/*"
-                                            className="hidden"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => fileInputRef.current?.click()}
-                                            className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0 ${imagePreview ? 'text-rose-500' : 'text-gray-400'}`}
-                                        >
-                                            <ImageIcon className="w-5 h-5" />
-                                        </button>
-                                        <button 
-                                            type="submit"
-                                            disabled={!newMessage.trim() || submitting}
-                                            className="bg-rose-500 text-white p-2 rounded-full hover:bg-rose-600 disabled:opacity-50 transition-colors flex-shrink-0"
-                                        >
-                                            <Send className="w-5 h-5" />
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -762,12 +753,12 @@ export default function FeedbackPage() {
                             </div>
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white">피드백 삭제</h3>
                         </div>
-                        
+
                         <p className="text-gray-600 dark:text-gray-300 mb-8 leading-relaxed text-base pl-1">
-                            정말로 이 피드백을 삭제하시겠습니까?<br/>
+                            정말로 이 피드백을 삭제하시겠습니까?<br />
                             삭제된 내용은 복구할 수 없습니다.
                         </p>
-                        
+
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setDeleteConfirmationId(null)}
