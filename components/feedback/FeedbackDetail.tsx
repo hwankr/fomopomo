@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
-import { User, Send, Image as ImageIcon, Loader2, MoreVertical, Trash2, ArrowLeft, X } from 'lucide-react';
+import { User, Send, Image as ImageIcon, Loader2, MoreVertical, Trash2, ArrowLeft, X, Edit2 } from 'lucide-react';
 import { Feedback } from './FeedbackItem';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
@@ -27,6 +27,8 @@ interface FeedbackDetailProps {
     onReply: (message: string, imageFile: File | null) => Promise<void>;
     onDelete: (id: string) => void;
     onStatusChange: (id: string, status: 'pending' | 'reviewed' | 'implemented') => void;
+    onFeedbackEdit?: (id: string, content: string, category: 'bug' | 'feature' | 'other') => Promise<void>;
+    onReplyDelete?: (replyId: string) => Promise<void>;
     isAdmin: boolean;
 }
 
@@ -38,6 +40,8 @@ export default function FeedbackDetail({
     onReply,
     onDelete,
     onStatusChange,
+    onFeedbackEdit,
+    onReplyDelete,
     isAdmin
 }: FeedbackDetailProps) {
     const [newMessage, setNewMessage] = useState('');
@@ -46,6 +50,46 @@ export default function FeedbackDetail({
     const [submitting, setSubmitting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
+
+    // Feedback edit states
+    const [isEditing, setIsEditing] = useState(false);
+    const [editContent, setEditContent] = useState(feedback.content);
+    const [editCategory, setEditCategory] = useState<'bug' | 'feature' | 'other'>(feedback.category);
+    const [editSubmitting, setEditSubmitting] = useState(false);
+
+    // Reply delete state
+    const [deletingReplyId, setDeletingReplyId] = useState<string | null>(null);
+
+    const canEdit = currentUser?.id === feedback.user_id && feedback.status === 'pending';
+
+    const handleEditSubmit = async () => {
+        if (!editContent.trim() || !onFeedbackEdit) return;
+        setEditSubmitting(true);
+        try {
+            await onFeedbackEdit(feedback.id, editContent, editCategory);
+            setIsEditing(false);
+            toast.success('피드백이 수정되었습니다.');
+        } catch (error) {
+            console.error(error);
+            toast.error('수정 실패');
+        } finally {
+            setEditSubmitting(false);
+        }
+    };
+
+    const handleReplyDelete = async (replyId: string) => {
+        if (!onReplyDelete) return;
+        setDeletingReplyId(replyId);
+        try {
+            await onReplyDelete(replyId);
+            toast.success('댓글이 삭제되었습니다.');
+        } catch (error) {
+            console.error(error);
+            toast.error('삭제 실패');
+        } finally {
+            setDeletingReplyId(null);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -88,10 +132,10 @@ export default function FeedbackDetail({
             <div className="sticky top-0 z-10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-100 dark:border-slate-800 p-4 flex items-center justify-between">
                 <button 
                     onClick={onBack}
-                    className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors flex items-center gap-2 text-gray-700 dark:text-gray-300"
+                    className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors text-gray-700 dark:text-gray-300"
+                    title="목록으로"
                 >
                     <ArrowLeft className="w-5 h-5" />
-                    <span className="font-semibold">목록으로</span>
                 </button>
                 
                 {isAdmin && (
@@ -141,22 +185,82 @@ export default function FeedbackDetail({
                             </div>
                         </div>
                         
-                        {(isAdmin || currentUser?.id === feedback.user_id) && (
-                            <button 
-                                onClick={() => onDelete(feedback.id)}
-                                className="p-2 text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-full transition-colors"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
-                        )}
+                        <div className="flex items-center gap-1">
+                            {canEdit && (
+                                <button 
+                                    onClick={() => setIsEditing(true)}
+                                    className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full transition-colors"
+                                    title="수정"
+                                >
+                                    <Edit2 className="w-4 h-4" />
+                                </button>
+                            )}
+                            {(isAdmin || currentUser?.id === feedback.user_id) && (
+                                <button 
+                                    onClick={() => onDelete(feedback.id)}
+                                    className="p-2 text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-full transition-colors"
+                                    title="삭제"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Post Content */}
-                    <div className="prose dark:prose-invert max-w-none">
-                        <p className="text-base md:text-lg leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-                            {feedback.content}
-                        </p>
-                    </div>
+                    {isEditing ? (
+                        <div className="space-y-4">
+                            {/* Category Selection */}
+                            <div className="flex gap-2">
+                                {(['bug', 'feature', 'other'] as const).map(cat => (
+                                    <button
+                                        key={cat}
+                                        type="button"
+                                        onClick={() => setEditCategory(cat)}
+                                        className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${
+                                            editCategory === cat
+                                                ? 'border-rose-500 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
+                                                : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500'
+                                        }`}
+                                    >
+                                        {cat === 'bug' ? '버그 신고' : cat === 'feature' ? '기능 제안' : '기타 문의'}
+                                    </button>
+                                ))}
+                            </div>
+                            <textarea
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                rows={6}
+                                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-transparent resize-none"
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => {
+                                        setIsEditing(false);
+                                        setEditContent(feedback.content);
+                                        setEditCategory(feedback.category);
+                                    }}
+                                    className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    onClick={handleEditSubmit}
+                                    disabled={!editContent.trim() || editSubmitting}
+                                    className="flex-1 py-2.5 rounded-xl bg-rose-500 text-white font-medium hover:bg-rose-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {editSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                    저장
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="prose dark:prose-invert max-w-none">
+                            <p className="text-base md:text-lg leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+                                {feedback.content}
+                            </p>
+                        </div>
+                    )}
 
                     {/* Image Gallery */}
                     {feedback.images && feedback.images.length > 0 && (
@@ -206,11 +310,26 @@ export default function FeedbackDetail({
                                                         {reply.author?.nickname || '익명'}
                                                     </span>
                                                     {isAuthor && <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-700 text-[10px] font-bold text-gray-500">작성자</span>}
-                                                    {/* In a real app, check role properly. Here relying on context or name */}
                                                 </div>
-                                                <span className="text-xs text-gray-400">
-                                                    {format(new Date(reply.created_at), 'MM.dd HH:mm')}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs text-gray-400">
+                                                        {format(new Date(reply.created_at), 'MM.dd HH:mm')}
+                                                    </span>
+                                                    {(isMe || isAdmin) && (
+                                                        <button
+                                                            onClick={() => handleReplyDelete(reply.id)}
+                                                            disabled={deletingReplyId === reply.id}
+                                                            className="p-1 text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors"
+                                                            title="댓글 삭제"
+                                                        >
+                                                            {deletingReplyId === reply.id ? (
+                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                             <p className="text-gray-700 dark:text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
                                                 {reply.content}

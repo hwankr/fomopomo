@@ -370,11 +370,39 @@ export default function FeedbackPage() {
 
             if (error) throw error;
             setFeedbacks(prev => prev.map(f => f.id === id ? { ...f, status: newStatus } : f));
+            if (selectedFeedback?.id === id) {
+                setSelectedFeedback(prev => prev ? { ...prev, status: newStatus } : null);
+            }
             toast.success('상태가 변경되었습니다');
         } catch (error) {
             console.error(error);
             toast.error('상태 변경 실패');
         }
+    };
+
+    const handleFeedbackEdit = async (id: string, content: string, category: 'bug' | 'feature' | 'other') => {
+        const { error } = await supabase
+            .from('feedbacks')
+            .update({ content, category })
+            .eq('id', id);
+
+        if (error) throw error;
+
+        setFeedbacks(prev => prev.map(f => f.id === id ? { ...f, content, category } : f));
+        if (selectedFeedback?.id === id) {
+            setSelectedFeedback(prev => prev ? { ...prev, content, category } : null);
+        }
+    };
+
+    const handleReplyDelete = async (replyId: string) => {
+        const { error } = await supabase
+            .from('feedback_replies')
+            .delete()
+            .eq('id', replyId);
+
+        if (error) throw error;
+
+        setReplies(prev => prev.filter(r => r.id !== replyId));
     };
 
     const { isDarkMode, toggleDarkMode } = useTheme();
@@ -601,6 +629,8 @@ export default function FeedbackPage() {
                                         onReply={handleSendReply}
                                         onDelete={() => setDeleteConfirmationId(selectedFeedback.id)}
                                         onStatusChange={handleStatusUpdate}
+                                        onFeedbackEdit={handleFeedbackEdit}
+                                        onReplyDelete={handleReplyDelete}
                                         isAdmin={userRole === 'admin'}
                                     />
                                 )}
