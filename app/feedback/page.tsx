@@ -11,6 +11,7 @@ import Navbar from '@/components/Navbar';
 import { useTheme } from '@/components/ThemeProvider';
 import FeedbackItem, { Feedback } from '@/components/feedback/FeedbackItem';
 import ChangelogList from '@/components/feedback/ChangelogList';
+import FeedbackDetail from '@/components/feedback/FeedbackDetail';
 
 interface Reply {
     id: string;
@@ -271,19 +272,20 @@ export default function FeedbackPage() {
         return data.publicUrl;
     };
 
-    const handleSendReply = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newMessage.trim() || !session || !selectedFeedback) return;
-        setSubmitting(true);
-
+    const handleSendReply = async (message: string, file: File | null) => {
+        if (!message.trim() || !session || !selectedFeedback) return;
+        
+        // Optimistic Update
         const tempId = 'temp-' + Date.now();
+        const imagePreviewUrl = file ? URL.createObjectURL(file) : undefined;
+        
         const optimisticReply: Reply | any = {
             id: tempId,
             feedback_id: selectedFeedback.id,
             user_id: session.user.id,
-            content: newMessage,
+            content: message,
             created_at: new Date().toISOString(),
-            images: imagePreview ? [imagePreview] : [],
+            images: imagePreviewUrl ? [imagePreviewUrl] : [],
             author: {
                 nickname: session.user.user_metadata?.nickname || '나',
                 email: session.user.email
@@ -291,15 +293,11 @@ export default function FeedbackPage() {
         };
 
         setReplies(prev => [...prev, optimisticReply]);
-        const currentMessage = newMessage;
-        setNewMessage('');
-        const currentImageFile = imageFile;
-        removeImage();
 
         try {
             let imageUrls: string[] = [];
-            if (currentImageFile) {
-                const url = await uploadImage(currentImageFile);
+            if (file) {
+                const url = await uploadImage(file);
                 imageUrls.push(url);
             }
 
@@ -309,7 +307,7 @@ export default function FeedbackPage() {
                     {
                         feedback_id: selectedFeedback.id,
                         user_id: session.user.id,
-                        content: currentMessage,
+                        content: message,
                         images: imageUrls
                     }
                 ])
@@ -319,14 +317,12 @@ export default function FeedbackPage() {
             if (error) throw error;
 
             setReplies(prev => prev.map(r => r.id === tempId ? { ...data, author: optimisticReply.author } : r));
+            if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); // Cleanup
 
         } catch (error) {
             console.error('Error sending reply:', error);
             toast.error('메시지 전송 실패');
             setReplies(prev => prev.filter(r => r.id !== tempId));
-            setNewMessage(currentMessage);
-        } finally {
-            setSubmitting(false);
         }
     };
 
@@ -597,145 +593,16 @@ export default function FeedbackPage() {
                                 )}
 
                                 {view === 'chat' && selectedFeedback && (
-                                    <div className="flex flex-col min-h-full">
-                                        <div className="flex-1 p-4 space-y-6">
-                                            {/* Initial Feedback Message */}
-                                            {(() => {
-                                                const isMe = isMyMessage(selectedFeedback.user_id, session.user.id);
-                                                return (
-                                                    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                                        {!isMe && (
-                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
-                                                                <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                                                            </div>
-                                                        )}
-                                                        <div className={`
-                                                            rounded-2xl p-3 max-w-[80%] shadow-sm
-                                                            ${isMe
-                                                                ? 'bg-rose-500 text-white rounded-tr-sm'
-                                                                : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
-                                                            }
-                                                        `}>
-                                                            <div className="text-xs opacity-70 mb-1 font-bold">
-                                                                {selectedFeedback.category === 'bug' ? 'BUG' : selectedFeedback.category === 'feature' ? 'FEATURE' : 'OTHER'}
-                                                            </div>
-                                                            <p className="whitespace-pre-wrap">{selectedFeedback.content}</p>
-                                                            {selectedFeedback.images && selectedFeedback.images.length > 0 && (
-                                                                <div className="mt-2 grid grid-cols-2 gap-2">
-                                                                    {selectedFeedback.images.map((img, idx) => (
-                                                                        <img
-                                                                            key={idx}
-                                                                            src={img}
-                                                                            alt="attached"
-                                                                            className="rounded-lg max-w-full h-auto object-cover max-h-64"
-                                                                        />
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                            <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
-                                                                <span className="text-[10px]">
-                                                                    {selectedFeedback.author?.email?.split('@')[0] || selectedFeedback.author?.nickname || '익명'}
-                                                                </span>
-                                                                <span className="text-[10px]">
-                                                                    {format(new Date(selectedFeedback.created_at), 'HH:mm')}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()}
-
-                                            {/* Replies */}
-                                            {replies.map((reply) => {
-                                                const isMe = isMyMessage(reply.user_id, session.user.id);
-                                                return (
-                                                    <div key={reply.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                                        {!isMe && (
-                                                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center mr-2 flex-shrink-0">
-                                                                <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                                                            </div>
-                                                        )}
-                                                        <div className={`
-                                                            rounded-2xl p-3 max-w-[80%] shadow-sm
-                                                            ${isMe
-                                                                ? 'bg-rose-500 text-white rounded-tr-sm'
-                                                                : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-tl-sm border border-gray-100 dark:border-slate-700'
-                                                            }
-                                                        `}>
-                                                            <p className="whitespace-pre-wrap text-sm md:text-base">{reply.content}</p>
-                                                            {reply.images && reply.images.length > 0 && (
-                                                                <div className="mt-2 grid grid-cols-2 gap-2">
-                                                                    {reply.images.map((img, idx) => (
-                                                                        <img
-                                                                            key={idx}
-                                                                            src={img}
-                                                                            alt="attached"
-                                                                            className="rounded-lg max-w-full h-auto object-cover max-h-64"
-                                                                        />
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                            <div className={`flex items-center justify-between mt-1 gap-4 ${isMe ? 'opacity-70' : 'text-gray-400'}`}>
-                                                                <span className="text-[10px]">
-                                                                    {reply.author?.email?.split('@')[0] || reply.author?.nickname || '익명'}
-                                                                </span>
-                                                                <span className="text-[10px]">
-                                                                    {format(new Date(reply.created_at), 'HH:mm')}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-
-                                        </div>
-
-                                        {/* Chat Input */}
-                                        <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 p-4">
-                                            {imagePreview && (
-                                                <div className="mb-2 relative inline-block">
-                                                    <img src={imagePreview} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-200" />
-                                                    <button
-                                                        type="button"
-                                                        onClick={removeImage}
-                                                        className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-gray-700 transition-colors"
-                                                    >
-                                                        <X className="w-3 h-3" />
-                                                    </button>
-                                                </div>
-                                            )}
-                                            <form onSubmit={handleSendReply} className="flex gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={newMessage}
-                                                    onChange={(e) => setNewMessage(e.target.value)}
-                                                    placeholder="메시지 입력..."
-                                                    className="flex-1 rounded-full border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 px-4 py-2 text-sm focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
-                                                />
-                                                <input
-                                                    type="file"
-                                                    ref={fileInputRef}
-                                                    onChange={handleFileSelect}
-                                                    accept="image/*"
-                                                    className="hidden"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={() => fileInputRef.current?.click()}
-                                                    className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0 ${imagePreview ? 'text-rose-500' : 'text-gray-400'}`}
-                                                >
-                                                    <ImageIcon className="w-5 h-5" />
-                                                </button>
-                                                <button
-                                                    type="submit"
-                                                    disabled={!newMessage.trim() || submitting}
-                                                    className="bg-rose-500 text-white p-2 rounded-full hover:bg-rose-600 disabled:opacity-50 transition-colors flex-shrink-0"
-                                                >
-                                                    <Send className="w-5 h-5" />
-                                                </button>
-                                            </form>
-                                        </div>
-                                    </div>
+                                    <FeedbackDetail
+                                        feedback={selectedFeedback}
+                                        replies={replies}
+                                        currentUser={session?.user}
+                                        onBack={() => setView('list')}
+                                        onReply={handleSendReply}
+                                        onDelete={() => setDeleteConfirmationId(selectedFeedback.id)}
+                                        onStatusChange={handleStatusUpdate}
+                                        isAdmin={userRole === 'admin'}
+                                    />
                                 )}
                             </>
                         )}
