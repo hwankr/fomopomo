@@ -33,7 +33,7 @@ const isMyMessage = (msgUserId: string | null, currentUserId: string) => {
 
 export default function FeedbackPage() {
     const [view, setView] = useState<'list' | 'chat' | 'new'>('list');
-    const [activeTab, setActiveTab] = useState<'feedback' | 'changelog'>('feedback');
+    const [activeTab, setActiveTab] = useState<'feedback' | 'changelog'>('changelog');
     const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
     const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null);
     const [replies, setReplies] = useState<Reply[]>([]);
@@ -443,16 +443,16 @@ export default function FeedbackPage() {
                                     {/* Tabs */}
                                     <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
                                         <button
-                                            onClick={() => setActiveTab('feedback')}
-                                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700'}`}
-                                        >
-                                            피드백
-                                        </button>
-                                        <button
                                             onClick={() => setActiveTab('changelog')}
                                             className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'changelog' ? 'bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700'}`}
                                         >
                                             변경 내역
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('feedback')}
+                                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700'}`}
+                                        >
+                                            피드백
                                         </button>
                                     </div>
                                 </div>
