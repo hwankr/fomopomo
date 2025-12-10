@@ -276,7 +276,7 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                                                 {format(new Date(log.created_at), 'yyyy.MM.dd')}
                                             </span>
                                         </div>
-                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                        <h3 className="text-xl font-extrabold bg-gradient-to-r from-rose-500 to-orange-500 bg-clip-text text-transparent">
                                             {log.title}
                                         </h3>
                                     </div>
