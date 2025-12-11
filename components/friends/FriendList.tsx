@@ -6,6 +6,7 @@ import { Session } from '@supabase/supabase-js';
 import { Pencil, Trash2, Check, X, AlertTriangle, Bell, BellOff } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import MemberReportModal from '../MemberReportModal';
+import { FriendStatusBadge } from './FriendStatusBadge';
 
 
 interface FriendListProps {
@@ -17,6 +18,7 @@ interface FriendProfile {
   status: 'online' | 'offline' | 'studying' | 'paused' | null;
   current_task: string | null;
   last_active_at: string | null;
+  study_start_time: string | null;
 }
 
 interface Friendship {
@@ -61,6 +63,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                     status: payload.new.status,
                     current_task: payload.new.current_task,
                     last_active_at: payload.new.last_active_at,
+                    study_start_time: payload.new.study_start_time,
                   },
                 };
               }
@@ -90,7 +93,8 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
           friend:friend_id (
             status,
             current_task,
-            last_active_at
+            last_active_at,
+            study_start_time
           )
         `)
         .eq('user_id', session.user.id)
@@ -182,39 +186,6 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
     }
   };
 
-  const getStatusBadge = (status: string | null, task: string | null) => {
-    switch (status) {
-      case 'studying':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-            공부 중{task ? `: ${task}` : ''}
-          </span>
-        );
-      case 'paused':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            일시정지
-          </span>
-        );
-      case 'online':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            온라인
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-            오프라인
-          </span>
-        );
-    }
-  };
-
   if (loading) return <div className="text-gray-500">친구 목록을 불러오는 중...</div>;
 
   if (friends.length === 0) {
@@ -297,7 +268,11 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                     >
                       {friend.is_notification_enabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
                     </button>
-                    {getStatusBadge(friend.friend?.status, friend.friend?.current_task)}
+                    <FriendStatusBadge
+                      status={friend.friend?.status || null}
+                      task={friend.friend?.current_task || null}
+                      studyStartTime={friend.friend?.study_start_time || null}
+                    />
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
