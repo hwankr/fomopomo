@@ -39,10 +39,36 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
   const [editName, setEditName] = useState('');
   const [deletingFriend, setDeletingFriend] = useState<{ id: string; name: string; friendId: string } | null>(null);
   const [selectedFriendForReport, setSelectedFriendForReport] = useState<{ id: string; name: string } | null>(null);
+  const [studyTimes, setStudyTimes] = useState<Record<string, number>>({});
 
+  const fetchStudyTimes = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      const { data, error } = await supabase.rpc('get_friends_study_time', {
+        p_user_id: session.user.id,
+        p_date: today
+      });
+
+      if (error) {
+        console.error('Error fetching friends study time:', error);
+        return;
+      }
+
+      if (data) {
+        const timeMap: Record<string, number> = {};
+        data.forEach((item: { friend_id: string; total_seconds: number }) => {
+          timeMap[item.friend_id] = item.total_seconds;
+        });
+        setStudyTimes(timeMap);
+      }
+    } catch (error) {
+      console.error('Error fetching friends study time:', error);
+    }
+  };
 
   useEffect(() => {
     fetchFriends();
+    fetchStudyTimes();
 
     const channel = supabase
       .channel('friend-list-updates')
@@ -276,6 +302,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                       task={friend.friend?.current_task || null}
                       studyStartTime={friend.friend?.study_start_time || null}
                       totalStopwatchTime={friend.friend?.total_stopwatch_time || null}
+                      dailyStudyTime={studyTimes[friend.friend_id] || 0}
                     />
                     <button
                       onClick={(e) => {
