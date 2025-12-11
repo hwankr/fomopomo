@@ -19,6 +19,7 @@ interface FriendProfile {
   current_task: string | null;
   last_active_at: string | null;
   study_start_time: string | null;
+  total_stopwatch_time: number | null;
 }
 
 interface Friendship {
@@ -64,6 +65,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                     current_task: payload.new.current_task,
                     last_active_at: payload.new.last_active_at,
                     study_start_time: payload.new.study_start_time,
+                    total_stopwatch_time: payload.new.total_stopwatch_time,
                   },
                 };
               }
@@ -94,7 +96,8 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
             status,
             current_task,
             last_active_at,
-            study_start_time
+            study_start_time,
+            total_stopwatch_time
           )
         `)
         .eq('user_id', session.user.id)
@@ -272,6 +275,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
                       status={friend.friend?.status || null}
                       task={friend.friend?.current_task || null}
                       studyStartTime={friend.friend?.study_start_time || null}
+                      totalStopwatchTime={friend.friend?.total_stopwatch_time || null}
                     />
                     <button
                       onClick={(e) => {

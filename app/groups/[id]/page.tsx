@@ -20,6 +20,7 @@ interface Member {
         last_active_at: string;
         avatar_url?: string;
         study_start_time: string | null;
+        total_stopwatch_time: number | null;
     };
 }
 
@@ -86,7 +87,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                         status,
                         current_task,
                         last_active_at,
-                        study_start_time
+                        study_start_time,
+                        total_stopwatch_time
                     )
                 `)
                 .eq('group_id', id);

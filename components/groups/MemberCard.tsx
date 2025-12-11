@@ -15,6 +15,7 @@ interface MemberCardProps {
             current_task: string | null;
             last_active_at: string;
             study_start_time: string | null;
+            total_stopwatch_time: number | null;
         };
     };
     rank: number;
@@ -58,6 +59,8 @@ export default function MemberCard({
     onSelectForReport,
 }: MemberCardProps) {
     const isStudying = member.profiles.status === 'studying';
+    const isPaused = member.profiles.status === 'paused';
+    const isActiveStudy = isStudying || isPaused; // 공부 중 또는 일시정지 상태
     const displayName = member.nickname || (member.profiles.email ? member.profiles.email.split('@')[0] : '멤버');
 
     // Real-time study time: saved time + live elapsed
@@ -67,8 +70,13 @@ export default function MemberCard({
         true // include saved time
     );
 
-    // Use live time when studying, otherwise use saved time
-    const displayStudyTime = isStudying ? liveStudyTime : savedStudyTime;
+    // 일시정지 중에는 total_stopwatch_time + 저장된 시간을 표시
+    const pausedStudyTime = isPaused
+        ? savedStudyTime + (member.profiles.total_stopwatch_time || 0)
+        : 0;
+
+    // Use live time when studying, paused time when paused, otherwise saved time
+    const displayStudyTime = isStudying ? liveStudyTime : (isPaused ? pausedStudyTime : savedStudyTime);
 
     let rankBadge = null;
     if (rank === 1) {
@@ -86,14 +94,16 @@ export default function MemberCard({
             onClick={onSelectForReport}
             className={`bg-white dark:bg-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between shadow-sm border transition-all cursor-pointer hover:border-rose-200 dark:hover:border-rose-800 gap-4 sm:gap-0 ${isStudying
                 ? 'border-rose-200 dark:border-rose-900 ring-1 ring-rose-100 dark:ring-rose-900/30'
-                : 'border-gray-100 dark:border-slate-700'
+                : isPaused
+                    ? 'border-amber-200 dark:border-amber-900 ring-1 ring-amber-100 dark:ring-amber-900/30'
+                    : 'border-gray-100 dark:border-slate-700'
                 }`}
         >
             <div className="flex items-center gap-4 w-full sm:w-auto">
                 <div className="flex items-center justify-center w-8 flex-shrink-0">
                     {rankBadge}
                 </div>
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white flex-shrink-0 ${isStudying ? 'bg-rose-500 animate-pulse' : 'bg-gray-300 dark:bg-slate-600'
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white flex-shrink-0 ${isStudying ? 'bg-rose-500 animate-pulse' : isPaused ? 'bg-amber-500' : 'bg-gray-300 dark:bg-slate-600'
                     }`}>
                     {displayName[0].toUpperCase()}
                 </div>
@@ -151,6 +161,10 @@ export default function MemberCard({
                             <span className="text-rose-500 font-medium">
                                 🔥 공부 중 {member.profiles.current_task ? `: ${member.profiles.current_task}` : ''}
                             </span>
+                        ) : isPaused ? (
+                            <span className="text-amber-500 font-medium">
+                                ⏸️ 일시정지 {member.profiles.current_task ? `: ${member.profiles.current_task}` : ''}
+                            </span>
                         ) : (
                             <span>
                                 {member.profiles.status === 'online' ? '온라인' : '오프라인'} • 마지막 활동 {formatDistanceToNow(new Date(member.profiles.last_active_at), { addSuffix: true })}
@@ -163,15 +177,16 @@ export default function MemberCard({
             <div className="flex items-center justify-end gap-3 w-full sm:w-auto pl-16 sm:pl-0">
                 <div className="text-right">
                     <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5 whitespace-nowrap">오늘 공부 시간</p>
-                    <p className={`text-sm font-bold ${isStudying ? 'text-rose-600 dark:text-rose-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                    <p className={`text-sm font-bold ${isActiveStudy ? 'text-rose-600 dark:text-rose-400' : 'text-gray-700 dark:text-gray-300'}`}>
                         {formatStudyTime(displayStudyTime)}
                         {isStudying && <span className="ml-1 text-xs">🔴</span>}
+                        {isPaused && <span className="ml-1 text-xs">⏸️</span>}
                     </p>
                 </div>
 
-                {isStudying && (
-                    <div className="inline-flex items-center px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-sm font-medium whitespace-nowrap">
-                        집중 중
+                {isActiveStudy && (
+                    <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium whitespace-nowrap ${isStudying ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'}`}>
+                        {isStudying ? '집중 중' : '일시정지'}
                     </div>
                 )}
 
