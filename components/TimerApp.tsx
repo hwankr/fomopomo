@@ -302,16 +302,22 @@ export default function TimerApp({
 
     // ✨ Push Notification Trigger - Server-based for iOS compatibility
     const sendServerNotification = async () => {
+      console.log('[sendServerNotification] Starting...');
       try {
         const { data: { session } } = await (await import('@/lib/supabase')).supabase.auth.getSession();
-        if (!session?.access_token) return;
+        console.log('[sendServerNotification] Session:', !!session);
+        if (!session?.access_token) {
+          console.log('[sendServerNotification] No access token, returning');
+          return;
+        }
 
         const title = timerMode === 'focus' ? '집중 시간 종료! ☕' : '휴식 종료! 다시 집중해볼까요? 🔥';
         const body = timerMode === 'focus'
           ? '수고하셨습니다. 잠시 머리를 식히세요.'
           : '휴식이 끝났습니다. 목표를 향해 다시 달려봐요!';
 
-        await fetch('/api/self-notification', {
+        console.log('[sendServerNotification] Sending to /api/self-notification');
+        const response = await fetch('/api/self-notification', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -323,6 +329,7 @@ export default function TimerApp({
             body,
           }),
         });
+        console.log('[sendServerNotification] Response status:', response.status);
       } catch (error) {
         console.error('Server notification failed:', error);
         // Fallback to local notification

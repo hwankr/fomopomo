@@ -39,7 +39,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
             const registration = await navigator.serviceWorker.ready;
             const subscription = await registration.pushManager.getSubscription();
             setIsSubscribed(!!subscription);
-            
+
             if (subscription) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
@@ -50,7 +50,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                     }, { onConflict: 'endpoint' });
                 }
             }
-            
+
             addLog(subscription ? 'Subscription active' : 'No subscription found');
         } catch (e) {
             addLog(`Error checking subscription: ${e}`);
@@ -79,7 +79,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                 setPermission(currentPermission);
                 addLog(`Current permission: ${currentPermission}`);
                 await checkSubscription();
-                
+
                 if (currentPermission === 'granted') {
                     subscribeUser(false);
                 }
@@ -89,26 +89,33 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
         registerSwAndCheckPermission();
     }, []);
 
-    const subscribeUser = async (showToast = true) => {
+    const subscribeUser = async (showToast = true, forceRefresh = false) => {
         if (!('serviceWorker' in navigator)) return;
 
         try {
             addLog('Starting subscription...');
             const registration = await navigator.serviceWorker.ready;
-            
-            // Unsubscribe existing to force refresh if needed
-            const existingSub = await registration.pushManager.getSubscription();
-            if (existingSub) {
-                addLog('Unsubscribing existing...');
-                await existingSub.unsubscribe();
+
+            // Check for existing subscription first
+            let subscription = await registration.pushManager.getSubscription();
+
+            // Only unsubscribe and resubscribe if explicitly requested (forceRefresh)
+            if (forceRefresh && subscription) {
+                addLog('Force refresh: Unsubscribing existing...');
+                await subscription.unsubscribe();
+                subscription = null;
             }
 
-            const subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-            });
-
-            addLog('Got push subscription');
+            // Create new subscription only if none exists
+            if (!subscription) {
+                subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+                });
+                addLog('New subscription created');
+            } else {
+                addLog('Reusing existing subscription');
+            }
 
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
@@ -116,11 +123,16 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                 return;
             }
 
-            const { error } = await supabase.from('push_subscriptions').upsert({
+            // Upsert by user_id instead of endpoint to prevent duplicates
+            // First, delete any existing subscriptions for this user
+            await supabase.from('push_subscriptions').delete().eq('user_id', user.id);
+
+            // Then insert the current subscription
+            const { error } = await supabase.from('push_subscriptions').insert({
                 user_id: user.id,
                 endpoint: subscription.endpoint,
                 keys: subscription.toJSON().keys,
-            }, { onConflict: 'endpoint' });
+            });
 
             if (error) {
                 addLog(`DB Error: ${JSON.stringify(error)}`);
@@ -196,7 +208,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
                     <span>🔔</span>
                     <span>알림 켜기</span>
                 </button>
-                <button 
+                <button
                     onClick={handleDismiss}
                     className="bg-white text-gray-400 hover:text-gray-600 rounded-full p-1 shadow-md w-6 h-6 flex items-center justify-center text-xs"
                     aria-label="닫기"
@@ -212,17 +224,16 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
         <div className="space-y-3">
             <div className="flex justify-between items-center">
                 <span className="text-gray-600 text-sm font-medium">알림 권한 상태</span>
-                <span className={`text-xs font-bold px-2 py-1 rounded ${
-                    permission === 'granted' ? 'bg-green-100 text-green-600' : 
+                <span className={`text-xs font-bold px-2 py-1 rounded ${permission === 'granted' ? 'bg-green-100 text-green-600' :
                     permission === 'denied' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
-                }`}>
-                    {permission === 'granted' ? '허용됨' : 
-                     permission === 'denied' ? '거부됨' : '미설정'}
+                    }`}>
+                    {permission === 'granted' ? '허용됨' :
+                        permission === 'denied' ? '거부됨' : '미설정'}
                 </span>
             </div>
 
             {permission !== 'granted' && (
-                 <button 
+                <button
                     onClick={requestPermission}
                     className="w-full py-2 bg-rose-500 text-white rounded-lg text-sm font-bold hover:bg-rose-600 transition-colors"
                 >
@@ -232,13 +243,13 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
 
             {permission === 'granted' && (
                 <div className="grid grid-cols-2 gap-2">
-                    <button 
-                        onClick={() => subscribeUser(true)}
+                    <button
+                        onClick={() => subscribeUser(true, true)}
                         className="py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors"
                     >
                         🔄 연결 새로고침
                     </button>
-                    <button 
+                    <button
                         onClick={sendTestNotification}
                         className="py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
                     >
@@ -249,13 +260,13 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
 
             {/* 디버그 로그 토글 (옵션) */}
             <div className="pt-2">
-                <button 
-                    onClick={() => setIsOpen(!isOpen)} 
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
                     className="text-[10px] text-gray-400 underline hover:text-gray-600"
                 >
                     {isOpen ? '디버그 로그 숨기기' : '디버그 로그 보기'}
                 </button>
-                
+
                 {isOpen && (
                     <div className="mt-2 p-2 bg-gray-900 text-green-400 rounded text-[10px] font-mono h-32 overflow-y-auto">
                         {debugLog.map((log, i) => (
