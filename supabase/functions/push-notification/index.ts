@@ -29,15 +29,23 @@ Deno.serve(async (req) => {
         const { record, old_record } = payload;
 
         // Check triggers
-        // 1. Profiles UPDATE: status changed to 'studying'
+        // 1. Profiles UPDATE: status changed to 'studying' AND timer_mode is 'focus'
+        // Only send friend notifications when starting a Pomodoro (focus session), not breaks
         let isStudyStart = false;
         if (record.status === 'studying') {
-            // If it's an update, check if status actually changed
-            if (!old_record || old_record.status !== 'studying') {
-                isStudyStart = true;
-                await supabase.from('debug_logs').insert({ message: 'Status changed to studying', details: { record, old_record } });
+            // Check if this is a focus session (not a break)
+            const isFocusMode = record.timer_mode === 'focus' || !record.timer_mode;
+
+            if (isFocusMode) {
+                // If it's an update, check if status actually changed
+                if (!old_record || old_record.status !== 'studying') {
+                    isStudyStart = true;
+                    await supabase.from('debug_logs').insert({ message: 'Status changed to studying (focus mode)', details: { record, old_record } });
+                } else {
+                    await supabase.from('debug_logs').insert({ message: 'Status already studying', details: { record, old_record } });
+                }
             } else {
-                await supabase.from('debug_logs').insert({ message: 'Status already studying', details: { record, old_record } });
+                await supabase.from('debug_logs').insert({ message: 'Break mode started, skipping friend notification', details: { timer_mode: record.timer_mode } });
             }
         } else {
             await supabase.from('debug_logs').insert({ message: 'Status not studying', details: { status: record.status } });
