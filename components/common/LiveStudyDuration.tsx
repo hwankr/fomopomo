@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getDayStart } from '@/lib/dateUtils';
 
 interface LiveStudyDurationProps {
     /** ISO string of when study started */
@@ -40,13 +41,12 @@ export function LiveStudyDuration({
             const now = Date.now();
             const startTime = new Date(studyStartTime).getTime();
 
-            // Handle cross-midnight: only count time from today
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            const todayStartMs = todayStart.getTime();
+            // Handle day reset at 5 AM: only count time from start of study day
+            const dayStart = getDayStart();
+            const dayStartMs = dayStart.getTime();
 
-            // If study started before today, count from midnight
-            const effectiveStart = Math.max(startTime, todayStartMs);
+            // If study started before today's reset time, count from reset time
+            const effectiveStart = Math.max(startTime, dayStartMs);
 
             // Calculate live elapsed seconds
             let liveSeconds = Math.floor((now - effectiveStart) / 1000);
@@ -118,11 +118,10 @@ export function useLiveStudyDuration(
             const now = Date.now();
             const startTime = new Date(studyStartTime).getTime();
 
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            const todayStartMs = todayStart.getTime();
+            const dayStart = getDayStart();
+            const dayStartMs = dayStart.getTime();
 
-            const effectiveStart = Math.max(startTime, todayStartMs);
+            const effectiveStart = Math.max(startTime, dayStartMs);
             let liveSeconds = Math.floor((now - effectiveStart) / 1000);
             if (liveSeconds < 0) liveSeconds = 0;
 

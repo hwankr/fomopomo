@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 import { X } from 'lucide-react';
 
 interface MemberReportModalProps {
@@ -39,10 +40,9 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
         setLoading(true);
 
         try {
-            // Get today's start and end time
-            const today = new Date();
-            const start = new Date(today.setHours(0, 0, 0, 0)).toISOString();
-            const end = new Date(today.setHours(23, 59, 59, 999)).toISOString();
+            // Get today's start and end time (based on 5 AM reset)
+            const start = getDayStart().toISOString();
+            const end = getDayEnd().toISOString();
 
             const { data: sessions, error } = await supabase
                 .from('study_sessions')

@@ -21,6 +21,7 @@ import {
   addDays,
   format,
 } from 'date-fns';
+import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -126,18 +127,13 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
       );
     }
 
+    // Get today's sessions based on 5 AM reset time
     const todaySessions = await supabase
       .from('study_sessions')
       .select('duration')
       .eq('user_id', user.id)
-      .gte(
-        'created_at',
-        new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
-      )
-      .lte(
-        'created_at',
-        new Date(new Date().setHours(23, 59, 59, 999)).toISOString()
-      );
+      .gte('created_at', getDayStart().toISOString())
+      .lte('created_at', getDayEnd().toISOString());
 
     const todaySeconds =
       todaySessions.data?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
@@ -338,25 +334,22 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
                 <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-lg flex">
                   <button
                     onClick={() => setViewMode('week')}
-                    className={`${tabBase} ${
-                      viewMode === 'week' ? tabActive : tabInactive
-                    }`}
+                    className={`${tabBase} ${viewMode === 'week' ? tabActive : tabInactive
+                      }`}
                   >
                     Week
                   </button>
                   <button
                     onClick={() => setViewMode('month')}
-                    className={`${tabBase} ${
-                      viewMode === 'month' ? tabActive : tabInactive
-                    }`}
+                    className={`${tabBase} ${viewMode === 'month' ? tabActive : tabInactive
+                      }`}
                   >
                     Month
                   </button>
                   <button
                     onClick={() => setViewMode('year')}
-                    className={`${tabBase} ${
-                      viewMode === 'year' ? tabActive : tabInactive
-                    }`}
+                    className={`${tabBase} ${viewMode === 'year' ? tabActive : tabInactive
+                      }`}
                   >
                     Year
                   </button>

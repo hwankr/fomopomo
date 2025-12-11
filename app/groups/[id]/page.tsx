@@ -2,6 +2,7 @@
 
 import { useEffect, useState, use } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 import { useRouter } from 'next/navigation';
 import { toast, Toaster } from 'react-hot-toast';
 import MemberReportModal from '@/components/MemberReportModal';
@@ -99,10 +100,9 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             setMembers(membersData || []);
 
             // 3. Fetch Study Times
-            // Get today's start and end time in local timezone
-            const now = new Date();
-            const start = new Date(now.setHours(0, 0, 0, 0)).toISOString();
-            const end = new Date(now.setHours(23, 59, 59, 999)).toISOString();
+            // Get today's start and end time (based on 5 AM reset)
+            const start = getDayStart().toISOString();
+            const end = getDayEnd().toISOString();
 
             const { data: studyTimeData, error: studyTimeError } = await supabase
                 .rpc('get_group_study_time_v3', {

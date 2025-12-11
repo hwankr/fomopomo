@@ -11,6 +11,7 @@ import Timeline from './Timeline';
 import WeeklyPlan from './WeeklyPlan';
 import MonthlyPlan from './MonthlyPlan';
 import { supabase } from '@/lib/supabase';
+import { getCalendarDayStart, getCalendarDayEnd } from '@/lib/dateUtils';
 import Link from 'next/link';
 import { ArrowLeft, ChevronUp, ChevronDown } from 'lucide-react';
 import TimerStatus from '../TimerStatus';
@@ -31,10 +32,9 @@ export default function Dashboard({ session }: DashboardProps) {
     if (!session) return;
 
     const fetchFocusTime = async () => {
-      const start = new Date(selectedDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(selectedDate);
-      end.setHours(23, 59, 59, 999);
+      // Use 5 AM as day boundary for the selected date
+      const start = getCalendarDayStart(selectedDate);
+      const end = getCalendarDayEnd(selectedDate);
 
       const { data } = await supabase
         .from('study_sessions')
@@ -136,7 +136,7 @@ export default function Dashboard({ session }: DashboardProps) {
               "order-3 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col transition-all duration-300",
               isDailyTasksExpanded ? "min-h-[600px]" : "min-h-0"
             )}>
-              <div 
+              <div
                 className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center cursor-pointer lg:cursor-default"
                 onClick={() => setIsDailyTasksExpanded(!isDailyTasksExpanded)}
               >
