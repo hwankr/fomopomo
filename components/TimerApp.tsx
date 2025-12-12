@@ -624,23 +624,23 @@ export default function TimerApp({
               // Sync Pomodoro Timer
               const mode = (data.timer_mode as any) || 'focus';
               const duration = data.timer_duration || (mode === 'focus' ? settings.pomoTime * 60 : mode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60);
-              
+
               const remaining = duration - elapsed;
               if (remaining > 0) {
-                 setTab('timer');
-                 setTimerMode(mode);
-                 setTimeLeft(remaining);
-                 setIsRunning(true);
-                 endTimeRef.current = now + (remaining * 1000);
-                 
-                 // If we switched modes, we might need to reset logged seconds for consistency if fresh start
-                 if (mode === 'focus' && elapsed === 0) setFocusLoggedSeconds(0);
-                 // If resuming, we technically should know how much was logged? 
-                 // We don't track "logged seconds" in profiles, only elapsed. 
-                 // So we assume elapsed == logged? 
-                 if (mode === 'focus') setFocusLoggedSeconds(elapsed);
-                 
-                 toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
+                setTab('timer');
+                setTimerMode(mode);
+                setTimeLeft(remaining);
+                setIsRunning(true);
+                endTimeRef.current = now + (remaining * 1000);
+
+                // If we switched modes, we might need to reset logged seconds for consistency if fresh start
+                if (mode === 'focus' && elapsed === 0) setFocusLoggedSeconds(0);
+                // If resuming, we technically should know how much was logged? 
+                // We don't track "logged seconds" in profiles, only elapsed. 
+                // So we assume elapsed == logged? 
+                if (mode === 'focus') setFocusLoggedSeconds(elapsed);
+
+                toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
               }
             } else {
               // Sync Stopwatch (Default)
@@ -648,39 +648,79 @@ export default function TimerApp({
               setStopwatchTime(elapsed);
               setIsStopwatchRunning(true);
               stopwatchStartTimeRef.current = startTime;
-              currentIntervalStartRef.current = now; 
-              
+              currentIntervalStartRef.current = now;
+
               setIntervals([]);
               toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
             }
           }
         } else if (data?.total_stopwatch_time && data.total_stopwatch_time > 0) {
-          // Found paused session
+          // Found paused session - compare with local storage to prevent data loss
+          const savedState = localStorage.getItem("fomopomo_full_state");
+          let localElapsed = 0;
+          let localTimerElapsed = 0;
+
+          if (savedState) {
+            try {
+              const parsed = JSON.parse(savedState);
+              localElapsed = parsed.stopwatch?.elapsed || 0;
+              // For timer, calculate elapsed from timeLeft and duration
+              if (parsed.timer?.mode && parsed.timer?.timeLeft !== undefined) {
+                const localMode = parsed.timer.mode;
+                const localTimeLeft = parsed.timer.timeLeft;
+                const localDuration = localMode === 'focus'
+                  ? settings.pomoTime * 60
+                  : localMode === 'shortBreak'
+                    ? settings.shortBreak * 60
+                    : settings.longBreak * 60;
+                localTimerElapsed = localDuration - localTimeLeft;
+              }
+            } catch (e) {
+              console.error('Error parsing local state for sync comparison', e);
+            }
+          }
+
           if (data.timer_type === 'timer') {
-             const mode = (data.timer_mode as any) || 'focus';
-             const duration = data.timer_duration || 0; 
-             const elapsed = data.total_stopwatch_time; // Reusing this column for elapsed
-             const remaining = duration - elapsed;
-             
-             if (remaining > 0) {
-               setTab('timer');
-               setTimerMode(mode);
-               setTimeLeft(remaining);
-               setIsRunning(false);
-               if (mode === 'focus') setFocusLoggedSeconds(elapsed);
-             }
+            const mode = (data.timer_mode as any) || 'focus';
+            const duration = data.timer_duration || 0;
+            const serverElapsed = data.total_stopwatch_time; // Reusing this column for elapsed
+
+            // Use the larger elapsed time to prevent data loss
+            const finalElapsed = Math.max(serverElapsed, localTimerElapsed);
+
+            if (localTimerElapsed > serverElapsed) {
+              console.log(`[Sync] 로컬 타이머 시간(${localTimerElapsed}s)이 DB(${serverElapsed}s)보다 큼. 로컬 값 유지.`);
+              // Already restored from local storage, skip server sync
+            } else {
+              const remaining = duration - finalElapsed;
+              if (remaining > 0) {
+                setTab('timer');
+                setTimerMode(mode);
+                setTimeLeft(remaining);
+                setIsRunning(false);
+                if (mode === 'focus') setFocusLoggedSeconds(finalElapsed);
+              }
+            }
           } else {
-             setTab('stopwatch');
-             setStopwatchTime(data.total_stopwatch_time);
-             setIsStopwatchRunning(false);
-             setIntervals([]);
+            // Use the larger time to prevent data loss
+            const serverTime = data.total_stopwatch_time;
+
+            if (localElapsed > serverTime) {
+              console.log(`[Sync] 로컬 스톱워치 시간(${localElapsed}s)이 DB(${serverTime}s)보다 큼. 로컬 값 유지.`);
+              // Already restored from local storage, skip server sync
+            } else {
+              setTab('stopwatch');
+              setStopwatchTime(serverTime);
+              setIsStopwatchRunning(false);
+              setIntervals([]);
+            }
           }
         }
       } catch (e) {
         console.error('Sync failed', e);
       }
     };
-    
+
     syncServerState();
   }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals]);
 
@@ -774,10 +814,10 @@ export default function TimerApp({
                 showSaveButton={timerMode === 'focus' && !isRunning && (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60)) - timeLeft - focusLoggedSeconds > 0}
                 showResetButton={!isRunning && timeLeft !== (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60))}
                 onToggleTimer={handleToggleTimer}
-                onResetTimer={() => { 
-                  resetTimerManual(); 
-                  setIntervals([]); 
-                  saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null); 
+                onResetTimer={() => {
+                  resetTimerManual();
+                  setIntervals([]);
+                  saveState(tab, timerMode, false, timerMode === 'focus' ? settings.pomoTime * 60 : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60), null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null);
                   updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
                 }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
