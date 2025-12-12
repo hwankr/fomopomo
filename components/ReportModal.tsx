@@ -20,7 +20,13 @@ import {
   endOfYear,
   addDays,
   format,
+  subMonths,
+  addMonths,
+  isAfter,
+  isSameMonth,
+  isSameWeek,
 } from 'date-fns';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 
 interface ReportModalProps {
@@ -46,8 +52,30 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
   const [selectedBucket, setSelectedBucket] = useState<ChartData | null>(null);
   const [viewMode, setViewMode] = useState<'week' | 'month' | 'year'>('week');
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
+  const [activeMonth, setActiveMonth] = useState(new Date());
+  const [activeWeekStart, setActiveWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [earliestYear, setEarliestYear] = useState<number | null>(null);
   const currentYear = new Date().getFullYear();
+  const today = new Date();
+
+  // Navigation functions
+  const goToPrevMonth = () => setActiveMonth(prev => subMonths(prev, 1));
+  const goToNextMonth = () => {
+    const next = addMonths(activeMonth, 1);
+    if (!isAfter(startOfMonth(next), startOfMonth(today))) {
+      setActiveMonth(next);
+    }
+  };
+  const goToPrevWeek = () => setActiveWeekStart(prev => addDays(prev, -7));
+  const goToNextWeek = () => {
+    const next = addDays(activeWeekStart, 7);
+    if (!isAfter(next, startOfWeek(today, { weekStartsOn: 1 }))) {
+      setActiveWeekStart(next);
+    }
+  };
+
+  const canGoNextMonth = !isSameMonth(activeMonth, today);
+  const canGoNextWeek = !isSameWeek(activeWeekStart, today, { weekStartsOn: 1 });
 
   const formatDuration = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -80,16 +108,15 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
       return;
     }
 
-    const today = new Date();
     let start: Date;
     let end: Date;
 
     if (viewMode === 'week') {
-      start = startOfWeek(today, { weekStartsOn: 1 });
+      start = activeWeekStart;
       end = addDays(start, 6); // Monday to Sunday
     } else if (viewMode === 'month') {
-      start = startOfMonth(today);
-      end = endOfMonth(today);
+      start = startOfMonth(activeMonth);
+      end = endOfMonth(activeMonth);
     } else {
       const targetDate = new Date(activeYear, 0, 1);
       start = startOfYear(targetDate);
@@ -234,7 +261,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
     setChartData(newChartData);
     setSelectedBucket(preferredBucket);
     setLoading(false);
-  }, [viewMode, activeYear]);
+  }, [viewMode, activeYear, activeMonth, activeWeekStart]);
 
   useEffect(() => {
     if (isOpen) {
@@ -356,20 +383,97 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
                 </div>
                 {viewMode === 'year' && (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-300">
-                      Year
-                    </span>
-                    <select
-                      value={activeYear}
-                      onChange={(e) => setActiveYear(Number(e.target.value))}
-                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-gray-700 dark:text-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-300 dark:focus:ring-rose-500"
+                    <button
+                      onClick={() => setActiveYear(prev => prev - 1)}
+                      disabled={earliestYear !== null && activeYear <= earliestYear}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        earliestYear !== null && activeYear <= earliestYear
+                          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          : 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
+                      }`}
+                      aria-label="이전 년도"
                     >
-                      {yearOptions.map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      onClick={() => setActiveYear(currentYear)}
+                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[60px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                      title="올해로 이동"
+                    >
+                      {activeYear}년
+                    </button>
+                    <button
+                      onClick={() => setActiveYear(prev => prev + 1)}
+                      disabled={activeYear >= currentYear}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        activeYear >= currentYear
+                          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          : 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
+                      }`}
+                      aria-label="다음 년도"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                )}
+                {viewMode === 'month' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={goToPrevMonth}
+                      className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400 transition-colors"
+                      aria-label="이전 달"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      onClick={() => setActiveMonth(new Date())}
+                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[100px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                      title="이번 달로 이동"
+                    >
+                      {format(activeMonth, 'yyyy년 M월')}
+                    </button>
+                    <button
+                      onClick={goToNextMonth}
+                      disabled={!canGoNextMonth}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        canGoNextMonth
+                          ? 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
+                          : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      }`}
+                      aria-label="다음 달"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                )}
+                {viewMode === 'week' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={goToPrevWeek}
+                      className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400 transition-colors"
+                      aria-label="이전 주"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      onClick={() => setActiveWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
+                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[120px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                      title="이번 주로 이동"
+                    >
+                      {format(activeWeekStart, 'M/d')} - {format(addDays(activeWeekStart, 6), 'M/d')}
+                    </button>
+                    <button
+                      onClick={goToNextWeek}
+                      disabled={!canGoNextWeek}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        canGoNextWeek
+                          ? 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
+                          : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      }`}
+                      aria-label="다음 주"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
                   </div>
                 )}
               </div>

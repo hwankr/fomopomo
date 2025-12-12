@@ -134,6 +134,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     useEffect(() => {
         fetchGroupData();
 
+        console.log('[Group Realtime] Setting up subscription for group:', id);
+
         // Realtime subscription for member status updates
         const channel = supabase
             .channel(`group-${id}`)
@@ -145,9 +147,11 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     table: 'profiles',
                 },
                 (payload) => {
+                    console.log('[Group Realtime] profiles UPDATE received:', payload.new);
                     setMembers((prev) =>
                         prev.map((member) => {
                             if (member.user_id === payload.new.id) {
+                                console.log('[Group Realtime] Updating member:', member.user_id);
                                 return {
                                     ...member,
                                     profiles: {
@@ -187,12 +191,58 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     router.push('/groups');
                 }
             )
-            .subscribe();
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'study_sessions',
+                },
+                (payload: any) => {
+                    // 그룹 멤버의 세션이 변경되면 공부 시간 다시 fetch
+                    const userId = payload.new?.user_id || payload.old?.user_id;
+                    console.log('[Group Realtime] study_sessions change detected for user:', userId);
+                    
+                    // 현재 멤버 목록에 있는 사용자인지 확인
+                    setMembers((currentMembers) => {
+                        if (currentMembers.some(m => m.user_id === userId)) {
+                            console.log('[Group Realtime] User is a group member, refreshing study times');
+                            // 비동기로 studyTimes만 갱신
+                            (async () => {
+                                const now = new Date();
+                                const start = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+                                const end = new Date(now.setHours(23, 59, 59, 999)).toISOString();
+
+                                const { data: studyTimeData } = await supabase
+                                    .rpc('get_group_study_time_v3', {
+                                        p_group_id: id,
+                                        p_start_time: start,
+                                        p_end_time: end
+                                    });
+
+                                if (studyTimeData) {
+                                    const timeMap: Record<string, number> = {};
+                                    studyTimeData.forEach((item: { user_id: string; total_seconds: number }) => {
+                                        timeMap[item.user_id] = item.total_seconds;
+                                    });
+                                    setStudyTimes(timeMap);
+                                }
+                            })();
+                        }
+                        return currentMembers; // 상태 변경 없음
+                    });
+                }
+            )
+            .subscribe((status) => {
+                console.log('[Group Realtime] Subscription status:', status);
+            });
 
         return () => {
+            console.log('[Group Realtime] Cleaning up subscription');
             supabase.removeChannel(channel);
         };
-    }, [id, router]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id]);
 
     const copyCode = () => {
         if (group?.code) {
