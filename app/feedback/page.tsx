@@ -283,11 +283,11 @@ export default function FeedbackPage() {
 
     const handleSendReply = async (message: string, file: File | null) => {
         if (!message.trim() || !session || !selectedFeedback) return;
-        
+
         // Optimistic Update
         const tempId = 'temp-' + Date.now();
         const imagePreviewUrl = file ? URL.createObjectURL(file) : undefined;
-        
+
         const optimisticReply: Reply | any = {
             id: tempId,
             feedback_id: selectedFeedback.id,
@@ -440,6 +440,10 @@ export default function FeedbackPage() {
                 isDarkMode={isDarkMode}
                 toggleDarkMode={toggleDarkMode}
                 onLogout={() => supabase.auth.signOut()}
+                onOpenLogin={() => supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: { redirectTo: `${window.location.origin}/feedback` }
+                })}
             />
 
             {!session ? (
@@ -567,8 +571,8 @@ export default function FeedbackPage() {
                                                         type="button"
                                                         onClick={() => setNewCategory(cat)}
                                                         className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all ${newCategory === cat
-                                                                ? 'border-rose-500 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
-                                                                : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500'
+                                                            ? 'border-rose-500 bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
+                                                            : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500'
                                                             }`}
                                                     >
                                                         {cat === 'bug' ? '버그 신고' : cat === 'feature' ? '기능 제안' : '기타 문의'}

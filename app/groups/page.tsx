@@ -26,7 +26,7 @@ export default function GroupsPage() {
 
     const fetchGroups = async () => {
         if (!session?.user) return;
-        
+
         try {
             const { data, error } = await supabase
                 .from('group_members')
@@ -61,6 +61,10 @@ export default function GroupsPage() {
                 isDarkMode={isDarkMode}
                 toggleDarkMode={toggleDarkMode}
                 onLogout={() => supabase.auth.signOut()}
+                onOpenLogin={() => supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: { redirectTo: `${window.location.origin}/groups` }
+                })}
             />
             <div className="max-w-4xl mx-auto">
                 <div className="mb-8">
