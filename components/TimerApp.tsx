@@ -612,6 +612,13 @@ export default function TimerApp({
 
     const syncServerState = async () => {
       try {
+        // 로컬에서 이미 실행 중으로 복원된 경우, 서버 동기화 스킵
+        // (로컬 startTime 기반으로 이미 정확한 시간이 복원됨)
+        if (isRunning || isStopwatchRunning) {
+          console.log('[Sync] 이미 실행 중인 세션이 로컬에서 복원됨. 서버 동기화 스킵.');
+          return;
+        }
+
         const data = await checkActiveSession();
         if (data?.status === 'studying' && data.study_start_time) {
           const startTime = new Date(data.study_start_time).getTime();
@@ -650,7 +657,7 @@ export default function TimerApp({
               stopwatchStartTimeRef.current = startTime;
               currentIntervalStartRef.current = now;
 
-              setIntervals([]);
+              // intervals는 유지 - 기존 intervals가 있다면 보존
               toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
             }
           }
@@ -659,11 +666,22 @@ export default function TimerApp({
           const savedState = localStorage.getItem("fomopomo_full_state");
           let localElapsed = 0;
           let localTimerElapsed = 0;
+          let localIsRunning = false;
+          let localIsStopwatchRunning = false;
 
           if (savedState) {
             try {
               const parsed = JSON.parse(savedState);
               localElapsed = parsed.stopwatch?.elapsed || 0;
+              localIsRunning = parsed.timer?.isRunning || false;
+              localIsStopwatchRunning = parsed.stopwatch?.isRunning || false;
+              
+              // 로컬에서 실행 중이었다면 startTime 기반으로 실제 경과 시간 계산
+              if (localIsStopwatchRunning && parsed.stopwatch?.startTime) {
+                const now = Date.now();
+                localElapsed = Math.floor((now - parsed.stopwatch.startTime) / 1000);
+              }
+              
               // For timer, calculate elapsed from timeLeft and duration
               if (parsed.timer?.mode && parsed.timer?.timeLeft !== undefined) {
                 const localMode = parsed.timer.mode;
@@ -674,6 +692,13 @@ export default function TimerApp({
                     ? settings.shortBreak * 60
                     : settings.longBreak * 60;
                 localTimerElapsed = localDuration - localTimeLeft;
+                
+                // 타이머가 실행 중이었다면 targetTime 기반으로 실제 남은 시간 계산
+                if (localIsRunning && parsed.timer?.targetTime) {
+                  const now = Date.now();
+                  const actualRemaining = Math.max(0, Math.floor((parsed.timer.targetTime - now) / 1000));
+                  localTimerElapsed = localDuration - actualRemaining;
+                }
               }
             } catch (e) {
               console.error('Error parsing local state for sync comparison', e);
@@ -704,15 +729,17 @@ export default function TimerApp({
           } else {
             // Use the larger time to prevent data loss
             const serverTime = data.total_stopwatch_time;
+            const maxTime = Math.max(localElapsed, serverTime);
 
             if (localElapsed > serverTime) {
               console.log(`[Sync] 로컬 스톱워치 시간(${localElapsed}s)이 DB(${serverTime}s)보다 큼. 로컬 값 유지.`);
               // Already restored from local storage, skip server sync
-            } else {
+            } else if (maxTime > stopwatchTime) {
+              // 서버 시간이 더 크고, 현재 상태보다 클 때만 업데이트
               setTab('stopwatch');
-              setStopwatchTime(serverTime);
+              setStopwatchTime(maxTime);
               setIsStopwatchRunning(false);
-              setIntervals([]);
+              // intervals는 초기화하지 않음 - 기존 intervals 보존
             }
           }
         }
@@ -722,7 +749,7 @@ export default function TimerApp({
     };
 
     syncServerState();
-  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals]);
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, isRunning, isStopwatchRunning, stopwatchTime]);
 
 
 
