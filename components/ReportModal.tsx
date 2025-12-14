@@ -18,6 +18,7 @@ import {
   endOfMonth,
   startOfYear,
   endOfYear,
+  endOfDay,
   addDays,
   format,
   subMonths,
@@ -113,7 +114,7 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
 
     if (viewMode === 'week') {
       start = activeWeekStart;
-      end = addDays(start, 6); // Monday to Sunday
+      end = endOfDay(addDays(start, 6)); // Monday to Sunday (include entire Sunday)
     } else if (viewMode === 'month') {
       start = startOfMonth(activeMonth);
       end = endOfMonth(activeMonth);
