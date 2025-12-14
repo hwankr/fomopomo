@@ -217,12 +217,14 @@ export default function ReportModal({ isOpen, onClose }: ReportModalProps) {
 
     periodSessions?.forEach((session) => {
       const sessionDate = new Date(session.created_at);
+      // Use study day start (5AM reset) to determine which calendar day this session belongs to
+      const studyDayDate = getDayStart(sessionDate);
       let bucketKey = '';
 
       if (viewMode === 'week' || viewMode === 'month') {
-        bucketKey = format(sessionDate, 'yyyy-MM-dd');
+        bucketKey = format(studyDayDate, 'yyyy-MM-dd');
       } else {
-        bucketKey = format(sessionDate, 'yyyy-MM');
+        bucketKey = format(studyDayDate, 'yyyy-MM');
       }
 
       if (!buckets[bucketKey]) return;
