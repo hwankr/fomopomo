@@ -128,16 +128,23 @@ export default function ContributionGraph({ data, endDate = new Date() }: Contri
                             const currentColumn = Math.floor(index / 7);
                             const isRightEdge = currentColumn >= totalColumns - 3; // Align right for last 3 columns
 
+                            const isSelected = selectedData && isSameDay(day, selectedData.date);
+                            const isToday = isSameDay(day, new Date());
+
                             return (
                                 <div
                                     key={dateKey}
-                                    className={`w-3 h-3 rounded-sm ${getColor(level)} transition-colors hover:ring-2 hover:ring-rose-400/50 relative group cursor-pointer`}
+                                    className={`w-3 h-3 rounded-sm ${getColor(level)} transition-all relative group cursor-pointer
+                                        ${isSelected ? 'ring-2 ring-gray-800 dark:ring-white z-10' : ''}
+                                        ${isToday && !isSelected ? 'ring-1 ring-rose-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-900' : ''}
+                                        ${!isSelected && !isToday ? 'hover:ring-2 hover:ring-rose-400/50' : ''}
+                                    `}
                                     title={`${format(day, 'yyyy-MM-dd')}: ${Math.floor(value/60)}분`}
                                     onClick={() => setSelectedData({ date: day, minutes: Math.floor(value / 60) })}
                                 >
                                     {/* Simple Tooltip on Hover */}
                                     <div 
-                                        className={`hidden md:group-hover:block absolute bottom-full mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap z-10 pointer-events-none ${
+                                        className={`hidden md:group-hover:block absolute bottom-full mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap z-20 pointer-events-none ${
                                             isRightEdge ? 'right-0' : 'left-1/2 -translate-x-1/2'
                                         }`}
                                     >

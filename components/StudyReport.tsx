@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   BarChart,
   Bar,
@@ -34,6 +34,8 @@ export default function StudyReport() {
   const [activeMonth, setActiveMonth] = useState(new Date());
   const [activeWeekStart, setActiveWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedBucket, setSelectedBucket] = useState<ChartData | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
 
   const {
     loading,
@@ -43,6 +45,17 @@ export default function StudyReport() {
     chartData,
     fetchStats
   } = useStudyStats();
+
+  // Auto-scroll to end when chart data or view mode changes
+  useEffect(() => {
+    if (scrollRef.current) {
+        setTimeout(() => {
+            if (scrollRef.current) {
+               scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+            }
+        }, 100);
+    }
+  }, [chartData, viewMode]);
 
   const currentYear = new Date().getFullYear();
   const today = new Date();
@@ -282,82 +295,84 @@ export default function StudyReport() {
               </div>
             </div>
 
-            <div className="h-64 w-full relative">
-              {loading ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-slate-800/50 z-10 transition-opacity duration-300">
-                  <div className="text-gray-400 animate-pulse text-sm">
-                    Loading data...
-                  </div>
-                </div>
-              ) : null}
+            <div ref={scrollRef} className="w-full overflow-x-auto pb-4 scrollbar-hide">
+                <div className="h-64 min-w-[600px] relative">
+                  {loading ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-slate-800/50 z-10 transition-opacity duration-300">
+                      <div className="text-gray-400 animate-pulse text-sm">
+                        Loading data...
+                      </div>
+                    </div>
+                  ) : null}
 
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={chartData}
-                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke="#e5e7eb"
-                    className="dark:stroke-slate-600"
-                  />
-                  <XAxis
-                    dataKey="displayLabel"
-                    stroke="#9ca3af"
-                    fontSize={viewMode === 'month' ? 9 : 11}
-                    tickLine={false}
-                    axisLine={false}
-                    dy={10}
-                    interval={0}
-                  />
-                  <YAxis
-                    stroke="#9ca3af"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => formatAxisValue(value)}
-                  />
-                  <Tooltip
-                    cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                    contentStyle={{
-                      backgroundColor: '#ffffff',
-                      borderColor: '#e5e7eb',
-                      color: '#111827',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.12)',
-                    }}
-                    labelStyle={{ color: '#111827', fontWeight: 700 }}
-                    labelFormatter={(label) => `${label}`}
-                    formatter={(_, __, props) => [
-                      formatTooltipDuration(props?.payload?.seconds ?? 0),
-                      '집중 시간',
-                    ]}
-                  />
-                  <Bar
-                    dataKey="hours"
-                    radius={[4, 4, 0, 0]}
-                    maxBarSize={50}
-                    onClick={(data) => {
-                      if (data && 'payload' in data) {
-                        setSelectedBucket(data.payload as ChartData);
-                      }
-                    }}
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        className={
-                          entry.hours > 0
-                            ? 'fill-rose-400 dark:fill-rose-500'
-                            : 'fill-gray-100 dark:fill-slate-700'
-                        }
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={chartData}
+                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        vertical={false}
+                        stroke="#e5e7eb"
+                        className="dark:stroke-slate-600"
                       />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                      <XAxis
+                        dataKey="displayLabel"
+                        stroke="#9ca3af"
+                        fontSize={viewMode === 'month' ? 9 : 11}
+                        tickLine={false}
+                        axisLine={false}
+                        dy={10}
+                        interval={0}
+                      />
+                      <YAxis
+                        stroke="#9ca3af"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(value) => formatAxisValue(value)}
+                      />
+                      <Tooltip
+                        cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          borderColor: '#e5e7eb',
+                          color: '#111827',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.12)',
+                        }}
+                        labelStyle={{ color: '#111827', fontWeight: 700 }}
+                        labelFormatter={(label) => `${label}`}
+                        formatter={(_, __, props) => [
+                          formatTooltipDuration(props?.payload?.seconds ?? 0),
+                          '집중 시간',
+                        ]}
+                      />
+                      <Bar
+                        dataKey="hours"
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={50}
+                        onClick={(data) => {
+                          if (data && 'payload' in data) {
+                            setSelectedBucket(data.payload as ChartData);
+                          }
+                        }}
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                            className={
+                              entry.hours > 0
+                                ? 'fill-rose-400 dark:fill-rose-500'
+                                : 'fill-gray-100 dark:fill-slate-700'
+                            }
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
             </div>
 
             <div className="text-center mt-4 text-xs text-gray-400">
