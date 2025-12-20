@@ -51,12 +51,12 @@ export default function ContributionGraph({ data, endDate = new Date() }: Contri
       // GitHub green logic or custom theme?
       // User uses Rose theme.
       switch(level) {
-          case 0: return 'bg-gray-100 dark:bg-slate-800';
+          case 0: return 'bg-gray-100 dark:bg-slate-700';
           case 1: return 'bg-rose-200 dark:bg-rose-900/40';
           case 2: return 'bg-rose-300 dark:bg-rose-800/60';
           case 3: return 'bg-rose-400 dark:bg-rose-600/80';
           case 4: return 'bg-rose-500 dark:bg-rose-500';
-          default: return 'bg-gray-100 dark:bg-slate-800';
+          default: return 'bg-gray-100 dark:bg-slate-700';
       }
   };
   
