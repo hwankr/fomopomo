@@ -50,6 +50,7 @@ export default function Navbar({
         { href: '/plan', label: '계획' },
         { href: '/friends', label: '친구' },
         { href: '/groups', label: '그룹' },
+        { href: '/leaderboard', label: '리더보드' },
         { href: '/feedback', label: '피드백' },
     ];
 

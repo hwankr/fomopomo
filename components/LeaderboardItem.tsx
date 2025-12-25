@@ -39,7 +39,7 @@ export default function LeaderboardItem({ rank, nickname, totalDuration, isCurre
         
         {isCurrentUser && (
           <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">
-            Me
+            나
           </span>
         )}
       </div>

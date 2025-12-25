@@ -21,7 +21,7 @@ BEGIN
   WITH monthly_stats AS (
     SELECT 
       ss.user_id,
-      SUM(ss.duration) as total_duration
+      CAST(SUM(ss.duration) AS BIGINT) as total_duration
     FROM 
       study_sessions ss
     JOIN
