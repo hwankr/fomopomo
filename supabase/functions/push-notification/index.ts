@@ -24,7 +24,6 @@ webpush.setVapidDetails(
 Deno.serve(async (req) => {
     try {
         const payload = await req.json();
-        await supabase.from('debug_logs').insert({ message: 'Payload received', details: payload });
 
         const { record, old_record } = payload;
 
@@ -35,18 +34,12 @@ Deno.serve(async (req) => {
             // If it's an update, check if status actually changed
             if (!old_record || old_record.status !== 'studying') {
                 isStudyStart = true;
-                await supabase.from('debug_logs').insert({ message: 'Status changed to studying', details: { record, old_record } });
-            } else {
-                await supabase.from('debug_logs').insert({ message: 'Status already studying', details: { record, old_record } });
             }
-        } else {
-            await supabase.from('debug_logs').insert({ message: 'Status not studying', details: { status: record.status } });
         }
 
         // 2. Fallback: If triggered by study_sessions INSERT (legacy support or if user prefers)
         // Check if record has user_id (study_sessions) but no status (profiles has status)
         if (!isStudyStart && record.user_id && !record.status) {
-            await supabase.from('debug_logs').insert({ message: 'Detected study_sessions insert', details: record });
             return new Response('Not a study start event', { status: 200 });
         }
 
@@ -68,12 +61,10 @@ Deno.serve(async (req) => {
         }
 
         if (!friends || friends.length === 0) {
-            await supabase.from('debug_logs').insert({ message: 'No friends found', details: { userId } });
             return new Response('No friends found', { status: 200 });
         }
 
         const friendIds = friends.map((f) => f.friend_id);
-        await supabase.from('debug_logs').insert({ message: 'Found friends', details: { friendIds } });
 
         // 2. Get Push Subscriptions for friends
         const { data: subscriptions, error: subsError } = await supabase
@@ -87,11 +78,8 @@ Deno.serve(async (req) => {
         }
 
         if (!subscriptions || subscriptions.length === 0) {
-            await supabase.from('debug_logs').insert({ message: 'No subscriptions found', details: { friendIds } });
             return new Response('No subscriptions found', { status: 200 });
         }
-
-        await supabase.from('debug_logs').insert({ message: 'Found subscriptions', details: { count: subscriptions.length } });
 
         // 3. Get User Profile for name (record itself is profile, so use it)
         const displayName = record.nickname || record.email?.split('@')[0] || '친구';
@@ -106,7 +94,6 @@ Deno.serve(async (req) => {
 
         const promises = subscriptions.map((sub) =>
             webpush.sendNotification(sub, notificationPayload)
-                .then(() => supabase.from('debug_logs').insert({ message: 'Notification sent', details: { subId: sub.id } }))
                 .catch((err) => {
                     supabase.from('debug_logs').insert({ message: 'Error sending notification', details: { subId: sub.id, error: err } });
                     console.error('Error sending notification to', sub.id, err);
@@ -131,3 +118,4 @@ Deno.serve(async (req) => {
         });
     }
 });
+

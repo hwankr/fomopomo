@@ -7,7 +7,7 @@ import { useAuthSession } from '@/hooks/useAuthSession';
 import TimerApp from '@/components/TimerApp';
 import HistoryList from '@/components/HistoryList';
 import LoginModal from '@/components/LoginModal';
-import ReportModal from '@/components/ReportModal';
+
 import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 
@@ -19,7 +19,7 @@ export default function Home() {
   const { session, loading: isLoading } = useAuthSession();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
@@ -58,10 +58,7 @@ export default function Home() {
         onClose={() => setIsLoginModalOpen(false)}
         onGoogleLogin={handleGoogleLogin}
       />
-      <ReportModal
-        isOpen={isReportModalOpen}
-        onClose={() => setIsReportModalOpen(false)}
-      />
+
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
@@ -73,7 +70,7 @@ export default function Home() {
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
-        onOpenReport={() => setIsReportModalOpen(true)}
+
         onOpenLogin={() => setIsLoginModalOpen(true)}
         onLogout={() => supabase.auth.signOut()}
       />

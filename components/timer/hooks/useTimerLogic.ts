@@ -8,7 +8,7 @@ interface UseTimerLogicProps {
   settings: Settings;
   onTimerCompleteRef: React.MutableRefObject<() => void>;
   playClickSound: () => void;
-  updateStatus: (status: 'studying' | 'paused', task?: string, startTime?: string, elapsed?: number, timerType?: 'timer' | 'stopwatch', timerMode?: 'focus' | 'shortBreak' | 'longBreak', timerDuration?: number) => void;
+  updateStatus: (status: 'studying' | 'paused' | 'online', task?: string, startTime?: string, elapsed?: number, timerType?: 'timer' | 'stopwatch', timerMode?: 'focus' | 'shortBreak' | 'longBreak', timerDuration?: number) => void;
 }
 
 export const useTimerLogic = ({
@@ -88,7 +88,10 @@ export const useTimerLogic = ({
       const elapsed = duration - timeLeft;
       const logicalStart = Date.now() - (elapsed * 1000);
       
-      updateStatus('studying', undefined, new Date(logicalStart).toISOString(), undefined, 'timer', timerMode, duration);
+      // Only set status to 'studying' for focus mode (triggers friend notification)
+      // Break modes should use 'online' to avoid sending "study started" notification
+      const statusForMode = timerMode === 'focus' ? 'studying' : 'online';
+      updateStatus(statusForMode, undefined, new Date(logicalStart).toISOString(), undefined, 'timer', timerMode, duration);
     }
   }, [isRunning, timeLeft, timerMode, settings, playClickSound, updateStatus]);
 

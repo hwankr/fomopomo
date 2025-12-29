@@ -16,7 +16,6 @@ interface NavbarProps {
     isDarkMode: boolean;
     toggleDarkMode: () => void;
     onOpenSettings?: () => void;
-    onOpenReport?: () => void;
     onOpenLogin?: () => void;
     onLogout?: () => void;
 }
@@ -26,7 +25,6 @@ export default function Navbar({
     isDarkMode,
     toggleDarkMode,
     onOpenSettings,
-    onOpenReport,
     onOpenLogin,
     onLogout,
 }: NavbarProps) {
@@ -52,6 +50,7 @@ export default function Navbar({
         { href: '/plan', label: '계획' },
         { href: '/friends', label: '친구' },
         { href: '/groups', label: '그룹' },
+        { href: '/leaderboard', label: '리더보드' },
         { href: '/feedback', label: '피드백' },
     ];
 
@@ -131,14 +130,14 @@ export default function Navbar({
                                 {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                             </button>
 
-                            {onOpenReport && (
-                                <button
-                                    onClick={onOpenReport}
+                            {session && (
+                                <Link
+                                    href="/profile"
                                     className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-rose-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-rose-400 transition-all duration-200"
-                                    aria-label="Report"
+                                    aria-label="Profile"
                                 >
-                                    <Flag className="w-5 h-5" />
-                                </button>
+                                    <UserIcon className="w-5 h-5" />
+                                </Link>
                             )}
 
                             {onOpenSettings && (
@@ -190,12 +189,20 @@ export default function Navbar({
                                                         {session.user.email}
                                                     </p>
                                                 </div>
-                                                <button
-                                                    onClick={() => {
-                                                        setIsProfileMenuOpen(false);
-                                                        onLogout?.();
-                                                    }}
-                                                    className="w-full text-left px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 flex items-center gap-2 transition-colors"
+                                            <Link
+                                                href="/profile"
+                                                onClick={() => setIsProfileMenuOpen(false)}
+                                                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                                            >
+                                                <UserIcon className="w-4 h-4" />
+                                                내 프로필
+                                            </Link>
+                                            <button
+                                                onClick={() => {
+                                                    setIsProfileMenuOpen(false);
+                                                    onLogout?.();
+                                                }}
+                                                className="w-full text-left px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 flex items-center gap-2 transition-colors"
                                                 >
                                                     <LogOut className="w-4 h-4" />
                                                     Sign out
@@ -329,30 +336,30 @@ export default function Navbar({
                                     </button>
                                 )}
 
-                                {onOpenReport && (
-                                    <button
-                                        onClick={() => {
-                                            setIsMenuOpen(false);
-                                            onOpenReport();
-                                        }}
-                                        className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <Flag className="w-6 h-6 mb-2 text-gray-500 dark:text-gray-400" />
-                                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">리포트</span>
-                                    </button>
-                                )}
+
 
                                 {session ? (
-                                    <button
-                                        onClick={() => {
-                                            setIsMenuOpen(false);
-                                            onLogout?.();
-                                        }}
-                                        className="flex flex-col items-center justify-center p-4 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800/50 shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <LogOut className="w-6 h-6 mb-2 text-rose-500" />
-                                        <span className="text-xs font-medium text-rose-600 dark:text-rose-400">로그아웃</span>
-                                    </button>
+                                    <>
+                                        <Link
+                                            href="/profile"
+                                            onClick={() => setIsMenuOpen(false)}
+                                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                            <UserIcon className="w-6 h-6 mb-2 text-gray-500 dark:text-gray-400" />
+                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">내 프로필</span>
+                                        </Link>
+
+                                        <button
+                                            onClick={() => {
+                                                setIsMenuOpen(false);
+                                                onLogout?.();
+                                            }}
+                                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800/50 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                            <LogOut className="w-6 h-6 mb-2 text-rose-500" />
+                                            <span className="text-xs font-medium text-rose-600 dark:text-rose-400">로그아웃</span>
+                                        </button>
+                                    </>
                                 ) : (
                                     <button
                                         onClick={() => {

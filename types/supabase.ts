@@ -27,6 +27,7 @@ export type Database = {
           timer_type: string | null
           timer_mode: string | null
           timer_duration: number | null
+          is_leaderboard_participant: boolean | null
         }
         Insert: {
           id: string
@@ -45,6 +46,7 @@ export type Database = {
           timer_type?: string | null
           timer_mode?: string | null
           timer_duration?: number | null
+          is_leaderboard_participant?: boolean | null
         }
         Update: {
           id?: string
@@ -63,10 +65,26 @@ export type Database = {
           timer_type?: string | null
           timer_mode?: string | null
           timer_duration?: number | null
+          is_leaderboard_participant?: boolean | null
         }
         // ... relationships ...
       }
       // ... truncated ...
+    }
+
+    Functions: {
+      get_monthly_leaderboard: {
+        Args: {
+          target_year: number
+          target_month: number
+        }
+        Returns: {
+          rank: number
+          user_id: string
+          nickname: string
+          total_duration: number
+        }[]
+      }
     }
   }
 }

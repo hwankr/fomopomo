@@ -607,11 +607,67 @@ export default function TimerApp({
   }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn]);
 
   // Server Sync Effect - Separate from local restore to handle async nature cleanly
+  // Ref to track if sync has been done (only sync once per mount)
+  const hasSyncedRef = useRef(false);
+  
   useEffect(() => {
     if (!isLoggedIn) return;
+    
+    // 이미 동기화 완료된 경우 스킵 (컴포넌트 마운트 시 1회만 실행)
+    if (hasSyncedRef.current) return;
+    hasSyncedRef.current = true;
 
     const syncServerState = async () => {
       try {
+        // 로컬에서 이미 실행 중으로 복원된 경우 확인 (로컬 스토리지에서)
+        const savedState = localStorage.getItem("fomopomo_full_state");
+        let localIsRunning = false;
+        let localIsStopwatchRunning = false;
+        let localElapsed = 0;
+        let localTimerElapsed = 0;
+        
+        if (savedState) {
+          try {
+            const parsed = JSON.parse(savedState);
+            localIsRunning = parsed.timer?.isRunning || false;
+            localIsStopwatchRunning = parsed.stopwatch?.isRunning || false;
+            localElapsed = parsed.stopwatch?.elapsed || 0;
+            
+            // 로컬에서 실행 중이었다면 startTime 기반으로 실제 경과 시간 계산
+            if (localIsStopwatchRunning && parsed.stopwatch?.startTime) {
+              const now = Date.now();
+              localElapsed = Math.floor((now - parsed.stopwatch.startTime) / 1000);
+            }
+            
+            // For timer, calculate elapsed from timeLeft and duration
+            if (parsed.timer?.mode && parsed.timer?.timeLeft !== undefined) {
+              const localMode = parsed.timer.mode;
+              const localTimeLeft = parsed.timer.timeLeft;
+              const localDuration = localMode === 'focus'
+                ? settings.pomoTime * 60
+                : localMode === 'shortBreak'
+                  ? settings.shortBreak * 60
+                  : settings.longBreak * 60;
+              localTimerElapsed = localDuration - localTimeLeft;
+              
+              // 타이머가 실행 중이었다면 targetTime 기반으로 실제 남은 시간 계산
+              if (localIsRunning && parsed.timer?.targetTime) {
+                const now = Date.now();
+                const actualRemaining = Math.max(0, Math.floor((parsed.timer.targetTime - now) / 1000));
+                localTimerElapsed = localDuration - actualRemaining;
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing local state for sync', e);
+          }
+        }
+        
+        // 로컬에서 이미 실행 중으로 복원된 경우, 서버 동기화 스킵
+        if (localIsRunning || localIsStopwatchRunning) {
+          console.log('[Sync] 로컬에서 실행 중인 세션이 복원됨. 서버 동기화 스킵.');
+          return;
+        }
+
         const data = await checkActiveSession();
         if (data?.status === 'studying' && data.study_start_time) {
           const startTime = new Date(data.study_start_time).getTime();
@@ -633,11 +689,7 @@ export default function TimerApp({
                 setIsRunning(true);
                 endTimeRef.current = now + (remaining * 1000);
 
-                // If we switched modes, we might need to reset logged seconds for consistency if fresh start
                 if (mode === 'focus' && elapsed === 0) setFocusLoggedSeconds(0);
-                // If resuming, we technically should know how much was logged? 
-                // We don't track "logged seconds" in profiles, only elapsed. 
-                // So we assume elapsed == logged? 
                 if (mode === 'focus') setFocusLoggedSeconds(elapsed);
 
                 toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
@@ -650,47 +702,22 @@ export default function TimerApp({
               stopwatchStartTimeRef.current = startTime;
               currentIntervalStartRef.current = now;
 
-              setIntervals([]);
               toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
             }
           }
         } else if (data?.total_stopwatch_time && data.total_stopwatch_time > 0) {
           // Found paused session - compare with local storage to prevent data loss
-          const savedState = localStorage.getItem("fomopomo_full_state");
-          let localElapsed = 0;
-          let localTimerElapsed = 0;
-
-          if (savedState) {
-            try {
-              const parsed = JSON.parse(savedState);
-              localElapsed = parsed.stopwatch?.elapsed || 0;
-              // For timer, calculate elapsed from timeLeft and duration
-              if (parsed.timer?.mode && parsed.timer?.timeLeft !== undefined) {
-                const localMode = parsed.timer.mode;
-                const localTimeLeft = parsed.timer.timeLeft;
-                const localDuration = localMode === 'focus'
-                  ? settings.pomoTime * 60
-                  : localMode === 'shortBreak'
-                    ? settings.shortBreak * 60
-                    : settings.longBreak * 60;
-                localTimerElapsed = localDuration - localTimeLeft;
-              }
-            } catch (e) {
-              console.error('Error parsing local state for sync comparison', e);
-            }
-          }
 
           if (data.timer_type === 'timer') {
             const mode = (data.timer_mode as any) || 'focus';
             const duration = data.timer_duration || 0;
-            const serverElapsed = data.total_stopwatch_time; // Reusing this column for elapsed
+            const serverElapsed = data.total_stopwatch_time;
 
             // Use the larger elapsed time to prevent data loss
             const finalElapsed = Math.max(serverElapsed, localTimerElapsed);
 
             if (localTimerElapsed > serverElapsed) {
               console.log(`[Sync] 로컬 타이머 시간(${localTimerElapsed}s)이 DB(${serverElapsed}s)보다 큼. 로컬 값 유지.`);
-              // Already restored from local storage, skip server sync
             } else {
               const remaining = duration - finalElapsed;
               if (remaining > 0) {
@@ -704,15 +731,15 @@ export default function TimerApp({
           } else {
             // Use the larger time to prevent data loss
             const serverTime = data.total_stopwatch_time;
+            const maxTime = Math.max(localElapsed, serverTime);
 
             if (localElapsed > serverTime) {
               console.log(`[Sync] 로컬 스톱워치 시간(${localElapsed}s)이 DB(${serverTime}s)보다 큼. 로컬 값 유지.`);
-              // Already restored from local storage, skip server sync
-            } else {
+            } else if (maxTime > 0) {
+              // 서버 시간이 더 클 때만 업데이트
               setTab('stopwatch');
-              setStopwatchTime(serverTime);
+              setStopwatchTime(maxTime);
               setIsStopwatchRunning(false);
-              setIntervals([]);
             }
           }
         }
@@ -722,7 +749,7 @@ export default function TimerApp({
     };
 
     syncServerState();
-  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals]);
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, settings]);
 
 
 

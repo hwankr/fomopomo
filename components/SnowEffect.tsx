@@ -33,6 +33,7 @@ const CHRISTMAS_COLORS = {
 
 
 
+
 export default function SnowEffect() {
   const [isEnabled, setIsEnabled] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
