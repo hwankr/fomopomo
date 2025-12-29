@@ -28,7 +28,6 @@ type Settings = {
   isMuted: boolean;
   taskPopupEnabled: boolean;
   snowEnabled: boolean; // ❄️ 눈 효과
-  giftBoxEnabled: boolean; // 🎁 선물 상자
   tasks: string[];
   presets: Preset[];
 };
@@ -44,7 +43,6 @@ const DEFAULT_SETTINGS = {
   isMuted: false, // ✨ 기본값 추가
   taskPopupEnabled: true,
   snowEnabled: true, // ❄️ 눈 효과 (기본값: 켜짐)
-  giftBoxEnabled: true, // 🎁 선물 상자 (기본값: 켜짐)
   tasks: ['국어', '수학', '영어'],
   presets: [
     { id: '1', label: '프리셋1', minutes: 25 },
@@ -76,7 +74,6 @@ export default function SettingsModal({
     DEFAULT_SETTINGS.taskPopupEnabled
   );
   const [snowEnabled, setSnowEnabled] = useState(DEFAULT_SETTINGS.snowEnabled); // ❄️ 눈 효과
-  const [giftBoxEnabled, setGiftBoxEnabled] = useState(DEFAULT_SETTINGS.giftBoxEnabled); // 🎁 선물 상자
   const [tasks, setTasks] = useState<string[]>(DEFAULT_SETTINGS.tasks);
   const [presets, setPresets] = useState<Preset[]>(DEFAULT_SETTINGS.presets);
 
@@ -124,7 +121,6 @@ export default function SettingsModal({
             loadedSettings.taskPopupEnabled ?? DEFAULT_SETTINGS.taskPopupEnabled
           );
           setSnowEnabled(loadedSettings.snowEnabled ?? DEFAULT_SETTINGS.snowEnabled); // ❄️ 로드
-          setGiftBoxEnabled(loadedSettings.giftBoxEnabled ?? DEFAULT_SETTINGS.giftBoxEnabled); // 🎁 로드
           if (loadedSettings.tasks && loadedSettings.tasks.length > 0) {
             setTasks(loadedSettings.tasks);
           }
@@ -162,7 +158,6 @@ export default function SettingsModal({
       isMuted,
       taskPopupEnabled,
       snowEnabled, // ❄️ 눈 효과
-      giftBoxEnabled, // 🎁 선물 상자
       tasks,
       presets,
     };
@@ -187,7 +182,6 @@ export default function SettingsModal({
     setIsMuted(DEFAULT_SETTINGS.isMuted);
     setTaskPopupEnabled(DEFAULT_SETTINGS.taskPopupEnabled);
     setSnowEnabled(DEFAULT_SETTINGS.snowEnabled); // ❄️ 눈 효과
-    setGiftBoxEnabled(DEFAULT_SETTINGS.giftBoxEnabled); // 🎁 선물 상자
     setTasks(DEFAULT_SETTINGS.tasks);
     setPresets(DEFAULT_SETTINGS.presets);
 
@@ -567,31 +561,9 @@ export default function SettingsModal({
                 </button>
               </div>
 
-              {/* 선물 상자 토글 (눈 효과가 켜져 있을 때만) */}
-              {snowEnabled && (
-                <div className="flex justify-between items-center pl-4 border-l-2 border-sky-200">
-                  <div>
-                    <span className="text-gray-600 text-sm font-medium flex items-center gap-2">
-                      🎁 선물 상자
-                    </span>
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      클릭하면..
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setGiftBoxEnabled(!giftBoxEnabled)}
-                    className={`${toggleBase} ${giftBoxEnabled ? 'bg-rose-400' : 'bg-gray-300'
-                      }`}
-                  >
-                    <span
-                      className={`${toggleDot} ${giftBoxEnabled ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                    ></span>
-                  </button>
-                </div>
-              )}
+
             </section>
-            
+
             <hr className="border-gray-100" />
             <section>
               <h3 className="text-red-400 text-xs font-bold mb-3 flex items-center gap-2">
