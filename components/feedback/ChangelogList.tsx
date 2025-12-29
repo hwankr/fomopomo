@@ -13,6 +13,7 @@ interface Changelog {
     title: string;
     content: string;
     created_at: string;
+    is_draft?: boolean;
 }
 
 interface ChangelogListProps {
@@ -40,9 +41,11 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
     }, []);
 
     const fetchChangelogs = async () => {
+        // RLS handles filtering: admin sees all, others see only published
         const { data, error } = await supabase
             .from('changelogs')
             .select('*')
+            .order('is_draft', { ascending: false }) // Drafts first for admin
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -72,6 +75,47 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
         setContent('');
     };
 
+    // Save as draft
+    const handleSaveDraft = async () => {
+        if (!version.trim() || !title.trim()) {
+            toast.error('버전과 제목은 필수입니다.');
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            if (editingId) {
+                const { data, error } = await supabase
+                    .from('changelogs')
+                    .update({ version, title, content, is_draft: true })
+                    .eq('id', editingId)
+                    .select()
+                    .single();
+
+                if (error) throw error;
+                setChangelogs(prev => prev.map(item => item.id === editingId ? data : item));
+            } else {
+                const { data, error } = await supabase
+                    .from('changelogs')
+                    .insert([{ version, title, content, is_draft: true }])
+                    .select()
+                    .single();
+
+                if (error) throw error;
+                setChangelogs(prev => [data, ...prev]);
+            }
+
+            toast.success('임시 저장되었습니다.');
+            cancelEdit();
+        } catch (error) {
+            console.error('Error saving draft:', error);
+            toast.error('임시 저장 실패');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // Publish (create new or update existing)
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         if (!version.trim() || !title.trim() || !content.trim()) return;
@@ -79,10 +123,10 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
         setSubmitting(true);
         try {
             if (editingId) {
-                // Update existing
+                // Update existing and publish
                 const { data, error } = await supabase
                     .from('changelogs')
-                    .update({ version, title, content })
+                    .update({ version, title, content, is_draft: false })
                     .eq('id', editingId)
                     .select()
                     .single();
@@ -90,27 +134,47 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                 if (error) throw error;
 
                 setChangelogs(prev => prev.map(item => item.id === editingId ? data : item));
-                toast.success('변경 내역이 수정되었습니다.');
+                toast.success('변경 내역이 발행되었습니다.');
             } else {
-                // Create new
+                // Create new and publish
                 const { data, error } = await supabase
                     .from('changelogs')
-                    .insert([{ version, title, content }])
+                    .insert([{ version, title, content, is_draft: false }])
                     .select()
                     .single();
 
                 if (error) throw error;
 
                 setChangelogs([data, ...changelogs]);
-                toast.success('변경 내역이 등록되었습니다.');
+                toast.success('변경 내역이 발행되었습니다.');
             }
 
             cancelEdit();
         } catch (error) {
-            console.error('Error saving changelog:', error);
-            toast.error('저장 실패');
+            console.error('Error publishing changelog:', error);
+            toast.error('발행 실패');
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    // Publish a draft directly from the list
+    const handlePublishDraft = async (id: string) => {
+        try {
+            const { data, error } = await supabase
+                .from('changelogs')
+                .update({ is_draft: false })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            setChangelogs(prev => prev.map(item => item.id === id ? data : item));
+            toast.success('발행되었습니다.');
+        } catch (error) {
+            console.error('Error publishing draft:', error);
+            toast.error('발행 실패');
         }
     };
 
@@ -140,7 +204,7 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                 .getPublicUrl(filePath);
 
             const markdownImage = `![이미지 설명](${data.publicUrl})\n`;
-            
+
             // Textarea cursor position insertion
             const textarea = textareaRef.current;
             if (textarea) {
@@ -148,7 +212,7 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                 const end = textarea.selectionEnd;
                 const newContent = content.substring(0, start) + markdownImage + content.substring(end);
                 setContent(newContent);
-                
+
                 // Restore focus (optional, usually good UX)
                 setTimeout(() => {
                     textarea.focus();
@@ -228,7 +292,7 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                             className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none font-mono text-sm"
                         />
                         <div className="absolute bottom-3 right-3 flex gap-2">
-                             <input
+                            <input
                                 type="file"
                                 ref={fileInputRef}
                                 onChange={handleImageUpload}
@@ -246,13 +310,23 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                             </button>
                         </div>
                     </div>
-                    <button
-                        type="submit"
-                        disabled={submitting}
-                        className="w-full py-3 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-colors disabled:opacity-50"
-                    >
-                        {submitting ? <Loader2 className="animate-spin mx-auto w-5 h-5" /> : (editingId ? '수정완료' : '등록하기')}
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            onClick={handleSaveDraft}
+                            disabled={submitting}
+                            className="flex-1 py-3 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-xl font-bold hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
+                        >
+                            {submitting ? <Loader2 className="animate-spin mx-auto w-5 h-5" /> : '임시 저장'}
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={submitting}
+                            className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-colors disabled:opacity-50"
+                        >
+                            {submitting ? <Loader2 className="animate-spin mx-auto w-5 h-5" /> : '발행하기'}
+                        </button>
+                    </div>
                 </form>
             )}
 
@@ -268,10 +342,15 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
                                 <div className="flex items-start justify-between mb-4">
                                     <div>
-                                        <div className="flex items-center gap-3 mb-1">
+                                        <div className="flex items-center gap-3 mb-1 flex-wrap">
                                             <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-xs font-bold px-2 py-1 rounded-md">
                                                 {log.version}
                                             </span>
+                                            {log.is_draft && (
+                                                <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-xs font-bold px-2 py-1 rounded-md">
+                                                    임시 저장
+                                                </span>
+                                            )}
                                             <span className="text-sm text-gray-500">
                                                 {format(new Date(log.created_at), 'yyyy.MM.dd')}
                                             </span>
@@ -281,7 +360,15 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                                         </h3>
                                     </div>
                                     {isAdmin && (
-                                        <div className="flex gap-1">
+                                        <div className="flex gap-1 items-center">
+                                            {log.is_draft && (
+                                                <button
+                                                    onClick={() => handlePublishDraft(log.id)}
+                                                    className="px-3 py-1.5 text-xs font-bold bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors"
+                                                >
+                                                    발행
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => handleEdit(log)}
                                                 className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full transition-colors"
@@ -298,19 +385,19 @@ export default function ChangelogList({ isAdmin }: ChangelogListProps) {
                                     )}
                                 </div>
                                 <div className="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 text-sm leading-relaxed whitespace-normal break-words">
-                                    <ReactMarkdown 
+                                    <ReactMarkdown
                                         components={{
-                                            h1: ({node, ...props}) => <h1 {...props} className="text-2xl font-bold my-4 pb-2 border-b dark:border-slate-700" />,
-                                            h2: ({node, ...props}) => <h2 {...props} className="text-xl font-bold my-3" />,
-                                            h3: ({node, ...props}) => <h3 {...props} className="text-lg font-semibold my-2" />,
-                                            ul: ({node, ...props}) => <ul {...props} className="list-disc pl-5 my-2 space-y-1" />,
-                                            ol: ({node, ...props}) => <ol {...props} className="list-decimal pl-5 my-2 space-y-1" />,
-                                            li: ({node, ...props}) => <li {...props} className="my-0.5" />,
-                                            blockquote: ({node, ...props}) => <blockquote {...props} className="border-l-4 border-rose-500 pl-4 italic my-2 text-gray-500 dark:text-gray-400" />,
-                                            img: ({node, ...props}) => (
+                                            h1: ({ node, ...props }) => <h1 {...props} className="text-2xl font-bold my-4 pb-2 border-b dark:border-slate-700" />,
+                                            h2: ({ node, ...props }) => <h2 {...props} className="text-xl font-bold my-3" />,
+                                            h3: ({ node, ...props }) => <h3 {...props} className="text-lg font-semibold my-2" />,
+                                            ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-5 my-2 space-y-1" />,
+                                            ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-5 my-2 space-y-1" />,
+                                            li: ({ node, ...props }) => <li {...props} className="my-0.5" />,
+                                            blockquote: ({ node, ...props }) => <blockquote {...props} className="border-l-4 border-rose-500 pl-4 italic my-2 text-gray-500 dark:text-gray-400" />,
+                                            img: ({ node, ...props }) => (
                                                 <img {...props} className="rounded-lg max-h-96 object-contain my-2 shadow-sm" />
                                             ),
-                                            a: ({node, ...props}) => (
+                                            a: ({ node, ...props }) => (
                                                 <a {...props} className="text-rose-500 hover:underline font-medium" target="_blank" rel="noopener noreferrer" />
                                             )
                                         }}
