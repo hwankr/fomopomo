@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import NotificationManager from './NotificationManager';
+import ConfirmModal from './ConfirmModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -76,6 +77,8 @@ export default function SettingsModal({
   const [snowEnabled, setSnowEnabled] = useState(DEFAULT_SETTINGS.snowEnabled); // ❄️ 눈 효과
   const [tasks, setTasks] = useState<string[]>(DEFAULT_SETTINGS.tasks);
   const [presets, setPresets] = useState<Preset[]>(DEFAULT_SETTINGS.presets);
+  const [isResetSettingsConfirmOpen, setIsResetSettingsConfirmOpen] = useState(false);
+  const [isResetAccountConfirmOpen, setIsResetAccountConfirmOpen] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -170,8 +173,6 @@ export default function SettingsModal({
   };
 
   const handleResetSettings = async () => {
-    if (!confirm('설정을 초기화하시겠습니까? 모든 설정이 기본값으로 돌아갑니다.')) return;
-
     setPomoTime(DEFAULT_SETTINGS.pomoTime);
     setShortBreak(DEFAULT_SETTINGS.shortBreak);
     setLongBreak(DEFAULT_SETTINGS.longBreak);
@@ -193,34 +194,65 @@ export default function SettingsModal({
     onClose();
   };
 
-  const handleResetAccount = async () => {
-    if (!confirm('⚠️ 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) return;
+  const clearAccountLocalStorage = () => {
+    [
+      'fomopomo_settings',
+      'fomopomo_pomoTime',
+      'fomopomo_initialPomoTime',
+      'fomopomo_stopwatchTime',
+      'fomopomo_selectedTask',
+      'fomopomo_selectedTaskId',
+      'fomopomo_full_state',
+      'fomopomo_task_state',
+      'fomopomo_notification_dismissed',
+      'fomopomo_changelog_last_viewed',
+    ].forEach((key) => localStorage.removeItem(key));
+  };
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
+  const handleResetAccount = async () => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (sessionError || !user) {
       toast.error('로그인 상태가 아닙니다.');
       return;
     }
 
-    const toastId = toast.loading('삭제 중...');
+    const toastId = toast.loading('계정 초기화 중...');
 
     try {
-      await supabase.from('study_sessions').delete().eq('user_id', user.id);
-      await supabase.from('user_settings').delete().eq('user_id', user.id);
-      await supabase.from('timer_states').delete().eq('user_id', user.id);
+      if (!session?.access_token) {
+        toast.error('로그인 정보가 유효하지 않습니다.', { id: toastId });
+        return;
+      }
 
-      localStorage.removeItem('fomopomo_settings');
-      localStorage.removeItem('fomopomo_pomoTime');
-      localStorage.removeItem('fomopomo_initialPomoTime');
-      localStorage.removeItem('fomopomo_stopwatchTime');
+      const response = await fetch('/api/account-reset', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 409 && Array.isArray(payload?.groups)) {
+          const groupNames = payload.groups.map((g: { name: string }) => g.name).join(', ');
+          toast.error(`그룹장을 이양한 뒤에 초기화할 수 있습니다.\n그룹: ${groupNames}`, {
+            id: toastId,
+            duration: 5000,
+          });
+          return;
+        }
+        toast.error(payload?.error || '초기화 실패', { id: toastId });
+        return;
+      }
+
+      clearAccountLocalStorage();
 
       toast.success('계정 초기화 완료', { id: toastId });
-      await supabase.auth.signOut();
       window.location.reload();
     } catch (e) {
-      console.error(e);
+      console.error('계정 초기화 오류:', e);
       toast.error('초기화 실패', { id: toastId });
     }
   };
@@ -675,13 +707,13 @@ export default function SettingsModal({
               <div className="flex flex-col gap-3">
                 <div className="flex gap-3">
                   <button
-                    onClick={handleResetSettings}
+                    onClick={() => setIsResetSettingsConfirmOpen(true)}
                     className="flex-1 py-3 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors border border-orange-100 text-center"
                   >
                     ↻ 설정 초기화
                   </button>
                   <button
-                    onClick={handleResetAccount}
+                    onClick={() => setIsResetAccountConfirmOpen(true)}
                     className="flex-1 py-3 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors border border-red-100 text-center"
                   >
                     🗑️ 계정 초기화
@@ -728,6 +760,41 @@ export default function SettingsModal({
           </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={isResetSettingsConfirmOpen}
+        onClose={() => setIsResetSettingsConfirmOpen(false)}
+        onConfirm={handleResetSettings}
+        title="설정 초기화"
+        message="모든 설정이 기본값으로 돌아갑니다. 계속하시겠습니까?"
+        confirmText="초기화"
+        cancelText="취소"
+        isDangerous={true}
+      />
+      <ConfirmModal
+        isOpen={isResetAccountConfirmOpen}
+        onClose={() => setIsResetAccountConfirmOpen(false)}
+        onConfirm={handleResetAccount}
+        title="계정 초기화"
+        message={(
+          <div className="space-y-3 text-sm">
+            <p>다음 데이터가 모두 초기화됩니다.</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>공부 기록/시간</li>
+              <li>친구/친구 요청</li>
+              <li>가입된 그룹 (자동 탈퇴, 혼자만 있는 그룹은 삭제)</li>
+              <li>할 일/주간·월간 플랜</li>
+              <li>피드백/댓글/좋아요</li>
+              <li>설정/알림</li>
+            </ul>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              다른 멤버가 있는 그룹의 그룹장은 이양 후에 초기화할 수 있으며, 이 작업은 복구할 수 없습니다.
+            </p>
+          </div>
+        )}
+        confirmText="초기화"
+        cancelText="취소"
+        isDangerous={true}
+      />
     </>
   );
 }
