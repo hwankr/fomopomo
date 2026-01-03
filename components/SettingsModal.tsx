@@ -170,7 +170,7 @@ export default function SettingsModal({
   };
 
   const handleResetSettings = async () => {
-    if (!confirm('설정을 초기화하시겠습니까?')) return;
+    if (!confirm('설정을 초기화하시겠습니까? 모든 설정이 기본값으로 돌아갑니다.')) return;
 
     setPomoTime(DEFAULT_SETTINGS.pomoTime);
     setShortBreak(DEFAULT_SETTINGS.shortBreak);
@@ -181,13 +181,16 @@ export default function SettingsModal({
     setVolume(DEFAULT_SETTINGS.volume);
     setIsMuted(DEFAULT_SETTINGS.isMuted);
     setTaskPopupEnabled(DEFAULT_SETTINGS.taskPopupEnabled);
-    setSnowEnabled(DEFAULT_SETTINGS.snowEnabled); // ❄️ 눈 효과
+    setSnowEnabled(DEFAULT_SETTINGS.snowEnabled);
     setTasks(DEFAULT_SETTINGS.tasks);
     setPresets(DEFAULT_SETTINGS.presets);
 
     await saveToAll(DEFAULT_SETTINGS);
-    toast.success('설정 초기화 완료');
+    // 설정 변경 이벤트 발생 (눈 효과 등 즉시 반영)
+    window.dispatchEvent(new Event('settingsChanged'));
+    toast.success('설정이 기본값으로 초기화되었습니다!');
     onSave();
+    onClose();
   };
 
   const handleResetAccount = async () => {
