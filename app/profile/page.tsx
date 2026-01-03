@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 // import { User } from '@supabase/supabase-js'; // Removed unused
 import ProfileHeader from '@/components/profile/ProfileHeader';
@@ -17,8 +17,26 @@ import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 
 export default function ProfilePage() {
   const { session, loading: sessionLoading } = useAuthSession();
-  const { fetchStats, heatmapData, totalFocusTime, loading: statsLoading } = useStudyStats();
+  const {
+    fetchStats,
+    heatmapData,
+    totalFocusTime,
+    earliestYear,
+    loading: statsLoading,
+  } = useStudyStats();
   const { isDarkMode, toggleDarkMode } = useTheme();
+
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+
+  const availableYears = useMemo(() => {
+    const startYear = earliestYear ?? currentYear;
+    const years: number[] = [];
+    for (let year = currentYear; year >= startYear; year -= 1) {
+      years.push(year);
+    }
+    return years;
+  }, [earliestYear, currentYear]);
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -87,14 +105,23 @@ export default function ProfilePage() {
         <section className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
           <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
             <span>공부 기록</span>
-            <span className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                최근 365일
-            </span>
+            <select
+              aria-label="Year"
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(Number(event.target.value))}
+              className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-rose-400/50"
+            >
+              {availableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
           </h2>
           {statsLoading && heatmapData.length === 0 ? (
                <div className="h-32 flex items-center justify-center text-gray-400 text-sm">잔디 심는 중...</div>
           ) : (
-               <ContributionGraph data={heatmapData} />
+               <ContributionGraph data={heatmapData} year={selectedYear} />
           )}
         </section>
 

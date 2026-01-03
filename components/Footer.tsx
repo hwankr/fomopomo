@@ -14,7 +14,7 @@ export default function Footer() {
               Fomopomo
             </Link>
             <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-              타이머가 멈추면 뒤처집니다. 지금 바로 시작하세요.
+              Fear Of Missing Out your Pomodoro
             </p>
             <div className="flex space-x-4 pt-2">
               <a href="https://github.com/hwankr" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-rose-500 transition-colors">
