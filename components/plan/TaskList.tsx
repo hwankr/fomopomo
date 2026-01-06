@@ -151,15 +151,18 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask, pinT
           "flex-1 font-medium transition-all flex items-center gap-2",
           task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
         )}>
-          {isPinned && (
-            <button
-              onClick={() => pinTask(task)}
-              className="text-amber-500 hover:text-amber-600 transition-colors"
-              title="고정 해제"
-            >
-              <Pin className="w-4 h-4 flex-shrink-0" />
-            </button>
-          )}
+          <button
+            onClick={() => pinTask(task)}
+            className={cn(
+              "transition-colors flex-shrink-0",
+              isPinned
+                ? "text-amber-500 hover:text-amber-600"
+                : "text-gray-400 hover:text-amber-500"
+            )}
+            title={isPinned ? "고정 해제" : "고정하기"}
+          >
+            <Pin className={cn("w-4 h-4", isPinned && "fill-current")} />
+          </button>
           {task.title}
         </span>
       )}
