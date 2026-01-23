@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
-const VAPID_PUBLIC_KEY = 'BKb9Eet4um6MvcXDHiKIFrbeKNrZoX3Mb5INbqXFogQdNrSp8LUgorU5ZuIvS1jvEfgSGBGUMUnridUQlej-Ic0';
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
 
 function urlBase64ToUint8Array(base64String: string) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -91,6 +91,13 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
 
     const subscribeUser = async (showToast = true) => {
         if (!('serviceWorker' in navigator)) return;
+        if (!VAPID_PUBLIC_KEY) {
+            addLog('Missing VAPID public key');
+            if (showToast) {
+                toast.error('VAPID 공개키가 설정되지 않았습니다.');
+            }
+            return;
+        }
 
         try {
             addLog('Starting subscription...');

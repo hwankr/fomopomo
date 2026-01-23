@@ -1,0 +1,1100 @@
+{
+  "policies": [
+    {
+      "schemaname": "cron",
+      "tablename": "job",
+      "policyname": "cron_job_policy",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "ALL",
+      "qual": "(username = CURRENT_USER)",
+      "with_check": null
+    },
+    {
+      "schemaname": "cron",
+      "tablename": "job_run_details",
+      "policyname": "cron_job_run_details_policy",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "ALL",
+      "qual": "(username = CURRENT_USER)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "changelogs",
+      "policyname": "Admins can delete changelogs",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "changelogs",
+      "policyname": "Admins can insert changelogs",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "changelogs",
+      "policyname": "Admins can update changelogs",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "changelogs",
+      "policyname": "Anyone can view published changelogs",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "((is_draft = false) OR (EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text)))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "debug_logs",
+      "policyname": "Enable insert for authenticated users only",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "true"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "debug_logs",
+      "policyname": "Enable select for users based on user_id",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_likes",
+      "policyname": "Users can delete their own likes",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_likes",
+      "policyname": "Users can insert their own likes",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_likes",
+      "policyname": "Users can view all likes",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Admins can delete any reply",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Admins can insert replies",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Admins can view all replies",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Authenticated users can insert replies",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "true"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Authenticated users can view all replies",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "policyname": "Users can delete their own replies",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Admins can delete feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Admins can update feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Admins can view all feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles\n  WHERE ((profiles.id = auth.uid()) AND (profiles.role = 'admin'::text))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Authenticated users can view all feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Authors can update their pending feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "((auth.uid() = user_id) AND (status = 'pending'::text))",
+      "with_check": "((auth.uid() = user_id) AND (status = 'pending'::text))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Enable read access for admins",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(((auth.jwt() ->> 'email'::text) = 'fabronjeon@gmail.com'::text) OR ((auth.jwt() ->> 'email'::text) = 'fabronjeon@naver.com'::text))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Users can create feedback",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "true"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "policyname": "Users can delete their own feedbacks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friend_requests",
+      "policyname": "Users can create requests",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = sender_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friend_requests",
+      "policyname": "Users can delete their own requests",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "((auth.uid() = sender_id) OR (auth.uid() = receiver_id))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friend_requests",
+      "policyname": "Users can update requests received by them",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = receiver_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friend_requests",
+      "policyname": "Users can view requests sent by them or to them",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "((auth.uid() = sender_id) OR (auth.uid() = receiver_id))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friendships",
+      "policyname": "Users can insert friendships.",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friendships",
+      "policyname": "Users can see their own friendships.",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "((auth.uid() = user_id) OR (auth.uid() = friend_id))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friendships",
+      "policyname": "Users can update their own friendships",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friendships",
+      "policyname": "Users can view their own friendships",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "policyname": "Group leaders can delete members",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM groups\n  WHERE ((groups.id = group_members.group_id) AND (groups.leader_id = auth.uid()))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "policyname": "Group members are viewable by everyone",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "policyname": "Users can join groups",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "policyname": "Users can leave groups",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "policyname": "Users can update their own member profile",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "groups",
+      "policyname": "Groups are viewable by everyone",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "groups",
+      "policyname": "Leaders can delete their groups",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = leader_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "groups",
+      "policyname": "Leaders can update their groups",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = leader_id)",
+      "with_check": "((auth.uid() = leader_id) OR (EXISTS ( SELECT 1\n   FROM group_members gm\n  WHERE ((gm.group_id = groups.id) AND (gm.user_id = groups.leader_id)))))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "groups",
+      "policyname": "Users can create groups",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = leader_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "policyname": "Admins can view all monthly_plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "((user_id = auth.uid()) OR is_admin())",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "policyname": "Users can delete their own monthly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "policyname": "Users can insert their own monthly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "policyname": "Users can update their own monthly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "policyname": "Users can view their own monthly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "pinned_tasks",
+      "policyname": "Users can manage their own pinned tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "ALL",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "policyname": "Admins can view all profiles",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "((auth.uid() = id) OR is_admin())",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "policyname": "Authenticated users can view all profiles",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "policyname": "Public profiles are viewable by everyone.",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "policyname": "Users can insert their own profile.",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "policyname": "Users can update own profile.",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "push_subscriptions",
+      "policyname": "Users can delete their own subscriptions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "push_subscriptions",
+      "policyname": "Users can insert their own subscriptions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(( SELECT auth.uid() AS uid) = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "push_subscriptions",
+      "policyname": "Users can update their own subscriptions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "push_subscriptions",
+      "policyname": "Users can view their own subscriptions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Admins can view all study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "((user_id = auth.uid()) OR is_admin())",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Friends can view study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM friendships\n  WHERE ((friendships.user_id = study_sessions.user_id) AND (friendships.friend_id = auth.uid()))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Group members can view study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM (group_members gm1\n     JOIN group_members gm2 ON ((gm1.group_id = gm2.group_id)))\n  WHERE ((gm1.user_id = auth.uid()) AND (gm2.user_id = study_sessions.user_id))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Users can delete their own study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Users can insert their own study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Users can update their own study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "policyname": "Users can view their own study sessions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "policyname": "Admins can view all tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "((user_id = auth.uid()) OR is_admin())",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "policyname": "Users can delete their own tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "policyname": "Users can insert their own tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(( SELECT auth.uid() AS uid) = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "policyname": "Users can update their own tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "policyname": "Users can view their own tasks",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(( SELECT auth.uid() AS uid) = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "timer_states",
+      "policyname": "Users can delete their own timer state",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "timer_states",
+      "policyname": "Users can insert their own timer state",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "timer_states",
+      "policyname": "Users can update their own timer state",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "timer_states",
+      "policyname": "Users can view their own timer state",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "user_settings",
+      "policyname": "Users can delete their own settings",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "user_settings",
+      "policyname": "Users can insert their own settings",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "user_settings",
+      "policyname": "Users can update their own settings",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "user_settings",
+      "policyname": "Users can view their own settings",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "policyname": "Admins can view all weekly_plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "((user_id = auth.uid()) OR is_admin())",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "policyname": "Users can delete their own weekly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "policyname": "Users can insert their own weekly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "policyname": "Users can update their own weekly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "policyname": "Users can view their own weekly plans",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "Authenticated users can upload",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((bucket_id = 'feedback-uploads'::text) AND (auth.role() = 'authenticated'::text))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "Public Access",
+      "permissive": "PERMISSIVE",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(bucket_id = 'feedback-uploads'::text)",
+      "with_check": null
+    }
+  ],
+  "rls": [
+    {
+      "schemaname": "public",
+      "tablename": "changelogs",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "debug_logs",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_likes",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedback_replies",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "feedbacks",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friend_requests",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "friendships",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "group_members",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "groups",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "monthly_plans",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "pinned_tasks",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "profiles",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "push_subscriptions",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "study_sessions",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "tasks",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "timer_states",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "user_settings",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "public",
+      "tablename": "weekly_plans",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "buckets",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "buckets_analytics",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "buckets_vectors",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "migrations",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "prefixes",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "s3_multipart_uploads",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "s3_multipart_uploads_parts",
+      "row_security": true,
+      "force_row_security": false
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "vector_indexes",
+      "row_security": true,
+      "force_row_security": false
+    }
+  ],
+  "functions": [
+    {
+      "schemaname": "public",
+      "function_name": "accept_friend_request",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.accept_friend_request(request_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\ndeclare\n  req record;\n  s_email text;\n  r_email text;\nbegin\n  -- Get request details\n  select * into req from friend_requests where id = request_id;\n  \n  if req is null then\n    raise exception 'Friend request not found.';\n  end if;\n\n  if req.status != 'pending' then\n    raise exception 'Friend request is not pending.';\n  end if;\n\n  -- Verify receiver is current user\n  if req.receiver_id != auth.uid() then\n    raise exception 'Not authorized to accept this request.';\n  end if;\n\n  -- Fetch latest emails from auth.users\n  select email into s_email from auth.users where id = req.sender_id;\n  select email into r_email from auth.users where id = req.receiver_id;\n\n  -- Update request status\n  update friend_requests set status = 'accepted' where id = request_id;\n\n  -- Insert friendships (bidirectional)\n  -- User (Sender) -> Friend (Receiver)\n  if not exists (select 1 from friendships where user_id = req.sender_id and friend_id = req.receiver_id) then\n    insert into friendships (user_id, friend_id, friend_email) \n    values (req.sender_id, req.receiver_id, r_email); -- Use fetched receiver email\n  end if;\n  \n  -- User (Receiver) -> Friend (Sender)\n  if not exists (select 1 from friendships where user_id = req.receiver_id and friend_id = req.sender_id) then\n    insert into friendships (user_id, friend_id, friend_email) \n    values (req.receiver_id, req.sender_id, s_email); -- Use fetched sender email\n  end if;\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "add_friend",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.add_friend(p_friend_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nDECLARE\n  v_user_id uuid;\nBEGIN\n  v_user_id := auth.uid();\n  \n  IF v_user_id IS NULL THEN\n    RAISE EXCEPTION 'Not authenticated';\n  END IF;\n\n  IF v_user_id = p_friend_id THEN\n    RAISE EXCEPTION 'Cannot add yourself';\n  END IF;\n\n  -- Insert A -> B\n  INSERT INTO friendships (user_id, friend_id)\n  VALUES (v_user_id, p_friend_id)\n  ON CONFLICT (user_id, friend_id) DO NOTHING;\n\n  -- Insert B -> A\n  INSERT INTO friendships (user_id, friend_id)\n  VALUES (p_friend_id, v_user_id)\n  ON CONFLICT (user_id, friend_id) DO NOTHING;\nEND;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "delete_friend",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.delete_friend(friend_uuid uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nbegin\n  -- Delete the friendship where the current user is the user_id\n  delete from friendships\n  where user_id = auth.uid() and friend_id = friend_uuid;\n\n  -- Delete the reciprocal friendship where the current user is the friend_id\n  delete from friendships\n  where user_id = friend_uuid and friend_id = auth.uid();\n\n  -- Delete the friend request history so they can be added again\n  delete from friend_requests\n  where (sender_id = auth.uid() and receiver_id = friend_uuid)\n     or (sender_id = friend_uuid and receiver_id = auth.uid());\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "delete_unconfirmed_users",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.delete_unconfirmed_users()\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  -- 3분(interval '3 minutes')이 지나도록 인증되지 않은 사용자 삭제\r\n  delete from auth.users\r\n  where email_confirmed_at is null\r\n  and created_at < now() - interval '3 minutes';\r\nend;\r\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_friends_study_time",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_friends_study_time(p_user_id uuid, p_date text)\n RETURNS TABLE(friend_id uuid, total_seconds integer)\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  return query\r\n  select\r\n    f.friend_id,\r\n    coalesce(sum(ss.duration), 0)::integer as total_seconds\r\n  from\r\n    friendships f\r\n  left join\r\n    study_sessions ss on f.friend_id = ss.user_id\r\n    and date(ss.created_at) = p_date::date\r\n  where\r\n    f.user_id = p_user_id\r\n  group by\r\n    f.friend_id;\r\nend;\r\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_group_study_time",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_group_study_time(p_group_id uuid, p_date text)\n RETURNS TABLE(user_id uuid, total_seconds integer)\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nbegin\n  return query\n  select\n    gm.user_id,\n    coalesce(sum(ss.duration), 0)::integer as total_seconds\n  from\n    group_members gm\n  left join\n    study_sessions ss on gm.user_id = ss.user_id\n    and date(ss.created_at) = p_date::date\n  where\n    gm.group_id = p_group_id\n  group by\n    gm.user_id;\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_group_study_time_v2",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_group_study_time_v2(p_date text, p_group_id uuid)\n RETURNS TABLE(user_id uuid, total_seconds integer)\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nbegin\n  return query\n  select\n    gm.user_id,\n    coalesce(sum(ss.duration), 0)::integer as total_seconds\n  from\n    group_members gm\n  left join\n    study_sessions ss on gm.user_id = ss.user_id\n    and date(ss.created_at) = p_date::date\n  where\n    gm.group_id = p_group_id\n  group by\n    gm.user_id;\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_group_study_time_v3",
+      "security_definer": false,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_group_study_time_v3(p_group_id uuid, p_start_time timestamp with time zone, p_end_time timestamp with time zone)\n RETURNS TABLE(user_id uuid, total_seconds integer)\n LANGUAGE plpgsql\nAS $function$\nbegin\n  return query\n  select\n    gm.user_id,\n    coalesce(sum(ss.duration), 0)::integer as total_seconds\n  from\n    group_members gm\n  left join\n    study_sessions ss on gm.user_id = ss.user_id\n    and ss.created_at >= p_start_time\n    and ss.created_at <= p_end_time\n  where\n    gm.group_id = p_group_id\n  group by\n    gm.user_id;\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_monthly_leaderboard",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_monthly_leaderboard(target_year integer, target_month integer)\n RETURNS TABLE(rank bigint, user_id uuid, nickname text, total_duration bigint)\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nBEGIN\r\n  RETURN QUERY\r\n  WITH monthly_stats AS (\r\n    SELECT \r\n      ss.user_id,\r\n      CAST(SUM(ss.duration) AS BIGINT) as total_duration\r\n    FROM \r\n      study_sessions ss\r\n    JOIN\r\n      profiles p ON ss.user_id = p.id\r\n    WHERE \r\n      EXTRACT(YEAR FROM ss.created_at) = target_year\r\n      AND EXTRACT(MONTH FROM ss.created_at) = target_month\r\n      AND p.is_leaderboard_participant = true\r\n    GROUP BY \r\n      ss.user_id\r\n  )\r\n  SELECT \r\n    RANK() OVER (ORDER BY ms.total_duration DESC) as rank,\r\n    ms.user_id,\r\n    COALESCE(p.nickname, 'Unknown') as nickname,\r\n    ms.total_duration\r\n  FROM \r\n    monthly_stats ms\r\n  JOIN \r\n    profiles p ON ms.user_id = p.id\r\n  ORDER BY \r\n    rank ASC\r\n  LIMIT 100;\r\nEND;\r\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "get_user_id_by_email",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.get_user_id_by_email(email_input text)\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\ndeclare\n  target_id uuid;\nbegin\n  select id into target_id from auth.users where email = email_input;\n  return target_id;\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "handle_new_user",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.handle_new_user()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nBEGIN\n  INSERT INTO public.profiles (id, email, nickname, role)\n  VALUES (\n    new.id, \n    new.email, \n    new.raw_user_meta_data->>'full_name',\n    'user'\n  );\n  RETURN new;\nEND;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "handle_user_update",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.handle_user_update()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nBEGIN\n  UPDATE public.profiles\n  SET nickname = new.raw_user_meta_data->>'full_name'\n  WHERE id = new.id;\n  RETURN new;\nEND;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "is_admin",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.is_admin()\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nBEGIN\n  RETURN EXISTS (\n    SELECT 1\n    FROM public.profiles\n    WHERE id = auth.uid()\n    AND role = 'admin'\n  );\nEND;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "send_friend_request",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.send_friend_request(receiver_email text)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  target_id uuid;\n  current_uid uuid;\nbegin\n  -- Capture auth.uid()\n  current_uid := auth.uid();\n\n  -- 1. Get User ID by email\n  select id into target_id from auth.users where email = receiver_email;\n  \n  if target_id is null then\n    raise exception 'User not found with this email.';\n  end if;\n\n  if target_id = current_uid then\n    raise exception 'You cannot add yourself.';\n  end if;\n\n  -- 2. Check if already friends (Source of Truth: friendships table)\n  if exists (select 1 from friendships where user_id = current_uid and friend_id = target_id) then\n    raise exception 'You are already friends.';\n  end if;\n\n  -- 3. Delete ANY existing rejected request between these two users\n  delete from friend_requests \n  where ((sender_id = current_uid and receiver_id = target_id)\n     or (sender_id = target_id and receiver_id = current_uid))\n    and status = 'rejected';\n    \n  -- 4. Insert new request\n  insert into friend_requests (sender_id, receiver_id, sender_email)\n  values (current_uid, target_id, (select email from auth.users where id = current_uid));\n\nend;\n$function$\n"
+    },
+    {
+      "schemaname": "public",
+      "function_name": "trim_push_subscriptions",
+      "security_definer": true,
+      "definition": "CREATE OR REPLACE FUNCTION public.trim_push_subscriptions()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\nDECLARE\n  max_subs INTEGER := 5;\nBEGIN\n  -- Delete oldest subscriptions for the modified user if count > max_subs\n  DELETE FROM public.push_subscriptions\n  WHERE id IN (\n    SELECT id\n    FROM public.push_subscriptions\n    WHERE user_id = NEW.user_id\n    ORDER BY created_at DESC\n    OFFSET max_subs\n  );\n  RETURN NULL; -- Trigger is AFTER INSERT, so return value is ignored\nEND;\n$function$\n"
+    }
+  ]
+}

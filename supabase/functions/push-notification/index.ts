@@ -9,6 +9,8 @@ const supabase = createClient(
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
+const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET') ?? '';
+
 const vapidKeys = {
     publicKey: Deno.env.get('VAPID_PUBLIC_KEY') ?? '',
     privateKey: Deno.env.get('VAPID_PRIVATE_KEY') ?? '',
@@ -22,6 +24,25 @@ webpush.setVapidDetails(
 );
 
 Deno.serve(async (req) => {
+    if (req.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+    }
+
+    if (WEBHOOK_SECRET) {
+        const headerSecret =
+            req.headers.get('x-webhook-secret') ||
+            req.headers.get('x-fomopomo-webhook-secret') ||
+            req.headers.get('authorization');
+
+        const token = headerSecret?.startsWith('Bearer ')
+            ? headerSecret.slice('Bearer '.length).trim()
+            : headerSecret?.trim();
+
+        if (!token || token !== WEBHOOK_SECRET) {
+            return new Response('Unauthorized', { status: 401 });
+        }
+    }
+
     try {
         const payload = await req.json();
 
