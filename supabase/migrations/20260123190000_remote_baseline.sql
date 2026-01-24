@@ -1,0 +1,2 @@
+-- Baseline migration to align local history with the current remote schema.
+-- No-op by design.

@@ -291,7 +291,6 @@ export async function POST(request: NextRequest) {
         timer_mode: 'focus',
         timer_duration: 0,
         is_task_public: true,
-        is_leaderboard_participant: false,
       })
       .eq('id', user.id);
 
