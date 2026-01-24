@@ -73,6 +73,11 @@ export default function Footer() {
                   문의하기
                 </a>
               </li>
+              <li>
+                <Link href="/support" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
+                  후원하기 ☕
+                </Link>
+              </li>
             </ul>
           </div>
 
