@@ -124,12 +124,6 @@ export default function AdminPage() {
             </h1>
             <div className="flex gap-3">
               <button
-                onClick={() => router.push('/admin/feedback')}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-              >
-                피드백 관리
-              </button>
-              <button
                 onClick={() => router.push('/admin/changelog')}
                 className="px-4 py-2 text-sm font-medium text-white bg-rose-500 rounded-lg hover:bg-rose-600 transition-colors shadow-sm"
               >

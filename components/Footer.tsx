@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { Github, Mail } from 'lucide-react';
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -14,18 +13,11 @@ export default function Footer() {
               Fomopomo
             </Link>
             <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-              Fear Of Missing Out your Pomodoro
+              Fear of missing out your Pomodoro
             </p>
-            <div className="flex space-x-4 pt-2">
-              <a href="https://github.com/hwankr" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-rose-500 transition-colors">
-                <span className="sr-only">GitHub</span>
-                <Github className="h-5 w-5" />
-              </a>
-              <a href="mailto:fabronjeon@naver.com" className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <span className="sr-only">Email</span>
-                <Mail className="h-5 w-5" />
-              </a>
-            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Contact: <a href="mailto:fomopomokr@gmail.com" className="hover:text-rose-500 dark:hover:text-rose-400 transition-colors">fomopomokr@gmail.com</a>
+            </p>
           </div>
 
           {/* Product Section */}
@@ -64,14 +56,9 @@ export default function Footer() {
             </h3>
             <ul className="space-y-3">
               <li>
-                <Link href="/feedback?tab=feedback" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  피드백 보내기
-                </Link>
-              </li>
-              <li>
-                <a href="mailto:fabronjeon@naver.com" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
+                <Link href="/contact" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
                   문의하기
-                </a>
+                </Link>
               </li>
               <li>
                 <Link href="/support" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">

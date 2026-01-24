@@ -80,7 +80,7 @@ export default function PrivacyPage() {
               <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">5. 문의처</h2>
               <p>
                 개인정보 관련 문의는 아래 이메일로 연락 주시기 바랍니다.<br />
-                이메일: <a href="mailto:fabronjeon@naver.com" className="text-rose-500 hover:underline">fabronjeon@naver.com</a>
+                이메일: <a href="mailto:fomopomokr@gmail.com" className="text-rose-500 hover:underline">fomopomokr@gmail.com</a>
               </p>
             </section>
 
