@@ -92,7 +92,7 @@ export default function SupportPage() {
         
         {/* 감사 메시지 */}
         <p className="text-center text-xs text-gray-500 dark:text-gray-500 mt-8">
-          Fomopomo를 사용해주셔서 감사합니다 🍅
+          Fomopomo를 사용해주셔서 감사합니다
         </p>
       </div>
     </main>

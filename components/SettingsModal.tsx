@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import NotificationManager from './NotificationManager';
 import ConfirmModal from './ConfirmModal';
-import DonationSection from './DonationSection';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -728,7 +727,15 @@ export default function SettingsModal({
               <h3 className="text-gray-400 text-xs font-bold mb-3 flex items-center gap-2">
                 ☕ 후원
               </h3>
-              <DonationSection variant="minimal" showDescription={true} />
+              <p className="text-xs text-gray-500 mb-3">
+                서비스가 마음에 드셨다면, 커피 한 잔으로 응원해주세요!
+              </p>
+              <a
+                href="/support"
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-medium rounded-lg transition-colors border border-amber-200"
+              >
+                후원하기 →
+              </a>
             </section>
           </div>
           <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
