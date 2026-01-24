@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Mail } from 'lucide-react';
+import { ArrowLeft, Mail, Copy } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useTheme } from '@/components/ThemeProvider';
@@ -85,18 +85,22 @@ export default function ContactPage() {
         {/* 연락처 카드 */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
           {/* 이메일 */}
-          <a 
-            href="mailto:fomopomokr@gmail.com"
-            className="flex items-center gap-4 p-5 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+          <button 
+            onClick={() => {
+              navigator.clipboard.writeText('fomopomokr@gmail.com');
+              toast.success('이메일이 복사되었습니다');
+            }}
+            className="group w-full flex items-center gap-4 p-5 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors text-left cursor-pointer"
           >
             <div className="flex items-center justify-center w-12 h-12 bg-rose-100 dark:bg-rose-900/30 rounded-full">
               <Mail className="w-5 h-5 text-rose-500" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-sm font-medium text-gray-900 dark:text-white">이메일</p>
               <p className="text-sm text-gray-500 dark:text-gray-400">fomopomokr@gmail.com</p>
             </div>
-          </a>
+            <Copy className="w-4 h-4 text-gray-400 dark:text-gray-500 group-hover:text-rose-500 dark:group-hover:text-rose-400 transition-colors" />
+          </button>
         </div>
         
         {/* 부가 안내 */}
