@@ -9,6 +9,9 @@ import NotificationManager from '@/components/NotificationManager';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import FloatingTimerButton from '@/components/FloatingTimerButton';
 import SnowEffect from '@/components/SnowEffect'; // ❄️ 겨울 눈 효과 (삭제 시 이 줄 제거)
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
+import GoogleAnalytics from '../components/GoogleAnalytics';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -56,6 +59,9 @@ export default function RootLayout({
           <NotificationManager />
           <Footer />
         </ThemeProvider>
+        <Analytics />
+        <SpeedInsights />
+        <GoogleAnalytics />
       </body>
     </html>
   );
