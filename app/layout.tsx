@@ -16,19 +16,41 @@ import GoogleAnalytics from '../components/GoogleAnalytics';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'fomopomo',
-  description: 'fomopomo - Focus on your work, not on missing out',
+  title: {
+    default: 'fomopomo | 뽀모도로 타이머',
+    template: '%s | fomopomo',
+  },
+  description: '뽀모도로와 스톱워치로 학습을 기록하세요. Fomopomo',
+  keywords: ['뽀모도로', '타이머', '집중', 'pomodoro', 'focus', '공부 타이머', '집중 타이머', '스톱워치', 'stopwatch'],
+  authors: [{ name: 'fomopomo' }],
+  creator: 'fomopomo',
+  metadataBase: new URL('https://fomopomo.com'),
+  openGraph: {
+    type: 'website',
+    locale: 'ko_KR',
+    url: 'https://fomopomo.com',
+    siteName: 'fomopomo',
+    title: 'fomopomo - 뽀모도로 타이머',
+    description: '뽀모도로와 스톱워치로 학습을 기록하세요. Fomopomo',
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'fomopomo - 뽀모도로 타이머' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'fomopomo - 뽀모도로 타이머',
+    description: '뽀모도로와 스톱워치로 학습을 기록하세요',
+    images: ['/og-image.png'],
+  },
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/icon.png', // 기본 파비콘
+    icon: '/icon.png',
     apple: [
-      { url: '/icon.png', sizes: '180x180', type: 'image/png' }, // 애플용 고화질 아이콘 지정
+      { url: '/icon.png', sizes: '180x180', type: 'image/png' },
     ],
   },
   appleWebApp: {
-    capable: true, // 웹앱으로 동작 가능하게 설정
-    title: 'fomopomo', // 홈 화면에 추가될 때의 이름
-    statusBarStyle: 'black-translucent', // 상단 상태바 스타일 (선택사항: default, black, black-translucent)
+    capable: true,
+    title: 'fomopomo',
+    statusBarStyle: 'black-translucent',
   },
 };
 
