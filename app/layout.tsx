@@ -24,6 +24,9 @@ export const metadata: Metadata = {
   keywords: ['뽀모도로', '타이머', '집중', 'pomodoro', 'focus', '공부 타이머', '집중 타이머', '스톱워치', 'stopwatch'],
   authors: [{ name: 'fomopomo' }],
   creator: 'fomopomo',
+  verification: {
+    google: 'OSDRrmDwqWOqvH1PfSidEU6c2ZX0FA23w7TpZbdHmEg',
+  },
   metadataBase: new URL('https://fomopomo.com'),
   openGraph: {
     type: 'website',
