@@ -1,10 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import FriendsDashboard from '@/components/friends/FriendsDashboard';
+import LoginModal from '@/components/LoginModal';
+import { supabase } from '@/lib/supabase';
 
 export default function FriendsPage() {
   const { session, loading } = useAuthSession();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   if (loading) {
     return (
@@ -17,5 +21,23 @@ export default function FriendsPage() {
     );
   }
 
-  return <FriendsDashboard session={session} />;
+  return (
+    <>
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onGoogleLogin={() => {
+          setIsLoginModalOpen(false);
+          supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: window.location.origin + '/friends' },
+          });
+        }}
+      />
+      <FriendsDashboard 
+        session={session} 
+        onOpenLogin={() => setIsLoginModalOpen(true)} 
+      />
+    </>
+  );
 }
