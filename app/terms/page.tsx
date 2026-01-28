@@ -77,8 +77,8 @@ export default function TermsPage() {
             </section>
 
             <div className="pt-8 border-t border-gray-100 dark:border-slate-800 text-sm text-gray-500">
-              <p>공고일자: 2025년 12월 21일</p>
-              <p>시행일자: 2025년 12월 21일</p>
+              <p>공고일자: 2026년 1월 28일</p>
+              <p>시행일자: 2026년 1월 28일</p>
             </div>
           </div>
         </div>
