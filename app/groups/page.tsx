@@ -6,6 +6,7 @@ import { useAuthSession } from '@/hooks/useAuthSession';
 import Link from 'next/link';
 import CreateGroupModal from '@/components/CreateGroupModal';
 import JoinGroupModal from '@/components/JoinGroupModal';
+import LoginModal from '@/components/LoginModal';
 import Navbar from '@/components/Navbar';
 import { useTheme } from '@/components/ThemeProvider';
 
@@ -23,6 +24,7 @@ export default function GroupsPage() {
     const [groupsLoading, setGroupsLoading] = useState(true);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+    const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
     const fetchGroups = async () => {
         if (!session?.user) return;
@@ -54,17 +56,33 @@ export default function GroupsPage() {
         }
     }, [session, sessionLoading]);
 
+    const handleActionClick = (action: () => void) => {
+        if (!session) {
+            setIsLoginModalOpen(true);
+        } else {
+            action();
+        }
+    };
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-8">
+            <LoginModal
+                isOpen={isLoginModalOpen}
+                onClose={() => setIsLoginModalOpen(false)}
+                onGoogleLogin={() => {
+                    setIsLoginModalOpen(false);
+                    supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: { redirectTo: `${window.location.origin}/groups` }
+                    });
+                }}
+            />
             <Navbar
                 session={session}
                 isDarkMode={isDarkMode}
                 toggleDarkMode={toggleDarkMode}
                 onLogout={() => supabase.auth.signOut()}
-                onOpenLogin={() => supabase.auth.signInWithOAuth({
-                    provider: 'google',
-                    options: { redirectTo: `${window.location.origin}/groups` }
-                })}
+                onOpenLogin={() => setIsLoginModalOpen(true)}
             />
             <div className="max-w-4xl mx-auto">
                 <div className="mb-8">
@@ -72,13 +90,13 @@ export default function GroupsPage() {
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">내 그룹</h1>
                         <div className="flex gap-4">
                             <button
-                                onClick={() => setIsJoinModalOpen(true)}
+                                onClick={() => handleActionClick(() => setIsJoinModalOpen(true))}
                                 className="px-4 py-2 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 rounded-lg shadow hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors font-medium border border-gray-200 dark:border-slate-700"
                             >
                                 그룹 참여
                             </button>
                             <button
-                                onClick={() => setIsCreateModalOpen(true)}
+                                onClick={() => handleActionClick(() => setIsCreateModalOpen(true))}
                                 className="px-4 py-2 bg-rose-500 text-white rounded-lg shadow hover:bg-rose-600 transition-colors font-medium"
                             >
                                 그룹 생성
@@ -90,6 +108,18 @@ export default function GroupsPage() {
                 {groupsLoading ? (
                     <div className="text-center py-12">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-500 mx-auto"></div>
+                    </div>
+                ) : !session ? (
+                    <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
+                        <div className="text-6xl mb-4">👥</div>
+                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">로그인하고 그룹에 참여해보세요!</h3>
+                        <p className="text-gray-500 dark:text-gray-400 mb-8">친구들과 함께 공부할 그룹을 만들거나 기존 그룹에 참여할 수 있어요.</p>
+                        <button
+                            onClick={() => setIsLoginModalOpen(true)}
+                            className="px-6 py-3 bg-rose-500 text-white rounded-xl shadow-lg hover:bg-rose-600 transition-all transform hover:-translate-y-1"
+                        >
+                            로그인하기
+                        </button>
                     </div>
                 ) : groups.length === 0 ? (
                     <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
