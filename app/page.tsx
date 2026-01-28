@@ -85,9 +85,11 @@ export default function Home() {
         />
 
         {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
-        {session ? (
-          <HistoryList updateTrigger={historyUpdateTrigger} />
-        ) : null}
+        <HistoryList 
+          updateTrigger={historyUpdateTrigger} 
+          session={session}
+          onOpenLogin={() => setIsLoginModalOpen(true)}
+        />
       </div>
     </main>
   );

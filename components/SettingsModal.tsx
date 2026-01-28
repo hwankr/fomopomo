@@ -771,7 +771,6 @@ export default function SettingsModal({
               <li>친구/친구 요청</li>
               <li>가입된 그룹 (자동 탈퇴, 혼자만 있는 그룹은 삭제)</li>
               <li>할 일/주간·월간 플랜</li>
-              <li>피드백/댓글/좋아요</li>
               <li>설정/알림</li>
             </ul>
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -796,7 +795,6 @@ export default function SettingsModal({
               <li>친구/친구 요청</li>
               <li>가입된 그룹 (자동 탈퇴, 혼자만 있는 그룹은 삭제)</li>
               <li>할 일/주간·월간 플랜</li>
-              <li>피드백/댓글/좋아요</li>
               <li>설정/알림</li>
             </ul>
             <p className="text-xs text-gray-500 dark:text-gray-400">

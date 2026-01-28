@@ -136,13 +136,13 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
   }, [selectedDate, userId]);
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading timeline...</div>;
+    return <div className="p-4 text-center text-gray-500">타임라인 불러오는 중...</div>;
   }
 
   if (sessions.length === 0) {
     return (
       <div className="p-8 text-center text-gray-500 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
-        <p>No activity recorded for this day.</p>
+        <p>오늘의 활동 기록이 없습니다.</p>
       </div>
     );
   }

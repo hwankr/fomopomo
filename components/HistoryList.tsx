@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
+import { Session } from '@supabase/supabase-js';
 
 type StudySession = {
   id: number;
@@ -16,10 +17,12 @@ type StudySession = {
 // ✨ [추가] updateTrigger를 선택적 prop으로 정의
 interface HistoryListProps {
   updateTrigger?: number;
+  session?: Session | null;
+  onOpenLogin?: () => void;
 }
 
 // ✨ props 구조 분해 할당 (기본값 0)
-export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
+export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }: HistoryListProps) {
   const [history, setHistory] = useState<StudySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -258,6 +261,16 @@ export default function HistoryList({ updateTrigger = 0 }: HistoryListProps) {
         {loading ? (
           <div className="text-center text-gray-400 py-8 text-sm">
             로딩 중...
+          </div>
+        ) : !session ? (
+          <div className="text-center py-8">
+            <p className="text-gray-400 text-sm mb-3">로그인하고 학습 기록을 확인해보세요!</p>
+            <button
+              onClick={onOpenLogin}
+              className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+            >
+              로그인하기
+            </button>
           </div>
         ) : history.length === 0 ? (
           <div className="text-center text-gray-400 py-8 text-sm">
