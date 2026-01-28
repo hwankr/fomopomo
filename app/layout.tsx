@@ -26,6 +26,9 @@ export const metadata: Metadata = {
   creator: 'fomopomo',
   verification: {
     google: 'OSDRrmDwqWOqvH1PfSidEU6c2ZX0FA23w7TpZbdHmEg',
+    other: {
+      'naver-site-verification': '79045230bcdc999bf0f45f89d43fb527bb1ec363',
+    },
   },
   metadataBase: new URL('https://fomopomo.com'),
   openGraph: {
