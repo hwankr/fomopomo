@@ -91,7 +91,7 @@ export default function LoginModal({
         {/* 헤더 */}
         <div className="text-center mb-6">
           <h2 className="text-gray-500 font-bold text-sm uppercase tracking-wider mb-1">
-            {isSignUp ? 'Sign Up' : 'Sign In'}
+            {isSignUp ? '회원가입' : '로그인'}
           </h2>
           <h1 className="text-2xl font-extrabold text-gray-700">
             {isSignUp ? 'fomopomo 회원가입' : 'fomopomo 로그인'}
@@ -110,21 +110,21 @@ export default function LoginModal({
             height={20}
             className="w-5 h-5 group-hover:scale-110 transition-transform"
           />
-          Sign up with Google
+          Google로 계속하기
         </button>
 
-        {/* 구분선 (OR) */}
+        {/* 구분선 */}
         <div className="flex items-center gap-4 mb-6">
           <div className="h-px bg-gray-200 flex-1"></div>
-          <span className="text-gray-400 text-sm font-medium">or</span>
+          <span className="text-gray-400 text-sm font-medium">또는</span>
           <div className="h-px bg-gray-200 flex-1"></div>
         </div>
 
         {/* 이메일 로그인 */}
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">
-              Email
+            <label className="block text-xs font-bold text-gray-400 mb-1">
+              이메일
             </label>
             <input
               type="email"
@@ -135,8 +135,8 @@ export default function LoginModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">
-              Password
+            <label className="block text-xs font-bold text-gray-400 mb-1">
+              비밀번호
             </label>
             <input
               type="password"
@@ -153,20 +153,20 @@ export default function LoginModal({
             disabled={loading}
             className="w-full bg-gray-800 text-white font-bold py-3 rounded hover:bg-gray-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'Processing...' : isSignUp ? 'Sign Up with Email' : 'Sign In with Email'}
+            {loading ? '처리 중...' : isSignUp ? '이메일로 가입하기' : '이메일로 로그인'}
           </button>
         </div>
 
         {/* 하단 링크 */}
         <div className="mt-6 text-center text-sm">
           <span className="text-gray-400">
-            {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
+            {isSignUp ? '이미 계정이 있으신가요? ' : '계정이 없으신가요? '}
           </span>
           <button
             onClick={() => setIsSignUp(!isSignUp)}
             className="text-gray-800 font-bold hover:underline"
           >
-            {isSignUp ? 'Log in' : 'Sign up'}
+            {isSignUp ? '로그인' : '회원가입'}
           </button>
         </div>
       </div>
