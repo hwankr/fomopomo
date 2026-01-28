@@ -27,6 +27,7 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
     const [debugLog, setDebugLog] = useState<string[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
 
     const addLog = (msg: string) => {
         setDebugLog(prev => [msg, ...prev].slice(0, 10));
@@ -57,12 +58,31 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
         }
     };
 
+    const checkAdminRole = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('role')
+                    .eq('id', user.id)
+                    .single();
+                setIsAdmin(profile?.role === 'admin');
+            }
+        } catch (e) {
+            console.error('Error checking admin role:', e);
+        }
+    };
+
     useEffect(() => {
         // Check dismissal state
         const isDismissed = localStorage.getItem('fomopomo_notification_dismissed') === 'true';
         if (!isDismissed) {
             setIsVisible(true);
         }
+
+        // Check admin role
+        checkAdminRole();
 
         const registerSwAndCheckPermission = async () => {
             if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -238,41 +258,35 @@ export default function NotificationManager({ mode = 'floating' }: { mode?: 'flo
             )}
 
             {permission === 'granted' && (
-                <div className="grid grid-cols-2 gap-2">
-                    <button 
-                        onClick={() => subscribeUser(true)}
-                        className="py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors"
-                    >
-                        🔄 연결 새로고침
-                    </button>
-                    <button 
-                        onClick={sendTestNotification}
-                        className="py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
-                    >
-                        🔔 테스트 알림 발송
-                    </button>
-                </div>
+                <button 
+                    onClick={sendTestNotification}
+                    className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors"
+                >
+                    🔔 테스트 알림 발송
+                </button>
             )}
 
-            {/* 디버그 로그 토글 (옵션) */}
-            <div className="pt-2">
-                <button 
-                    onClick={() => setIsOpen(!isOpen)} 
-                    className="text-[10px] text-gray-400 underline hover:text-gray-600"
-                >
-                    {isOpen ? '디버그 로그 숨기기' : '디버그 로그 보기'}
-                </button>
-                
-                {isOpen && (
-                    <div className="mt-2 p-2 bg-gray-900 text-green-400 rounded text-[10px] font-mono h-32 overflow-y-auto">
-                        {debugLog.map((log, i) => (
-                            <div key={i} className="border-b border-gray-800 last:border-0 py-0.5">
-                                &gt; {log}
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+            {/* 디버그 로그 토글 (관리자 전용) */}
+            {isAdmin && (
+                <div className="pt-2">
+                    <button 
+                        onClick={() => setIsOpen(!isOpen)} 
+                        className="text-[10px] text-gray-400 underline hover:text-gray-600"
+                    >
+                        {isOpen ? '디버그 로그 숨기기' : '디버그 로그 보기'}
+                    </button>
+                    
+                    {isOpen && (
+                        <div className="mt-2 p-2 bg-gray-900 text-green-400 rounded text-[10px] font-mono h-32 overflow-y-auto">
+                            {debugLog.map((log, i) => (
+                                <div key={i} className="border-b border-gray-800 last:border-0 py-0.5">
+                                    &gt; {log}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
