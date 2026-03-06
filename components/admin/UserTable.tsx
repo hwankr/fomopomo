@@ -9,6 +9,8 @@ interface UserTableProps {
   onUserClick: (userId: string) => void;
 }
 
+type SortOption = 'recentAccess' | 'joined';
+
 function StudyDuration({ startTime }: { startTime: string }) {
   const [duration, setDuration] = useState('');
 
@@ -49,8 +51,25 @@ function getStatusLabel(user: Profile) {
   return 'Offline';
 }
 
+function getTimestamp(value?: string | null) {
+  if (!value) return 0;
+
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return date.toLocaleString();
+}
+
 export default function UserTable({ users, onUserClick }: UserTableProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('recentAccess');
 
   const filteredUsers = users.filter((user) => {
     const normalizedSearch = searchTerm.toLowerCase();
@@ -60,21 +79,45 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
     );
   });
 
+  const sortedUsers = [...filteredUsers].sort((left, right) => {
+    if (sortBy === 'recentAccess') {
+      const accessDiff =
+        getTimestamp(right.last_active_at) - getTimestamp(left.last_active_at);
+
+      if (accessDiff !== 0) return accessDiff;
+    }
+
+    return getTimestamp(right.created_at) - getTimestamp(left.created_at);
+  });
+
   return (
     <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <div className="flex flex-col justify-between gap-4 border-b border-gray-100 p-4 dark:border-gray-700 sm:flex-row sm:items-center">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">
           Users ({filteredUsers.length})
         </h2>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by email or nickname"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 sm:w-72"
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <label className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <span>Sort</span>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as SortOption)}
+              className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-200"
+            >
+              <option value="recentAccess">Recent access</option>
+              <option value="joined">Recently joined</option>
+            </select>
+          </label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by email or nickname"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 sm:w-72"
+            />
+          </div>
         </div>
       </div>
 
@@ -85,11 +128,12 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
               <th className="px-6 py-3 font-medium">User</th>
               <th className="px-6 py-3 font-medium">Status</th>
               <th className="px-6 py-3 font-medium">Current task</th>
+              <th className="px-6 py-3 font-medium">Last active</th>
               <th className="px-6 py-3 font-medium">Joined</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-            {filteredUsers.map((user) => (
+            {sortedUsers.map((user) => (
               <tr
                 key={user.id}
                 onClick={() => onUserClick(user.id)}
@@ -136,6 +180,9 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
                 </td>
                 <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
                   {user.current_task || '-'}
+                </td>
+                <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
+                  {formatDateTime(user.last_active_at)}
                 </td>
                 <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
                   {user.created_at
