@@ -15,6 +15,14 @@ export const useTasks = (isLoggedIn: boolean) => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isTasksLoaded, setIsTasksLoaded] = useState(false);
 
+  const applyRestoredTaskState = useCallback(
+    (taskId: string | null, taskTitle: string) => {
+      setSelectedTaskId(taskId);
+      setSelectedTask(taskTitle);
+    },
+    []
+  );
+
   const fetchDbTasks = useCallback(async () => {
     if (!isLoggedIn) return;
     try {
@@ -83,28 +91,37 @@ export const useTasks = (isLoggedIn: boolean) => {
             monthlyPlans.some(t => t.id === taskId);
 
           if (taskExists) {
-            setSelectedTaskId(taskId);
-            setSelectedTask(taskTitle || '');
+            queueMicrotask(() => {
+              applyRestoredTaskState(taskId, taskTitle || '');
+            });
           } else {
             // Clear invalid task from localStorage
             localStorage.removeItem('fomopomo_task_state');
-            setSelectedTaskId(null);
-            setSelectedTask('');
+            queueMicrotask(() => {
+              applyRestoredTaskState(null, '');
+            });
           }
         }
       }
     } catch (error) {
       console.error('Error restoring task state:', error);
     }
-  }, [isTasksLoaded, dbTasks, weeklyPlans, monthlyPlans]);
+  }, [applyRestoredTaskState, isTasksLoaded, dbTasks, weeklyPlans, monthlyPlans]);
 
   // Initial fetch and focus/mount listeners
   useEffect(() => {
-    fetchDbTasks();
+    const initialFetch = setTimeout(() => {
+      void fetchDbTasks();
+    }, 0);
 
-    const onFocus = () => fetchDbTasks();
+    const onFocus = () => {
+      void fetchDbTasks();
+    };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      clearTimeout(initialFetch);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [fetchDbTasks]);
 
   // Restore validation: Ensure selected task still exists or keep it anyway?

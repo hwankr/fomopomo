@@ -1,6 +1,11 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useSyncExternalStore,
+} from 'react';
 
 type ThemeContextType = {
   isDarkMode: boolean;
@@ -8,44 +13,66 @@ type ThemeContextType = {
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const THEME_KEY = 'theme';
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [mounted, setMounted] = useState(false);
+function getThemeSnapshot() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
 
-  useEffect(() => {
-    setMounted(true);
-    // Check local storage or system preference
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
-      setIsDarkMode(true);
-    } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setIsDarkMode(true);
+  const savedTheme = window.localStorage.getItem(THEME_KEY);
+  if (savedTheme === 'dark') return true;
+  if (savedTheme === 'light') return false;
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function subscribeTheme(onStoreChange: () => void) {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  const handleThemeChange = () => onStoreChange();
+  const handleStorageChange = (event: StorageEvent) => {
+    if (event.key === THEME_KEY) {
+      onStoreChange();
     }
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
-    
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  }, [isDarkMode, mounted]);
-
-  const toggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
   };
 
-  // Prevent hydration mismatch by rendering children only after mount, 
-  // or just return children but accept that class might change.
-  // Since we are modifying documentElement (html tag), it's outside of React root usually, 
-  // but for the initial render, we might want to avoid flashing.
-  // However, for simplicity, we'll just render children.
-  
+  mediaQuery.addEventListener('change', handleThemeChange);
+  window.addEventListener('storage', handleStorageChange);
+  window.addEventListener('themeChanged', handleThemeChange);
+
+  return () => {
+    mediaQuery.removeEventListener('change', handleThemeChange);
+    window.removeEventListener('storage', handleStorageChange);
+    window.removeEventListener('themeChanged', handleThemeChange);
+  };
+}
+
+function writeTheme(isDarkMode: boolean) {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(THEME_KEY, isDarkMode ? 'dark' : 'light');
+  window.dispatchEvent(new Event('themeChanged'));
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const isDarkMode = useSyncExternalStore(
+    subscribeTheme,
+    getThemeSnapshot,
+    () => false
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkMode);
+  }, [isDarkMode]);
+
+  const toggleDarkMode = () => {
+    writeTheme(!isDarkMode);
+  };
+
   return (
     <ThemeContext.Provider value={{ isDarkMode, toggleDarkMode }}>
       {children}
@@ -55,8 +82,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 export function useTheme() {
   const context = useContext(ThemeContext);
+
   if (context === undefined) {
     throw new Error('useTheme must be used within a ThemeProvider');
   }
+
   return context;
 }

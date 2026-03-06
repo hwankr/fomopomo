@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useEffectEvent, useRef } from 'react';
 import toast from 'react-hot-toast';
 import TaskSidebar from './TaskSidebar';
 
@@ -8,7 +8,7 @@ import TaskSidebar from './TaskSidebar';
 import { useSettings, type Settings } from '@/components/timer/hooks/useSettings';
 import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
-import { useTimerLogic } from './timer/hooks/useTimerLogic';
+import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
 import { useStudySession } from './timer/hooks/useStudySession';
 
@@ -33,6 +33,42 @@ interface TimerAppProps {
   onRecordSaved: () => void;
   isLoggedIn: boolean;
 }
+
+type SavedInterval = {
+  start: number;
+  end: number;
+};
+
+type SavedTimerState = {
+  mode: TimerMode;
+  isRunning: boolean;
+  timeLeft: number;
+  targetTime: number | null;
+  cycleCount: number;
+  loggedSeconds: number;
+};
+
+type SavedStopwatchState = {
+  isRunning: boolean;
+  elapsed: number;
+  startTime: number | null;
+};
+
+type SavedAppState = {
+  activeTab: 'timer' | 'stopwatch';
+  timer: SavedTimerState;
+  stopwatch: SavedStopwatchState;
+  intervals?: SavedInterval[];
+  currentIntervalStart?: number | null;
+  lastUpdated: number;
+};
+
+const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
+  if (value === 'shortBreak' || value === 'longBreak') {
+    return value;
+  }
+  return 'focus';
+};
 
 export default function TimerApp({
   settingsUpdated,
@@ -128,58 +164,6 @@ export default function TimerApp({
     playClickSound,
     updateStatus: (status, task, startTime, elapsed) => updateStatus(status, task, startTime, elapsed),
   });
-
-  // Fix cyclic dependency for onTimerComplete
-  // We'll handle timer completion effect here instead of passing a callback that needs future declarations.
-  useEffect(() => {
-    if (timeLeft === 0 && !isRunning && endTimeRef.current !== 0) { // Simple check
-      // But useTimerLogic handles setting it to 0.
-      // Let's rely on a specific prop or state from hook if possible,
-      // OR just define the function using `useCallback` with refs if we really want to pass it.
-      // Actually, we can just define the logic here in an effect if `timeLeft` hits 0 and we were running.
-      // BUT `useTimerLogic` stops running when it hits 0.
-    }
-  }, [timeLeft, isRunning]);
-
-  // REDO: Define `handleTimerComplete` logic after hooks, and pass it to a `useEffect` here that monitors completion?
-  // `useTimerLogic` calls `onTimerComplete`.
-  // We can just pass an empty function and use an effect here to detect transitions.
-  // OR clearer: pass the dependencies to `useTimerLogic`? No, too many.
-
-  // Let's use a Ref for the callback!
-  const onTimerCompleteRef = useCallback(() => {
-    // Logic for timer completion
-    if (timerMode === 'focus') {
-      const duration = settings.pomoTime * 60;
-      const remaining = duration - focusLoggedSeconds;
-      if (remaining > 0) {
-        // Trigger Save
-        // We need to call generic triggerSave but that is not defined yet.
-        // This is the classic specialized hook dependency hell.
-        // Maybe `TimerDisplay` shouldn't be so decoupled?
-        // Or maybe `TimerApp` should be the coordinator.
-        // Let's define the complex logic functions *before* passing them?
-        // Can't, they depend on hook state.
-
-        // Breaking the cycle:
-        // 1. `useTimerLogic` tells us "timer finished".
-        // 2. `TimerApp` observes this event and acts.
-
-        // Let's stick to the `onTimerComplete` prop but make it stable or use a Ref.
-      }
-      // ...
-    }
-    // ...
-  }, [settings, focusLoggedSeconds, timerMode]); // dependencies will change
-
-  // To solve this cleanly for now:
-  // I will implement `handleTimerComplete` inside `TimerApp` and call it from an effect that watches `timeLeft`.
-  // `useTimerLogic` is responsible for ticking down. When it hits 0, it stops and sets `timeLeft` to 0.
-  // We can add a `didComplete` flag to `useTimerLogic`?
-  // Or just check: `if (timeLeft === 0 && wasRunning)`?
-
-  // Let's stick to the plan: `TimerApp` orchestrates.
-  // We will re-implement `handleTimerComplete` inside the main body and use a `useEffect` to trigger it.
 
   // --- Persistence Logic ---
   const saveState = useCallback((
@@ -323,47 +307,12 @@ export default function TimerApp({
 
     setIntervals([]);
     // currentIntervalStartRef.current = null; // Managed by hook, but we need to reset it? Hook exposes `currentIntervalStartRef`.
-  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIsRunning, setIntervals]);
-
-  // Watch for completion via Hook's internal state or callback override
-  // We passed a no-op to useTimerLogic. Now we detect edge case:
-  useEffect(() => {
-    // If we could modify useTimerLogic to accept a Ref, that would be best.
-    // Or we just check `timeLeft === 0` and `wasRunning`?
-    // Since useTimerLogic sets `isRunning` to false when it hits 0...
-    // We need a stable signal.
-  }, []);
-
-  // Actually, let's redefine useTimerLogic Props to accept the full callback, 
-  // and we wrap the definition in a transparent component or use UseEffect separation.
-  // BUT the simplest way right now is to pass `handleTimerComplete` to `useTimerLogic` by RE-RENDERING `TimerApp` when it changes. 
-  // Since `handleTimerComplete` depends on `settings` which changes rarely, it's fine.
-  // The issue is `handleTimerComplete` depends on `triggerSave` which depends on `saveRecord`...
-  // It's a valid dependency chain.
-  // The only issue is `useTimerLogic` is called *before* `handleTimerComplete` is defined.
-  // We can't hoist `handleTimerComplete` before the hooks it uses.
-
-  // FIX: Use a `useEffect` in `TimerApp` to listen to an `isComplete` state from `useTimerLogic`?
-  // No, `useTimerLogic` should just call a ref.
-
-  const timerCompleteRef = useCallback(() => {
-    handleTimerComplete();
-  }, [handleTimerComplete]); // This waits for `handleTimerComplete` to be defined? No, this is circular if used in hook.
+  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIsRunning, setIntervals, endTimeRef]);
 
   // Update the ref handler whenever `handleTimerComplete` changes
   useEffect(() => {
     onTimerCompleteCallback.current = handleTimerComplete;
   }, [handleTimerComplete]);
-
-
-  const {
-    timerMode: _tm, // shadowing
-    // ... we need to destructure again or move the hook call down? 
-    // functionality of hooks must be at top level.
-  } = { timerMode }; // Dummy
-
-  // Real usage with ref:
-  // We need to alter `useTimerLogic` call above to use `timeoutHandlerRef.handler()`.
 
 
   // --- Wrappers for Toggle to handle persistence ---
@@ -418,7 +367,7 @@ export default function TimerApp({
     toggleStopwatch();
   };
 
-  const handleChangeTimerMode = (mode: any) => {
+  const handleChangeTimerMode = (mode: TimerMode) => {
     if (timerMode === 'focus' && focusLoggedSeconds > 0) {
       const fullTime = settings.pomoTime * 60;
       const elapsed = fullTime - timeLeft;
@@ -536,7 +485,7 @@ export default function TimerApp({
       const savedStateJson = localStorage.getItem("fomopomo_full_state");
       if (savedStateJson) {
         try {
-          const state = JSON.parse(savedStateJson);
+          const state = JSON.parse(savedStateJson) as SavedAppState;
           const now = Date.now();
           if (now - state.lastUpdated < 24 * 60 * 60 * 1000) {
             setTab(state.activeTab);
@@ -579,7 +528,11 @@ export default function TimerApp({
             }
 
             if (state.intervals) {
-              setIntervals(state.intervals.filter((i: any) => i.start > 0 && i.end > 0));
+              setIntervals(
+                state.intervals.filter(
+                  (interval) => interval.start > 0 && interval.end > 0
+                )
+              );
             }
 
             // Restore current interval start if available
@@ -604,7 +557,7 @@ export default function TimerApp({
       }
     };
     restoreState();
-  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn]);
+  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef]);
 
   // Server Sync Effect - Separate from local restore to handle async nature cleanly
   // Ref to track if sync has been done (only sync once per mount)
@@ -678,7 +631,7 @@ export default function TimerApp({
             // Found active session on server!
             if (data.timer_type === 'timer') {
               // Sync Pomodoro Timer
-              const mode = (data.timer_mode as any) || 'focus';
+              const mode = normalizeTimerMode(data.timer_mode);
               const duration = data.timer_duration || (mode === 'focus' ? settings.pomoTime * 60 : mode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60);
 
               const remaining = duration - elapsed;
@@ -709,7 +662,7 @@ export default function TimerApp({
           // Found paused session - compare with local storage to prevent data loss
 
           if (data.timer_type === 'timer') {
-            const mode = (data.timer_mode as any) || 'focus';
+            const mode = normalizeTimerMode(data.timer_mode);
             const duration = data.timer_duration || 0;
             const serverElapsed = data.total_stopwatch_time;
 
@@ -749,7 +702,7 @@ export default function TimerApp({
     };
 
     syncServerState();
-  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, settings]);
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, settings, endTimeRef, setFocusLoggedSeconds, setIsRunning, setTimeLeft, setTimerMode]);
 
 
 
@@ -759,21 +712,29 @@ export default function TimerApp({
     localStorage.setItem("fomopomo_task_state", JSON.stringify({ taskId: selectedTaskId, taskTitle: selectedTask }));
   }, [selectedTaskId, selectedTask]);
 
+  const handleSpaceToggle = useEffectEvent((event: KeyboardEvent) => {
+    if (event.code !== 'Space' && event.key !== ' ') return;
+    const target = event.target as HTMLElement | null;
+    const tagName = target?.tagName;
+    const isFormField =
+      tagName === 'INPUT' ||
+      tagName === 'TEXTAREA' ||
+      tagName === 'SELECT' ||
+      target?.isContentEditable;
+    if (isFormField || taskModalOpen) return;
+    event.preventDefault();
+    if (tab === 'timer') handleToggleTimer();
+    else handleToggleStopwatch();
+  });
+
   // Keyboard
   useEffect(() => {
-    const handleSpaceToggle = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' && event.key !== ' ') return;
-      const target = event.target as HTMLElement | null;
-      const tagName = target?.tagName;
-      const isFormField = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable;
-      if (isFormField || taskModalOpen) return;
-      event.preventDefault();
-      if (tab === 'timer') handleToggleTimer();
-      else handleToggleStopwatch();
+    const listener = (event: KeyboardEvent) => {
+      handleSpaceToggle(event);
     };
-    window.addEventListener('keydown', handleSpaceToggle);
-    return () => window.removeEventListener('keydown', handleSpaceToggle);
-  }, [tab, taskModalOpen, isRunning, isStopwatchRunning, timeLeft, stopwatchTime, intervals]);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   // Update Document Title
   useEffect(() => {
