@@ -1,5 +1,25 @@
+👉 **라이브 서비스**: [https://fomopomo.com/](https://fomopomo.com/)
 
-👉 **라이브 서비스**: [https://fomopomo.com/)
+## Development Environment
+
+This project is configured for WSL/Linux-first development.
+
+- Run `npm install`, `npm run dev`, `npm run build`, and test commands inside WSL.
+- Do not develop this project with native Windows `node`/`npm`.
+- Recommended clone location inside WSL: `~/projects/fomopomo`
+- Avoid `/mnt/c/...` for day-to-day development. It is slower and can cause file watching and native module issues.
+- If you want to open the project from Windows Explorer, use `\\wsl.localhost\Ubuntu\home\<your-user>\projects\fomopomo`
+
+### Recommended Setup
+
+```bash
+mkdir -p ~/projects
+cd ~/projects
+git clone <repo-url> fomopomo
+cd fomopomo
+npm install
+npm run dev
+```
 
 ---
 
