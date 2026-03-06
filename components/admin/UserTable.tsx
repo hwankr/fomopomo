@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Profile } from '@/lib/types';
-import { Search, MoreVertical, Shield } from 'lucide-react';
+import { Search, Shield } from 'lucide-react';
 
 interface UserTableProps {
   users: Profile[];
@@ -17,19 +17,23 @@ function StudyDuration({ startTime }: { startTime: string }) {
       const start = new Date(startTime).getTime();
       const now = Date.now();
       const diff = Math.floor((now - start) / 1000);
+
       if (diff < 0) {
         setDuration('00:00');
         return;
       }
-      const h = Math.floor(diff / 3600);
-      const m = Math.floor((diff % 3600) / 60);
-      const s = diff % 60;
+
+      const hours = Math.floor(diff / 3600);
+      const minutes = Math.floor((diff % 3600) / 60);
+      const seconds = diff % 60;
+
       setDuration(
-        `${h > 0 ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s
+        `${hours > 0 ? `${hours}:` : ''}${minutes
           .toString()
-          .padStart(2, '0')}`
+          .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
       );
     };
+
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
@@ -38,42 +42,50 @@ function StudyDuration({ startTime }: { startTime: string }) {
   return <span>{duration}</span>;
 }
 
+function getStatusLabel(user: Profile) {
+  if (user.status === 'studying') return 'Studying';
+  if (user.status === 'online') return 'Online';
+  if (user.status === 'paused') return 'Paused';
+  return 'Offline';
+}
+
 export default function UserTable({ users, onUserClick }: UserTableProps) {
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.nickname?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = users.filter((user) => {
+    const normalizedSearch = searchTerm.toLowerCase();
+    return (
+      user.email?.toLowerCase().includes(normalizedSearch) ||
+      user.nickname?.toLowerCase().includes(normalizedSearch)
+    );
+  });
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex flex-col justify-between gap-4 border-b border-gray-100 p-4 dark:border-gray-700 sm:flex-row sm:items-center">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-          사용자 목록 ({filteredUsers.length})
+          Users ({filteredUsers.length})
         </h2>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="이메일 또는 닉네임 검색"
+            placeholder="Search by email or nickname"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 pr-4 py-2 text-sm border rounded-xl w-full sm:w-64 bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 sm:w-72"
           />
         </div>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400">
+          <thead className="bg-gray-50 text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
             <tr>
-              <th className="px-6 py-3 font-medium">사용자</th>
-              <th className="px-6 py-3 font-medium">상태</th>
-              <th className="px-6 py-3 font-medium">현재 작업</th>
-              <th className="px-6 py-3 font-medium">가입일</th>
-              <th className="px-6 py-3 font-medium text-right">관리</th>
+              <th className="px-6 py-3 font-medium">User</th>
+              <th className="px-6 py-3 font-medium">Status</th>
+              <th className="px-6 py-3 font-medium">Current task</th>
+              <th className="px-6 py-3 font-medium">Joined</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -81,18 +93,18 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
               <tr
                 key={user.id}
                 onClick={() => onUserClick(user.id)}
-                className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
               >
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400">
                       {(user.nickname || user.email || '?')[0].toUpperCase()}
                     </div>
                     <div>
-                      <div className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5">
-                        {user.nickname || '닉네임 없음'}
+                      <div className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+                        {user.nickname || 'No nickname'}
                         {user.role === 'admin' && (
-                          <Shield className="w-3 h-3 text-indigo-500" fill="currentColor" />
+                          <Shield className="h-3 w-3 fill-current text-indigo-500" />
                         )}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -103,28 +115,22 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
                 </td>
                 <td className="px-6 py-4">
                   <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                       user.status === 'online'
                         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
                         : user.status === 'studying'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300'
-                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300'
+                          : user.status === 'paused'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
                     }`}
                   >
-                    {user.status === 'online' ? (
-                      '온라인'
-                    ) : user.status === 'studying' ? (
-                      <span className="flex items-center gap-1">
-                        공부 중
-                        {user.study_start_time && (
-                          <>
-                            <span className="mx-1">•</span>
-                            <StudyDuration startTime={user.study_start_time} />
-                          </>
-                        )}
-                      </span>
-                    ) : (
-                      '오프라인'
+                    {getStatusLabel(user)}
+                    {user.status === 'studying' && user.study_start_time && (
+                      <>
+                        <span className="mx-1">-</span>
+                        <StudyDuration startTime={user.study_start_time} />
+                      </>
                     )}
                   </span>
                 </td>
@@ -135,11 +141,6 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
                   {user.created_at
                     ? new Date(user.created_at).toLocaleDateString()
                     : '-'}
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <button className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
                 </td>
               </tr>
             ))}

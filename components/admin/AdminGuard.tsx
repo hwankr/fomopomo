@@ -1,48 +1,42 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 import { toast } from 'react-hot-toast';
+import { getAdminStatus } from '@/lib/admin';
 
 export default function AdminGuard({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    checkAdmin();
-  }, []);
-
-  const checkAdmin = async () => {
+  const checkAdmin = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      const { user, isAdmin: hasAdminAccess } = await getAdminStatus();
+
       if (!user) {
-        router.push('/');
+        router.replace('/');
         return;
       }
 
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (error || profile?.role !== 'admin') {
+      if (!hasAdminAccess) {
         toast.error('관리자 권한이 필요합니다.');
-        router.push('/');
+        router.replace('/');
         return;
       }
 
       setIsAdmin(true);
     } catch (error) {
       console.error('Admin check failed:', error);
-      router.push('/');
+      router.replace('/');
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    void checkAdmin();
+  }, [checkAdmin]);
 
   if (loading) {
     return (

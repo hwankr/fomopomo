@@ -1,167 +1,201 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Share, Download, X } from 'lucide-react';
+import { Download, Share, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+};
+
+type InstallContext = {
+  canShowPrompt: boolean;
+  isIOS: boolean;
+  isStandalone: boolean;
+};
+
+type IOSNavigator = Navigator & {
+  standalone?: boolean;
+};
+
+const PROMPT_DISMISSED_KEY = 'pwa_prompt_dismissed_at';
+const PROMPT_COOLDOWN_DAYS = 7;
+
+function shouldShowPrompt() {
+  if (typeof window === 'undefined') return false;
+
+  const dismissedAt = window.localStorage.getItem(PROMPT_DISMISSED_KEY);
+  if (!dismissedAt) return true;
+
+  const dismissedDate = new Date(Number.parseInt(dismissedAt, 10));
+  const now = new Date();
+  const diffTime = Math.abs(now.getTime() - dismissedDate.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  return diffDays > PROMPT_COOLDOWN_DAYS;
+}
+
+function getInstallContext(): InstallContext {
+  if (typeof window === 'undefined') {
+    return {
+      canShowPrompt: false,
+      isIOS: false,
+      isStandalone: false,
+    };
+  }
+
+  const navigatorWithStandalone = window.navigator as IOSNavigator;
+
+  return {
+    canShowPrompt: shouldShowPrompt(),
+    isIOS: /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()),
+    isStandalone:
+      window.matchMedia('(display-mode: standalone)').matches ||
+      navigatorWithStandalone.standalone === true,
+  };
+}
+
 export default function InstallPrompt() {
-    const [isIOS, setIsIOS] = useState(false);
-    const [isStandalone, setIsStandalone] = useState(false);
-    const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-    const [showAndroidPrompt, setShowAndroidPrompt] = useState(false);
-    const [isClosing, setIsClosing] = useState(false);
+  const [installContext] = useState<InstallContext>(getInstallContext);
+  const [isIOSPromptVisible, setIsIOSPromptVisible] = useState(
+    installContext.isIOS
+  );
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [showAndroidPrompt, setShowAndroidPrompt] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
 
-    const PROMPT_DISMISSED_KEY = 'pwa_prompt_dismissed_at';
-    const PROMPT_COOLDOWN_DAYS = 7;
+  useEffect(() => {
+    if (!installContext.canShowPrompt || installContext.isStandalone) return;
 
-    useEffect(() => {
-        // Check if prompt should be shown based on cooldown
-        const shouldShowPrompt = () => {
-            const dismissedAt = localStorage.getItem(PROMPT_DISMISSED_KEY);
-            if (!dismissedAt) return true;
-
-            const dismissedDate = new Date(parseInt(dismissedAt));
-            const now = new Date();
-            const diffTime = Math.abs(now.getTime() - dismissedDate.getTime());
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-            return diffDays > PROMPT_COOLDOWN_DAYS;
-        };
-
-        if (!shouldShowPrompt()) return;
-
-        // Check if user agent is iOS
-        const userAgent = window.navigator.userAgent.toLowerCase();
-        const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
-        setIsIOS(isIosDevice);
-
-        // Check if app is in standalone mode
-        const isStandaloneMode =
-            window.matchMedia('(display-mode: standalone)').matches ||
-            (window.navigator as any).standalone === true;
-        setIsStandalone(isStandaloneMode);
-
-        // Handle Android beforeinstallprompt
-        const handleBeforeInstallPrompt = (e: any) => {
-            e.preventDefault();
-            setDeferredPrompt(e);
-            setShowAndroidPrompt(true);
-        };
-
-        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-        return () => {
-            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-        };
-    }, []);
-
-    const handleInstallClick = async () => {
-        if (!deferredPrompt) return;
-
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-
-        if (outcome === 'accepted') {
-            setDeferredPrompt(null);
-            setShowAndroidPrompt(false);
-        }
+    const handleBeforeInstallPrompt = (event: Event) => {
+      const installEvent = event as BeforeInstallPromptEvent;
+      installEvent.preventDefault();
+      setDeferredPrompt(installEvent);
+      setShowAndroidPrompt(true);
     };
 
-    const handleClose = () => {
-        // Save dismissal timestamp
-        localStorage.setItem(PROMPT_DISMISSED_KEY, Date.now().toString());
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-        setIsClosing(true);
-        setTimeout(() => {
-            setIsIOS(false);
-            setShowAndroidPrompt(false);
-            setIsClosing(false);
-        }, 300);
+    return () => {
+      window.removeEventListener(
+        'beforeinstallprompt',
+        handleBeforeInstallPrompt
+      );
     };
+  }, [installContext.canShowPrompt, installContext.isStandalone]);
 
-    // Don't show anything if already installed
-    if (isStandalone) {
-        return null;
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+
+    await deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setShowAndroidPrompt(false);
     }
+  };
 
-    // iOS Prompt
-    if (isIOS) {
-        return (
-            <>
-                {/* Backdrop */}
-                <div 
-                    className={cn(
-                        "fixed inset-0 z-50 bg-black/20",
-                        isClosing ? "animate-out fade-out duration-300" : "animate-in fade-in duration-300"
-                    )}
-                    onClick={handleClose}
-                />
-                <div className={cn(
-                    "fixed bottom-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-t border-gray-200 p-4 pb-8 shadow-lg",
-                    isClosing ? "animate-out fade-out slide-out-to-bottom duration-300" : "animate-in slide-in-from-bottom duration-500"
-                )}>
-                    <button 
-                        onClick={handleClose}
-                        className="absolute top-4 right-4 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
-                    <div className="max-w-md mx-auto flex flex-col items-center text-center space-y-3">
-                        <p className="text-sm font-medium text-gray-800">
-                            앱으로 설치하고 더 편리하게 이용하세요!
-                        </p>
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <span>하단의</span>
-                            <Share className="w-5 h-5 text-blue-500" />
-                            <span>공유 버튼을 누르고</span>
-                        </div>
-                        <p className="text-sm font-bold text-gray-900">
-                            '홈 화면에 추가'를 선택하세요
-                        </p>
-                    </div>
-                </div>
-            </>
-        );
-    }
+  const handleClose = () => {
+    window.localStorage.setItem(PROMPT_DISMISSED_KEY, Date.now().toString());
 
-    // Android Prompt
-    if (showAndroidPrompt) {
-        return (
-            <>
-                {/* Backdrop */}
-                <div 
-                    className={cn(
-                        "fixed inset-0 z-50 bg-black/20",
-                        isClosing ? "animate-out fade-out duration-300" : "animate-in fade-in duration-300"
-                    )}
-                    onClick={handleClose}
-                />
-                <div className={cn(
-                    "fixed bottom-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-t border-gray-200 p-4 pb-8 shadow-lg",
-                    isClosing ? "animate-out fade-out slide-out-to-bottom duration-300" : "animate-in slide-in-from-bottom duration-500"
-                )}>
-                    <button 
-                        onClick={handleClose}
-                        className="absolute top-4 right-4 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
-                    <div className="max-w-md mx-auto flex flex-col items-center text-center space-y-3">
-                        <p className="text-sm font-medium text-gray-800">
-                            앱으로 설치하고 더 편리하게 이용하세요!
-                        </p>
-                        <button
-                            onClick={handleInstallClick}
-                            className="flex items-center gap-2 bg-rose-500 text-white px-4 py-2 rounded-full font-medium hover:bg-rose-600 transition-colors"
-                        >
-                            <Download className="w-4 h-4" />
-                            앱 설치하기
-                        </button>
-                    </div>
-                </div>
-            </>
-        );
-    }
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsIOSPromptVisible(false);
+      setShowAndroidPrompt(false);
+      setIsClosing(false);
+    }, 300);
+  };
 
+  if (!installContext.canShowPrompt || installContext.isStandalone) {
     return null;
+  }
+
+  if (isIOSPromptVisible) {
+    return (
+      <>
+        <div
+          className={cn(
+            'fixed inset-0 z-50 bg-black/20',
+            isClosing
+              ? 'animate-out fade-out duration-300'
+              : 'animate-in fade-in duration-300'
+          )}
+          onClick={handleClose}
+        />
+        <div
+          className={cn(
+            'fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/90 p-4 pb-8 shadow-lg backdrop-blur-md',
+            isClosing
+              ? 'animate-out fade-out slide-out-to-bottom duration-300'
+              : 'animate-in slide-in-from-bottom duration-500'
+          )}
+        >
+          <button
+            onClick={handleClose}
+            className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
+            <p className="text-sm font-medium text-gray-800">
+              Install this app for faster access.
+            </p>
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <span>Tap</span>
+              <Share className="h-5 w-5 text-blue-500" />
+              <span>then choose Add to Home Screen.</span>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (showAndroidPrompt) {
+    return (
+      <>
+        <div
+          className={cn(
+            'fixed inset-0 z-50 bg-black/20',
+            isClosing
+              ? 'animate-out fade-out duration-300'
+              : 'animate-in fade-in duration-300'
+          )}
+          onClick={handleClose}
+        />
+        <div
+          className={cn(
+            'fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/90 p-4 pb-8 shadow-lg backdrop-blur-md',
+            isClosing
+              ? 'animate-out fade-out slide-out-to-bottom duration-300'
+              : 'animate-in slide-in-from-bottom duration-500'
+          )}
+        >
+          <button
+            onClick={handleClose}
+            className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
+            <p className="text-sm font-medium text-gray-800">
+              Install this app for faster access.
+            </p>
+            <button
+              onClick={handleInstallClick}
+              className="flex items-center gap-2 rounded-full bg-rose-500 px-4 py-2 font-medium text-white transition-colors hover:bg-rose-600"
+            >
+              <Download className="h-4 w-4" />
+              Install app
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return null;
 }

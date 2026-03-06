@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
+import { getAdminStatus } from '@/lib/admin';
+import { Profile } from '@/lib/types';
 import AdminGuard from '@/components/admin/AdminGuard';
 import DashboardStats from '@/components/admin/DashboardStats';
 import UserTable from '@/components/admin/UserTable';
-import { Profile, StudySession } from '@/lib/types';
-import { toast } from 'react-hot-toast';
 
 export default function AdminPage() {
   const router = useRouter();
@@ -20,39 +21,8 @@ export default function AdminPage() {
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-
-    // Real-time subscription for profile updates
-    const channel = supabase
-      .channel('admin-dashboard-updates')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-        },
-        (payload) => {
-          setUsers((prevUsers) =>
-            prevUsers.map((user) =>
-              user.id === payload.new.id
-                ? { ...user, ...payload.new }
-                : user
-            )
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      // 1. Fetch all profiles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
@@ -60,35 +30,27 @@ export default function AdminPage() {
 
       if (profilesError) throw profilesError;
 
-      // 2. Fetch today's study sessions for stats
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const { data: sessions, error: sessionsError } = await supabase
         .from('study_sessions')
         .select('duration, created_at, user_id');
 
       if (sessionsError) throw sessionsError;
 
-      // Calculate Stats
       const totalUsers = profiles?.length || 0;
-      
-      // Active users today (based on study sessions or last_active_at)
-      // Here we use study sessions for "active study users"
       const activeUserIds = new Set(
         sessions
-          ?.filter(s => new Date(s.created_at) >= today)
-          .map(s => s.user_id)
+          ?.filter((session) => new Date(session.created_at) >= today)
+          .map((session) => session.user_id)
       );
       const activeUsersToday = activeUserIds.size;
-
-      // Total study time
-      const totalStudyTime = sessions?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
-
-      // New users today
-      const newUsersToday = profiles?.filter(
-        p => new Date(p.created_at!) >= today
-      ).length || 0;
+      const totalStudyTime =
+        sessions?.reduce((acc, current) => acc + current.duration, 0) || 0;
+      const newUsersToday =
+        profiles?.filter((profile) => new Date(profile.created_at!) >= today)
+          .length || 0;
 
       setStats({
         totalUsers,
@@ -96,54 +58,106 @@ export default function AdminPage() {
         totalStudyTime,
         newUsersToday,
       });
-
       setUsers(profiles as Profile[]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
-      toast.error('데이터를 불러오는데 실패했습니다.');
+      toast.error('Failed to load admin dashboard data.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const initialize = async () => {
+      const { isAdmin } = await getAdminStatus();
+
+      if (!isActive) return;
+
+      if (!isAdmin) {
+        setLoading(false);
+        router.replace('/');
+        return;
+      }
+
+      await fetchData();
+
+      if (!isActive) return;
+
+      channel = supabase
+        .channel('admin-dashboard-updates')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+          },
+          (payload) => {
+            setUsers((previousUsers) =>
+              previousUsers.map((user) =>
+                user.id === payload.new.id
+                  ? { ...user, ...payload.new }
+                  : user
+              )
+            );
+          }
+        )
+        .subscribe();
+    };
+
+    void initialize();
+
+    return () => {
+      isActive = false;
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [fetchData, router]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6 md:p-12">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
+      <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900 md:p-12">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-8 flex items-center justify-between">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              관리자 대시보드
+              Admin Dashboard
             </h1>
             <div className="flex gap-3">
               <button
                 onClick={() => router.push('/admin/changelog')}
-                className="px-4 py-2 text-sm font-medium text-white bg-rose-500 rounded-lg hover:bg-rose-600 transition-colors shadow-sm"
+                className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600"
               >
-                패치노트 관리
+                Changelog
               </button>
               <button
                 onClick={() => router.push('/')}
-                className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700 transition-colors"
+                className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
               >
-                앱으로 돌아가기
+                Back to home
               </button>
             </div>
           </div>
 
           <DashboardStats {...stats} />
 
-          <UserTable 
-            users={users} 
-            onUserClick={(userId) => router.push(`/admin/users/${userId}`)} 
-          />
+          <div className="mt-8">
+            <UserTable
+              users={users}
+              onUserClick={(userId) => router.push(`/admin/users/${userId}`)}
+            />
+          </div>
         </div>
       </div>
     </AdminGuard>

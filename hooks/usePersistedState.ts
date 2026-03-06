@@ -1,36 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, type SetStateAction } from 'react';
 
-export function usePersistedState<T>(key: string, initialState: T): [T, (value: T) => void] {
-  // Initialize state with initialState
-  // We don't read from localStorage during initialization to avoid hydration mismatch
-  const [state, setState] = useState<T>(initialState);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    // Load from localStorage after mount
+export function usePersistedState<T>(
+  key: string,
+  initialState: T
+): [T, (value: SetStateAction<T>) => void] {
+  const [state, setState] = useState<T>(() => {
     try {
-      const item = window.localStorage.getItem(key);
-      if (item) {
-        setState(JSON.parse(item));
+      if (typeof window === 'undefined') {
+        return initialState;
       }
+
+      const item = window.localStorage.getItem(key);
+      return item ? (JSON.parse(item) as T) : initialState;
     } catch (error) {
       console.error(`Error reading localStorage key "${key}":`, error);
+      return initialState;
     }
-    setIsLoaded(true);
-  }, [key]);
+  });
 
-  const setPersistedState = (value: T) => {
-    try {
-      // Allow value to be a function so we have same API as useState
-      const valueToStore = value instanceof Function ? value(state) : value;
-      setState(valueToStore);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
-      }
-    } catch (error) {
-      console.error(`Error saving localStorage key "${key}":`, error);
-    }
-  };
+  const setPersistedState = useCallback(
+    (value: SetStateAction<T>) => {
+      setState((currentValue) => {
+        try {
+          const nextValue =
+            typeof value === 'function'
+              ? (value as (previousValue: T) => T)(currentValue)
+              : value;
+
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(key, JSON.stringify(nextValue));
+          }
+
+          return nextValue;
+        } catch (error) {
+          console.error(`Error saving localStorage key "${key}":`, error);
+          return currentValue;
+        }
+      });
+    },
+    [key]
+  );
 
   return [state, setPersistedState];
 }

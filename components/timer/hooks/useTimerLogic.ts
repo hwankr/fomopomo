@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import toast from 'react-hot-toast';
 import { Settings } from './useSettings';
 
 export type TimerMode = 'focus' | 'shortBreak' | 'longBreak';

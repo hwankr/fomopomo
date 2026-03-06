@@ -134,7 +134,15 @@ describe('useTimerLogic', () => {
       result.current.toggleTimer();
     });
     expect(result.current.isRunning).toBe(false);
-    expect(mockUpdateStatus).toHaveBeenCalledWith('paused');
+    expect(mockUpdateStatus).toHaveBeenLastCalledWith(
+      'paused',
+      undefined,
+      undefined,
+      10,
+      'timer',
+      'focus',
+      25 * 60
+    );
 
     // Wait 5 seconds (paused)
     act(() => {
