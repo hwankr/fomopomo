@@ -37,6 +37,8 @@ const DEFAULT_SETTINGS: Settings = {
     { id: '3', label: '작업3', minutes: 90 },
   ],
 };
+let cachedSettingsRaw: string | null = null;
+let cachedSettingsSnapshot: Settings = DEFAULT_SETTINGS;
 
 function normalizeSettings(rawSettings: Partial<Settings> | null | undefined): Settings {
   return {
@@ -59,12 +61,24 @@ function readSettingsSnapshot(): Settings {
   try {
     const savedSettings = window.localStorage.getItem(SETTINGS_KEY);
     if (!savedSettings) {
+      cachedSettingsRaw = null;
+      cachedSettingsSnapshot = DEFAULT_SETTINGS;
       return DEFAULT_SETTINGS;
     }
 
-    return normalizeSettings(JSON.parse(savedSettings) as Partial<Settings>);
+    if (savedSettings === cachedSettingsRaw) {
+      return cachedSettingsSnapshot;
+    }
+
+    cachedSettingsRaw = savedSettings;
+    cachedSettingsSnapshot = normalizeSettings(
+      JSON.parse(savedSettings) as Partial<Settings>
+    );
+    return cachedSettingsSnapshot;
   } catch (error) {
     console.error('Failed to parse settings', error);
+    cachedSettingsRaw = null;
+    cachedSettingsSnapshot = DEFAULT_SETTINGS;
     return DEFAULT_SETTINGS;
   }
 }
@@ -72,7 +86,10 @@ function readSettingsSnapshot(): Settings {
 function writeSettingsSnapshot(settings: Settings) {
   if (typeof window === 'undefined') return;
 
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  const serializedSettings = JSON.stringify(settings);
+  cachedSettingsRaw = serializedSettings;
+  cachedSettingsSnapshot = settings;
+  window.localStorage.setItem(SETTINGS_KEY, serializedSettings);
   window.dispatchEvent(new Event('settingsChanged'));
 }
 
