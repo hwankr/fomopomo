@@ -1,15 +1,25 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useCallback, useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { ko } from 'date-fns/locale';
-import { CheckCircle2, Circle, Plus, Trash2, Calendar as CalendarIcon, ChevronUp, ChevronDown, Pencil, Check, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { usePersistedState } from '@/hooks/usePersistedState';
+import {
+  Calendar as CalendarIcon,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 
-  interface MonthlyPlan {
+interface MonthlyPlan {
   id: string;
   title: string;
   status: 'todo' | 'in_progress' | 'done';
@@ -18,16 +28,36 @@ import ConfirmModal from '@/components/ConfirmModal';
   duration?: number;
 }
 
+type MonthlyPlanRow = {
+  id: string;
+  title: string;
+  status: MonthlyPlan['status'];
+  month: number;
+  year: number;
+};
+
+type SessionDurationRow = {
+  task_id: string | null;
+  duration: number | null;
+};
+
 interface MonthlyPlanProps {
   userId: string;
 }
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return null;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+};
+
+const getCurrentMonthYear = () => {
+  const now = new Date();
+  return {
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  };
 };
 
 export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
@@ -35,15 +65,13 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
   const [loading, setLoading] = useState(true);
   const [newPlanTitle, setNewPlanTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
-  const [isExpanded, setIsExpanded] = usePersistedState('monthly_plan_expanded', true);
+  const [isExpanded, setIsExpanded] = usePersistedState(
+    'monthly_plan_expanded',
+    true
+  );
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
-
-  // Calculate current month and year
-  const today = new Date();
-  const currentMonth = today.getMonth() + 1; // 1-12
-  const currentYear = today.getFullYear();
 
   const fetchPlans = useCallback(async () => {
     if (!userId) {
@@ -54,50 +82,71 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
 
     setLoading(true);
 
+    const { month, year } = getCurrentMonthYear();
     const { data, error } = await supabase
       .from('monthly_plans')
-      .select('*')
+      .select('id, title, status, month, year')
       .eq('user_id', userId)
-      .eq('month', currentMonth)
-      .eq('year', currentYear)
+      .eq('month', month)
+      .eq('year', year)
       .order('created_at', { ascending: true });
 
     if (error) {
       console.error('Error fetching monthly plans:', error);
-    } else {
-      const planIds = (data || []).map((p: any) => p.id);
+      setLoading(false);
+      return;
+    }
 
-      const { data: sessions } = await supabase
+    const planRows = (data ?? []) as MonthlyPlanRow[];
+    const planIds = planRows.map((plan) => plan.id);
+
+    let sessionRows: SessionDurationRow[] = [];
+    if (planIds.length > 0) {
+      const { data: sessions, error: sessionsError } = await supabase
         .from('study_sessions')
         .select('task_id, duration')
         .in('task_id', planIds);
 
-      const plansWithDuration = (data || []).map((plan: any) => {
-        const planSessions = sessions?.filter((s: any) => s.task_id === plan.id) || [];
-        const totalDuration = planSessions.reduce((acc: number, curr: any) => acc + curr.duration, 0);
-        return { ...plan, duration: totalDuration };
-      });
-
-      setPlans(plansWithDuration);
+      if (sessionsError) {
+        console.error('Error fetching plan study durations:', sessionsError);
+      } else {
+        sessionRows = (sessions ?? []) as SessionDurationRow[];
+      }
     }
+
+    const plansWithDuration = planRows.map((plan) => {
+      const totalDuration = sessionRows.reduce((sum, row) => {
+        if (row.task_id !== plan.id) return sum;
+        return sum + (row.duration ?? 0);
+      }, 0);
+
+      return {
+        ...plan,
+        duration: totalDuration,
+      };
+    });
+
+    setPlans(plansWithDuration);
     setLoading(false);
-  }, [userId, currentMonth, currentYear]);
+  }, [userId]);
 
   useEffect(() => {
-    fetchPlans();
+    const initialFetch = setTimeout(() => {
+      void fetchPlans();
+    }, 0);
 
     const planChannel = supabase
       .channel('monthly-plan-updates')
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to all events to catch updates too
+          event: '*',
           schema: 'public',
           table: 'monthly_plans',
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          fetchPlans();
+          void fetchPlans();
         }
       )
       .subscribe();
@@ -113,63 +162,69 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          fetchPlans();
+          void fetchPlans();
         }
       )
       .subscribe();
 
     return () => {
+      clearTimeout(initialFetch);
       supabase.removeChannel(planChannel);
       supabase.removeChannel(sessionChannel);
     };
   }, [fetchPlans, userId]);
 
-  const addPlan = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addPlan = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!newPlanTitle.trim()) return;
     if (!userId) {
       alert('Please log in to add plans.');
       return;
     }
 
+    const { month, year } = getCurrentMonthYear();
     const { data, error } = await supabase
       .from('monthly_plans')
       .insert({
         user_id: userId,
-        title: newPlanTitle,
-        month: currentMonth,
-        year: currentYear,
+        title: newPlanTitle.trim(),
+        month,
+        year,
         status: 'todo',
       })
-      .select()
+      .select('id, title, status, month, year')
       .single();
 
     if (error) {
       console.error('Error adding plan:', error);
-    } else if (data) {
-      setPlans([...plans, { ...data, duration: 0 }]);
-      setNewPlanTitle('');
-      setIsAdding(false);
+      return;
     }
+
+    const createdPlan = data as MonthlyPlanRow;
+    setPlans((currentPlans) => [...currentPlans, { ...createdPlan, duration: 0 }]);
+    setNewPlanTitle('');
+    setIsAdding(false);
   };
 
   const togglePlanStatus = async (plan: MonthlyPlan) => {
-    const newStatus = plan.status === 'done' ? 'todo' : 'done';
+    const nextStatus = plan.status === 'done' ? 'todo' : 'done';
+    setPlans((currentPlans) =>
+      currentPlans.map((currentPlan) =>
+        currentPlan.id === plan.id
+          ? { ...currentPlan, status: nextStatus }
+          : currentPlan
+      )
+    );
 
     const { error } = await supabase
       .from('monthly_plans')
-      .update({ status: newStatus })
+      .update({ status: nextStatus })
       .eq('id', plan.id);
 
     if (error) {
       console.error('Error updating plan:', error);
-    } else {
-      setPlans(plans.map(p => p.id === plan.id ? { ...p, status: newStatus } : p));
+      void fetchPlans();
     }
-  };
-
-  const deletePlan = (id: string) => {
-    setDeletingPlanId(id);
   };
 
   const startEditing = (plan: MonthlyPlan) => {
@@ -188,87 +243,103 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
       return;
     }
 
-    const originalPlan = plans.find(p => p.id === editingPlanId);
-    if (originalPlan && editedTitle.trim() === originalPlan.title) {
+    const nextTitle = editedTitle.trim();
+    const originalPlan = plans.find((plan) => plan.id === editingPlanId);
+    if (originalPlan?.title === nextTitle) {
       cancelEditing();
       return;
     }
 
-    // Optimistic update
-    setPlans(plans.map(p => p.id === editingPlanId ? { ...p, title: editedTitle.trim() } : p));
     const planId = editingPlanId;
+    setPlans((currentPlans) =>
+      currentPlans.map((plan) =>
+        plan.id === planId ? { ...plan, title: nextTitle } : plan
+      )
+    );
     cancelEditing();
 
     const { error } = await supabase
       .from('monthly_plans')
-      .update({ title: editedTitle.trim() })
+      .update({ title: nextTitle })
       .eq('id', planId);
 
     if (error) {
       console.error('Error updating plan:', error);
-      fetchPlans();
-    }
-  };
-
-  const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      updatePlan();
-    } else if (e.key === 'Escape') {
-      cancelEditing();
+      void fetchPlans();
     }
   };
 
   const confirmDelete = async () => {
     if (!deletingPlanId) return;
 
-    const id = deletingPlanId;
-
+    const planId = deletingPlanId;
     const { error } = await supabase
       .from('monthly_plans')
       .delete()
-      .eq('id', id);
+      .eq('id', planId);
 
     if (error) {
       console.error('Error deleting plan:', error);
-    } else {
-      setPlans(plans.filter(p => p.id !== id));
+      return;
+    }
+
+    setPlans((currentPlans) =>
+      currentPlans.filter((plan) => plan.id !== planId)
+    );
+  };
+
+  const handleEditKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      void updatePlan();
+    } else if (event.key === 'Escape') {
+      cancelEditing();
     }
   };
 
+  const currentLabel = format(new Date(), 'yyyy MMM');
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 flex flex-col transition-all duration-300">
+    <div className="flex flex-col rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-300 dark:border-gray-700 dark:bg-gray-800">
       <div
-        className="flex justify-between items-center mb-6 cursor-pointer lg:cursor-default"
+        className="mb-6 flex cursor-pointer items-center justify-between lg:cursor-default"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div>
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-purple-500" />
-            월간 목표
+          <h2 className="flex items-center gap-2 text-lg font-bold">
+            <CalendarIcon className="h-5 w-5 text-purple-500" />
+            Monthly Goals
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {format(today, 'yyyy년 M월', { locale: ko })}
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {currentLabel}
           </p>
         </div>
-        <div className="lg:hidden text-gray-400">
-          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        <div className="text-gray-400 lg:hidden">
+          {isExpanded ? (
+            <ChevronUp className="h-5 w-5" />
+          ) : (
+            <ChevronDown className="h-5 w-5" />
+          )}
         </div>
       </div>
 
-      <div className={cn("flex-1 flex flex-col transition-all duration-300", !isExpanded && "hidden lg:flex")}>
-
-        <div className="flex-1 overflow-y-auto space-y-3 max-h-[300px] min-h-[100px] custom-scrollbar">
+      <div
+        className={cn(
+          'flex flex-1 flex-col transition-all duration-300',
+          !isExpanded && 'hidden lg:flex'
+        )}
+      >
+        <div className="custom-scrollbar min-h-[100px] max-h-[300px] flex-1 space-y-3 overflow-y-auto">
           {loading ? (
-            <div className="text-center text-gray-400 py-6">Loading...</div>
+            <div className="py-6 text-center text-gray-400">Loading...</div>
           ) : plans.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 py-6">
-              <p className="text-sm">이번 달 목표가 없습니다.</p>
+            <div className="flex h-full flex-col items-center justify-center py-6 text-gray-400">
+              <p className="text-sm">No monthly goals yet.</p>
               {!isAdding && (
                 <button
                   onClick={() => setIsAdding(true)}
-                  className="mt-2 text-purple-500 hover:text-purple-600 font-medium text-sm"
+                  className="mt-2 text-sm font-medium text-purple-500 hover:text-purple-600"
                 >
-                  + 목표 설정
+                  + Add a goal
                 </button>
               )}
             </div>
@@ -276,56 +347,62 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
             plans.map((plan) => (
               <div
                 key={plan.id}
-                className="group flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-transparent hover:border-purple-200 dark:hover:border-purple-800 transition-all"
+                className="group flex items-center gap-3 rounded-xl border border-transparent bg-purple-50 p-3 transition-all hover:border-purple-200 dark:bg-purple-900/20 dark:hover:border-purple-800"
               >
                 <button
-                  onClick={() => togglePlanStatus(plan)}
+                  onClick={() => void togglePlanStatus(plan)}
                   className={cn(
-                    "flex-shrink-0 transition-colors",
-                    plan.status === 'done' ? "text-purple-500" : "text-gray-400 hover:text-purple-400"
+                    'flex-shrink-0 transition-colors',
+                    plan.status === 'done'
+                      ? 'text-purple-500'
+                      : 'text-gray-400 hover:text-purple-400'
                   )}
                 >
                   {plan.status === 'done' ? (
-                    <CheckCircle2 className="w-5 h-5" />
+                    <CheckCircle2 className="h-5 w-5" />
                   ) : (
-                    <Circle className="w-5 h-5" />
+                    <Circle className="h-5 w-5" />
                   )}
                 </button>
 
                 {editingPlanId === plan.id ? (
-                  <div className="flex-1 flex items-center gap-2">
+                  <div className="flex flex-1 items-center gap-2">
                     <input
                       type="text"
                       value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onChange={(event) => setEditedTitle(event.target.value)}
                       onKeyDown={handleEditKeyDown}
-                      className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white text-sm"
+                      className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                       autoFocus
                     />
                     <button
-                      onClick={updatePlan}
-                      className="p-1 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+                      onClick={() => void updatePlan()}
+                      className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
                     >
-                      <Check className="w-4 h-4" />
+                      <Check className="h-4 w-4" />
                     </button>
                     <button
                       onClick={cancelEditing}
-                      className="p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                      className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 ) : (
-                  <span className={cn(
-                    "flex-1 text-sm font-medium transition-all",
-                    plan.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
-                  )}>
+                  <span
+                    className={cn(
+                      'flex-1 text-sm font-medium transition-all',
+                      plan.status === 'done'
+                        ? 'text-gray-400 line-through'
+                        : 'text-gray-700 dark:text-gray-200'
+                    )}
+                  >
                     {plan.title}
                   </span>
                 )}
 
                 {plan.duration ? (
-                  <span className="text-xs font-bold text-purple-500 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded-md whitespace-nowrap">
+                  <span className="whitespace-nowrap rounded-md bg-purple-50 px-2 py-1 text-xs font-bold text-purple-500 dark:bg-purple-900/30">
                     {formatDuration(plan.duration)}
                   </span>
                 ) : null}
@@ -333,74 +410,73 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
                 {editingPlanId !== plan.id && (
                   <button
                     onClick={() => startEditing(plan)}
-                    className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-purple-500 transition-all"
+                    className="p-1.5 text-gray-400 transition-all hover:text-purple-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
-                    <Pencil className="w-4 h-4" />
+                    <Pencil className="h-4 w-4" />
                   </button>
                 )}
 
                 <button
-                  onClick={() => deletePlan(plan.id)}
-                  className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 transition-all"
+                  onClick={() => setDeletingPlanId(plan.id)}
+                  className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))
           )}
         </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+        <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
           {isAdding ? (
             <form onSubmit={addPlan} className="flex flex-col gap-3">
               <input
                 type="text"
                 value={newPlanTitle}
-                onChange={(e) => setNewPlanTitle(e.target.value)}
-                placeholder="이번 달 목표..."
-                className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                onChange={(event) => setNewPlanTitle(event.target.value)}
+                placeholder="Add a monthly goal..."
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsAdding(false)}
-                  className="px-3 py-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-sm"
+                  className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  취소
+                  Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!newPlanTitle.trim()}
-                  className="px-4 py-2 bg-purple-500 text-white font-bold rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                  className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  추가
+                  Add
                 </button>
               </div>
             </form>
           ) : (
             <button
               onClick={() => setIsAdding(true)}
-              className="w-full py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl text-gray-400 hover:text-purple-500 hover:border-purple-200 dark:hover:text-purple-400 dark:hover:border-purple-800 transition-all flex items-center justify-center gap-2 font-medium text-sm"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-3 text-sm font-medium text-gray-400 transition-all hover:border-purple-200 hover:text-purple-500 dark:border-gray-700 dark:hover:border-purple-800 dark:hover:text-purple-400"
             >
-              <Plus className="w-4 h-4" />
-              월간 목표 추가
+              <Plus className="h-4 w-4" />
+              Add monthly goal
             </button>
           )}
         </div>
       </div>
 
-
       <ConfirmModal
         isOpen={!!deletingPlanId}
         onClose={() => setDeletingPlanId(null)}
         onConfirm={confirmDelete}
-        title="목표 삭제"
-        message="이 목표를 삭제하시겠습니까? 삭제된 목표는 복구할 수 없습니다."
-        confirmText="삭제"
-        cancelText="취소"
+        title="Delete goal"
+        message="Delete this monthly goal? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
         isDangerous={true}
       />
-    </div >
+    </div>
   );
 }

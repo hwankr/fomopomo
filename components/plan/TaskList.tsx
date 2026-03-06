@@ -1,28 +1,38 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useCallback, useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { CheckCircle2, Circle, Plus, Trash2, GripVertical, Pencil, Check, X, Pin } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import ConfirmModal from '@/components/ConfirmModal';
+import {
+  Check,
+  CheckCircle2,
+  Circle,
+  GripVertical,
+  Pencil,
+  Pin,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   DndContext,
   closestCenter,
+  type DragEndEvent,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
-  DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
+  arrayMove,
   sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
   useSortable,
+  verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import ConfirmModal from '@/components/ConfirmModal';
+import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 
 interface Task {
   id: string;
@@ -39,13 +49,49 @@ interface PinnedTask {
   position: number;
 }
 
+type TaskRow = {
+  id: string;
+  title: string;
+  status: Task['status'];
+  estimated_pomodoros: number | null;
+  position: number | null;
+};
+
+type PinnedTaskRow = {
+  id: string;
+  title: string;
+  position: number | null;
+};
+
+type SessionDurationRow = {
+  task_id: string | null;
+  duration: number | null;
+};
+
 const formatDuration = (seconds: number) => {
   if (!seconds) return null;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 };
+
+const normalizeTaskRows = (rows: TaskRow[] | null | undefined): Task[] =>
+  (rows ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    estimated_pomodoros: row.estimated_pomodoros ?? 0,
+    position: row.position ?? 0,
+  }));
+
+const normalizePinnedTaskRows = (
+  rows: PinnedTaskRow[] | null | undefined
+): PinnedTask[] =>
+  (rows ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    position: row.position ?? 0,
+  }));
 
 interface SortableTaskItemProps {
   task: Task;
@@ -56,7 +102,14 @@ interface SortableTaskItemProps {
   isPinned: boolean;
 }
 
-function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask, pinTask, isPinned }: SortableTaskItemProps) {
+function SortableTaskItem({
+  task,
+  toggleTaskStatus,
+  deleteTask,
+  updateTask,
+  pinTask,
+  isPinned,
+}: SortableTaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.title);
 
@@ -88,10 +141,10 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask, pinT
     setIsEditing(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
       handleSave();
-    } else if (e.key === 'Escape') {
+    } else if (event.key === 'Escape') {
       handleCancel();
     }
   };
@@ -101,74 +154,85 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask, pinT
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-transparent hover:border-gray-200 dark:hover:border-gray-700 transition-all",
-        isDragging && "shadow-lg bg-white dark:bg-gray-800 border-rose-200 dark:border-rose-900"
+        'group flex items-center gap-3 rounded-xl border border-transparent bg-gray-50 p-4 transition-all hover:border-gray-200 dark:bg-gray-900/50 dark:hover:border-gray-700',
+        isDragging &&
+          'border-rose-200 bg-white shadow-lg dark:border-rose-900 dark:bg-gray-800'
       )}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500">
-        <GripVertical className="w-5 h-5" />
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+      >
+        <GripVertical className="h-5 w-5" />
       </div>
 
       <button
         onClick={() => toggleTaskStatus(task)}
         className={cn(
-          "flex-shrink-0 transition-colors",
-          task.status === 'done' ? "text-rose-500" : "text-gray-300 hover:text-gray-400"
+          'flex-shrink-0 transition-colors',
+          task.status === 'done'
+            ? 'text-rose-500'
+            : 'text-gray-300 hover:text-gray-400'
         )}
       >
         {task.status === 'done' ? (
-          <CheckCircle2 className="w-6 h-6" />
+          <CheckCircle2 className="h-6 w-6" />
         ) : (
-          <Circle className="w-6 h-6" />
+          <Circle className="h-6 w-6" />
         )}
       </button>
 
       {isEditing ? (
-        <div className="flex-1 flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2">
           <input
             type="text"
             value={editedTitle}
-            onChange={(e) => setEditedTitle(e.target.value)}
+            onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-white text-sm"
+            className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
             autoFocus
           />
           <button
             onClick={handleSave}
-            className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+            className="rounded-lg p-1.5 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
           >
-            <Check className="w-4 h-4" />
+            <Check className="h-4 w-4" />
           </button>
           <button
             onClick={handleCancel}
-            className="p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
       ) : (
-        <span className={cn(
-          "flex-1 font-medium transition-all flex items-center gap-2",
-          task.status === 'done' ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
-        )}>
+        <span
+          className={cn(
+            'flex flex-1 items-center gap-2 font-medium transition-all',
+            task.status === 'done'
+              ? 'text-gray-400 line-through'
+              : 'text-gray-700 dark:text-gray-200'
+          )}
+        >
           <button
             onClick={() => pinTask(task)}
             className={cn(
-              "transition-colors flex-shrink-0",
+              'flex-shrink-0 transition-colors',
               isPinned
-                ? "text-amber-500 hover:text-amber-600"
-                : "text-gray-400 hover:text-amber-500"
+                ? 'text-amber-500 hover:text-amber-600'
+                : 'text-gray-400 hover:text-amber-500'
             )}
-            title={isPinned ? "고정 해제" : "고정하기"}
+            title={isPinned ? 'Unpin task' : 'Pin task'}
           >
-            <Pin className={cn("w-4 h-4", isPinned && "fill-current")} />
+            <Pin className={cn('h-4 w-4', isPinned && 'fill-current')} />
           </button>
           {task.title}
         </span>
       )}
 
       {task.duration ? (
-        <span className="text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-md whitespace-nowrap">
+        <span className="whitespace-nowrap rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-500 dark:bg-rose-900/30">
           {formatDuration(task.duration)}
         </span>
       ) : null}
@@ -176,17 +240,17 @@ function SortableTaskItem({ task, toggleTaskStatus, deleteTask, updateTask, pinT
       {!isEditing && (
         <button
           onClick={() => setIsEditing(true)}
-          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-gray-400 hover:text-rose-500 transition-all"
+          className="p-2 text-gray-400 transition-all hover:text-rose-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
         >
-          <Pencil className="w-4 h-4" />
+          <Pencil className="h-4 w-4" />
         </button>
       )}
 
       <button
         onClick={() => deleteTask(task.id)}
-        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 transition-all"
+        className="p-2 text-gray-400 transition-all hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
       >
-        <Trash2 className="w-4 h-4" />
+        <Trash2 className="h-4 w-4" />
       </button>
     </div>
   );
@@ -203,9 +267,9 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-
-  // Pinned Tasks state
   const [pinnedTasks, setPinnedTasks] = useState<PinnedTask[]>([]);
+
+  const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -214,7 +278,6 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     })
   );
 
-  // Fetch pinned tasks
   const fetchPinnedTasks = useCallback(async () => {
     if (!userId) {
       setPinnedTasks([]);
@@ -223,59 +286,17 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
 
     const { data, error } = await supabase
       .from('pinned_tasks')
-      .select('*')
+      .select('id, title, position')
       .eq('user_id', userId)
       .order('position', { ascending: true });
 
     if (error) {
       console.error('Error fetching pinned tasks:', error);
-    } else {
-      setPinnedTasks(data || []);
+      return;
     }
+
+    setPinnedTasks(normalizePinnedTaskRows(data as PinnedTaskRow[]));
   }, [userId]);
-
-
-
-  // Pin a task (add to pinned tasks or remove if already pinned)
-  const pinTaskFromTask = async (task: Task) => {
-    if (!userId) return;
-
-    // Check if already pinned
-    const existingPinned = pinnedTasks.find(p => p.title === task.title);
-
-    if (existingPinned) {
-      // Unpin - remove from pinned_tasks
-      const { error } = await supabase
-        .from('pinned_tasks')
-        .delete()
-        .eq('id', existingPinned.id);
-
-      if (error) {
-        console.error('Error unpinning task:', error);
-      } else {
-        setPinnedTasks(pinnedTasks.filter(p => p.id !== existingPinned.id));
-      }
-    } else {
-      // Pin - add to pinned_tasks
-      const maxPosition = pinnedTasks.length > 0 ? Math.max(...pinnedTasks.map(t => t.position || 0)) : -1;
-
-      const { data, error } = await supabase
-        .from('pinned_tasks')
-        .insert({
-          user_id: userId,
-          title: task.title,
-          position: maxPosition + 1,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error pinning task:', error);
-      } else if (data) {
-        setPinnedTasks([...pinnedTasks, data]);
-      }
-    }
-  };
 
   const fetchTasks = useCallback(async () => {
     if (!userId) {
@@ -285,92 +306,118 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     }
 
     setLoading(true);
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
-    // 1. 먼저 고정 작업 목록 조회
-    const { data: pinnedData } = await supabase
+    const { data: pinnedData, error: pinnedError } = await supabase
       .from('pinned_tasks')
-      .select('*')
-      .eq('user_id', userId);
-
-    // 2. 해당 날짜의 기존 작업 조회
-    let { data, error } = await supabase
-      .from('tasks')
-      .select('*')
+      .select('id, title, position')
       .eq('user_id', userId)
-      .eq('due_date', dateStr)
+      .order('position', { ascending: true });
+
+    if (pinnedError) {
+      console.error('Error fetching pinned tasks for task list:', pinnedError);
+    }
+
+    const pinnedRows = normalizePinnedTaskRows(pinnedData as PinnedTaskRow[]);
+
+    const { data: taskData, error: taskError } = await supabase
+      .from('tasks')
+      .select('id, title, status, estimated_pomodoros, position')
+      .eq('user_id', userId)
+      .eq('due_date', selectedDateKey)
       .order('position', { ascending: true })
       .order('created_at', { ascending: true });
 
-    if (error) {
-      console.error('Error fetching tasks:', error);
+    if (taskError) {
+      console.error('Error fetching tasks:', taskError);
       setLoading(false);
       return;
     }
 
-    // 3. 고정 작업 중 해당 날짜에 없는 것들 자동 생성 (오늘 또는 미래만)
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const existingTitles = new Set((data || []).map((t: any) => t.title));
-    const pinnedToCreate = (pinnedData || []).filter(p => !existingTitles.has(p.title));
+    let taskRows = normalizeTaskRows(taskData as TaskRow[]);
+    const todayKey = format(new Date(), 'yyyy-MM-dd');
+    const existingTitles = new Set(taskRows.map((task) => task.title));
+    const pinnedToCreate = pinnedRows.filter(
+      (pinnedTask) => !existingTitles.has(pinnedTask.title)
+    );
 
-    if (dateStr >= today && pinnedToCreate.length > 0) {
-      const maxPosition = (data || []).length > 0
-        ? Math.max(...(data || []).map((t: any) => t.position || 0))
-        : -1;
+    if (selectedDateKey >= todayKey && pinnedToCreate.length > 0) {
+      const maxPosition =
+        taskRows.length > 0
+          ? Math.max(...taskRows.map((task) => task.position))
+          : -1;
 
-      const newTasks = pinnedToCreate.map((p, idx) => ({
+      const newTaskPayload = pinnedToCreate.map((pinnedTask, index) => ({
         user_id: userId,
-        title: p.title,
-        due_date: dateStr,
-        status: 'todo',
-        position: maxPosition + 1 + idx,
+        title: pinnedTask.title,
+        due_date: selectedDateKey,
+        status: 'todo' as const,
+        position: maxPosition + 1 + index,
       }));
 
       const { data: insertedTasks, error: insertError } = await supabase
         .from('tasks')
-        .insert(newTasks)
-        .select();
+        .insert(newTaskPayload)
+        .select('id, title, status, estimated_pomodoros, position');
 
       if (insertError) {
         console.error('Error auto-creating pinned tasks:', insertError);
-      } else if (insertedTasks) {
-        data = [...(data || []), ...insertedTasks];
+      } else {
+        taskRows = [
+          ...taskRows,
+          ...normalizeTaskRows(insertedTasks as TaskRow[]),
+        ];
       }
     }
 
-    // 4. 공부 시간 계산
-    const taskIds = (data || []).map((t: any) => t.id);
+    const taskIds = taskRows.map((task) => task.id);
+    const durationByTaskId = new Map<string, number>();
 
-    const { data: sessions } = await supabase
-      .from('study_sessions')
-      .select('task_id, duration')
-      .in('task_id', taskIds);
+    if (taskIds.length > 0) {
+      const { data: sessions, error: sessionsError } = await supabase
+        .from('study_sessions')
+        .select('task_id, duration')
+        .in('task_id', taskIds);
 
-    const tasksWithDuration = (data || []).map((task: any) => {
-      const taskSessions = sessions?.filter((s: any) => s.task_id === task.id) || [];
-      const totalDuration = taskSessions.reduce((acc: number, curr: any) => acc + curr.duration, 0);
-      return { ...task, duration: totalDuration };
-    });
-    setTasks(tasksWithDuration);
+      if (sessionsError) {
+        console.error('Error fetching task study durations:', sessionsError);
+      } else {
+        (sessions as SessionDurationRow[] | null | undefined)?.forEach((row) => {
+          if (!row.task_id) return;
+          durationByTaskId.set(
+            row.task_id,
+            (durationByTaskId.get(row.task_id) ?? 0) + (row.duration ?? 0)
+          );
+        });
+      }
+    }
+
+    setTasks(
+      taskRows.map((task) => ({
+        ...task,
+        duration: durationByTaskId.get(task.id) ?? 0,
+      }))
+    );
     setLoading(false);
-  }, [selectedDate, userId]);
+  }, [selectedDateKey, userId]);
 
   useEffect(() => {
-    fetchTasks();
-    fetchPinnedTasks();
+    const initialFetch = setTimeout(() => {
+      void fetchTasks();
+      void fetchPinnedTasks();
+    }, 0);
 
     const taskChannel = supabase
       .channel('task-list-updates')
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to all events to catch updates too
+          event: '*',
           schema: 'public',
           table: 'tasks',
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          fetchTasks();
+          void fetchTasks();
         }
       )
       .subscribe();
@@ -386,158 +433,205 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          fetchTasks();
+          void fetchTasks();
         }
       )
       .subscribe();
 
     return () => {
+      clearTimeout(initialFetch);
       supabase.removeChannel(taskChannel);
       supabase.removeChannel(sessionChannel);
     };
-  }, [fetchTasks, fetchPinnedTasks, userId]);
+  }, [fetchPinnedTasks, fetchTasks, userId]);
+
+  const pinTaskFromTask = async (task: Task) => {
+    if (!userId) return;
+
+    const existingPinned = pinnedTasks.find(
+      (pinnedTask) => pinnedTask.title === task.title
+    );
+
+    if (existingPinned) {
+      const { error } = await supabase
+        .from('pinned_tasks')
+        .delete()
+        .eq('id', existingPinned.id);
+
+      if (error) {
+        console.error('Error unpinning task:', error);
+        return;
+      }
+
+      setPinnedTasks((currentPinnedTasks) =>
+        currentPinnedTasks.filter(
+          (pinnedTask) => pinnedTask.id !== existingPinned.id
+        )
+      );
+      return;
+    }
+
+    const maxPosition =
+      pinnedTasks.length > 0
+        ? Math.max(...pinnedTasks.map((pinnedTask) => pinnedTask.position))
+        : -1;
+
+    const { data, error } = await supabase
+      .from('pinned_tasks')
+      .insert({
+        user_id: userId,
+        title: task.title,
+        position: maxPosition + 1,
+      })
+      .select('id, title, position')
+      .single();
+
+    if (error) {
+      console.error('Error pinning task:', error);
+      return;
+    }
+
+    const createdPinnedTask = normalizePinnedTaskRows([data as PinnedTaskRow])[0];
+    setPinnedTasks((currentPinnedTasks) => [
+      ...currentPinnedTasks,
+      createdPinnedTask,
+    ]);
+  };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
-    if (over && active.id !== over.id) {
-      setTasks((items) => {
-        const oldIndex = items.findIndex((item) => item.id === active.id);
-        const newIndex = items.findIndex((item) => item.id === over.id);
-        const newItems = arrayMove(items, oldIndex, newIndex);
+    if (!over || active.id === over.id) return;
 
-        // Update positions in DB
-        // We update all items to ensure consistency. 
-        // Optimization: only update affected range if list is huge, but for daily tasks it's fine.
-        const updates = newItems.map((task, index) => ({
-          id: task.id,
-          position: index,
-          updated_at: new Date().toISOString(),
-        }));
+    const oldIndex = tasks.findIndex((task) => task.id === active.id);
+    const newIndex = tasks.findIndex((task) => task.id === over.id);
 
-        // Fire and forget update (or handle error quietly)
-        updates.forEach(async (update) => {
-          await supabase
-            .from('tasks')
-            .update({ position: update.position })
-            .eq('id', update.id);
-        });
+    if (oldIndex === -1 || newIndex === -1) return;
 
-        return newItems;
-      });
-    }
+    const reorderedTasks = arrayMove(tasks, oldIndex, newIndex).map(
+      (task, index) => ({
+        ...task,
+        position: index,
+      })
+    );
+
+    setTasks(reorderedTasks);
+
+    await Promise.all(
+      reorderedTasks.map((task) =>
+        supabase.from('tasks').update({ position: task.position }).eq('id', task.id)
+      )
+    );
   };
 
-  const addTask = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addTask = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!newTaskTitle.trim()) return;
     if (!userId) {
       alert('Please log in to add tasks.');
       return;
     }
 
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-
-    // Calculate new position (at the end)
-    const maxPosition = tasks.length > 0 ? Math.max(...tasks.map(t => t.position || 0)) : -1;
-    const newPosition = maxPosition + 1;
+    const maxPosition =
+      tasks.length > 0 ? Math.max(...tasks.map((task) => task.position)) : -1;
 
     const { data, error } = await supabase
       .from('tasks')
       .insert({
         user_id: userId,
-        title: newTaskTitle,
-        due_date: dateStr,
+        title: newTaskTitle.trim(),
+        due_date: selectedDateKey,
         status: 'todo',
-        position: newPosition,
+        position: maxPosition + 1,
       })
-      .select()
+      .select('id, title, status, estimated_pomodoros, position')
       .single();
 
     if (error) {
       console.error('Error adding task:', error);
-    } else if (data) {
-      setTasks([...tasks, { ...data, duration: 0 }]); // Add duration: 0 for consistency
-      setNewTaskTitle('');
-      setIsAdding(false);
+      return;
     }
+
+    const createdTask = normalizeTaskRows([data as TaskRow])[0];
+    setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0 }]);
+    setNewTaskTitle('');
+    setIsAdding(false);
   };
 
   const toggleTaskStatus = async (task: Task) => {
-    const newStatus = task.status === 'done' ? 'todo' : 'done';
-
-    // Optimistic update
-    setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    const nextStatus = task.status === 'done' ? 'todo' : 'done';
+    setTasks((currentTasks) =>
+      currentTasks.map((currentTask) =>
+        currentTask.id === task.id
+          ? { ...currentTask, status: nextStatus }
+          : currentTask
+      )
+    );
 
     const { error } = await supabase
       .from('tasks')
-      .update({ status: newStatus })
+      .update({ status: nextStatus })
       .eq('id', task.id);
 
     if (error) {
       console.error('Error updating task:', error);
-      // Revert if error
-      fetchTasks();
+      void fetchTasks();
     }
   };
 
-  const deleteTask = (id: string) => {
-    setDeletingTaskId(id);
-  };
-
-  const updateTask = async (id: string, title: string) => {
-    // Optimistic update
-    setTasks(tasks.map(t => t.id === id ? { ...t, title } : t));
+  const updateTask = async (taskId: string, title: string) => {
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === taskId ? { ...task, title } : task
+      )
+    );
 
     const { error } = await supabase
       .from('tasks')
       .update({ title })
-      .eq('id', id);
+      .eq('id', taskId);
 
     if (error) {
       console.error('Error updating task:', error);
-      // Revert if error
-      fetchTasks();
+      void fetchTasks();
     }
   };
 
   const confirmDelete = async () => {
     if (!deletingTaskId) return;
 
-    const id = deletingTaskId;
-
-    // Optimistic update
-    setTasks(tasks.filter(t => t.id !== id));
+    const taskId = deletingTaskId;
+    setTasks((currentTasks) =>
+      currentTasks.filter((task) => task.id !== taskId)
+    );
 
     const { error } = await supabase
       .from('tasks')
       .delete()
-      .eq('id', id);
+      .eq('id', taskId);
 
     if (error) {
       console.error('Error deleting task:', error);
-      fetchTasks();
+      void fetchTasks();
     }
   };
 
   return (
-    <div className="h-full flex flex-col">
-
-
-      <div className="flex-1 overflow-y-auto space-y-3 min-h-[300px]">
+    <div className="flex h-full flex-col">
+      <div className="min-h-[300px] flex-1 space-y-3 overflow-y-auto">
         {loading && tasks.length === 0 ? (
-          <div className="text-center text-gray-400 py-10">작업을 불러오는 중...</div>
+          <div className="py-10 text-center text-gray-400">Loading tasks...</div>
         ) : tasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 py-10">
-            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
-              <span className="text-2xl">📝</span>
+          <div className="flex h-full flex-col items-center justify-center py-10 text-gray-400">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+              <span className="text-2xl">-</span>
             </div>
-            <p>오늘의 작업이 없습니다.</p>
+            <p>No tasks for this day.</p>
             <button
               onClick={() => setIsAdding(true)}
-              className="mt-4 text-rose-500 hover:text-rose-600 font-medium text-sm"
+              className="mt-4 text-sm font-medium text-rose-500 hover:text-rose-600"
             >
-              + 첫 번째 작업 추가
+              + Add your first task
             </button>
           </div>
         ) : (
@@ -547,7 +641,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={tasks.map(t => t.id)}
+              items={tasks.map((task) => task.id)}
               strategy={verticalListSortingStrategy}
             >
               {tasks.map((task) => (
@@ -555,10 +649,12 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
                   key={task.id}
                   task={task}
                   toggleTaskStatus={toggleTaskStatus}
-                  deleteTask={deleteTask}
+                  deleteTask={(taskId) => setDeletingTaskId(taskId)}
                   updateTask={updateTask}
                   pinTask={pinTaskFromTask}
-                  isPinned={pinnedTasks.some(p => p.title === task.title)}
+                  isPinned={pinnedTasks.some(
+                    (pinnedTask) => pinnedTask.title === task.title
+                  )}
                 />
               ))}
             </SortableContext>
@@ -566,57 +662,55 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
         )}
       </div>
 
-      <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
+      <div className="mt-6 border-t border-gray-100 pt-6 dark:border-gray-700">
         {isAdding ? (
           <form onSubmit={addTask} className="flex flex-col gap-3">
             <input
               type="text"
               value={newTaskTitle}
-              onChange={(e) => setNewTaskTitle(e.target.value)}
-              placeholder="할 일을 입력하세요"
-              className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-white"
+              onChange={(event) => setNewTaskTitle(event.target.value)}
+              placeholder="Enter a task title..."
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               autoFocus
             />
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsAdding(false)}
-                className="px-4 py-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors"
+                className="rounded-xl px-4 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                취소
+                Cancel
               </button>
               <button
                 type="submit"
                 disabled={!newTaskTitle.trim()}
-                className="px-6 py-2 bg-rose-500 text-white font-bold rounded-xl hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="rounded-xl bg-rose-500 px-6 py-2 font-bold text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                추가
+                Add
               </button>
             </div>
           </form>
         ) : (
           <button
             onClick={() => setIsAdding(true)}
-            className="w-full py-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl text-gray-400 hover:text-gray-600 hover:border-gray-300 dark:hover:text-gray-300 dark:hover:border-gray-600 transition-all flex items-center justify-center gap-2 font-medium"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-4 font-medium text-gray-400 transition-all hover:border-gray-300 hover:text-gray-600 dark:border-gray-700 dark:hover:border-gray-600 dark:hover:text-gray-300"
           >
-            <Plus className="w-5 h-5" />
-            작업 추가
+            <Plus className="h-5 w-5" />
+            Add task
           </button>
         )}
       </div>
-
 
       <ConfirmModal
         isOpen={!!deletingTaskId}
         onClose={() => setDeletingTaskId(null)}
         onConfirm={confirmDelete}
-        title="작업 삭제"
-        message="이 작업을 삭제하시겠습니까? 삭제된 작업은 복구할 수 없습니다."
-        confirmText="삭제"
-        cancelText="취소"
+        title="Delete task"
+        message="Delete this task? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
         isDangerous={true}
       />
-
-    </div >
+    </div>
   );
 }
