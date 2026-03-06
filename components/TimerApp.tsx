@@ -70,6 +70,23 @@ const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
   return 'focus';
 };
 
+const getStoredValue = (key: string) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (error) {
+    console.error(`Failed to read ${key} from localStorage`, error);
+    return null;
+  }
+};
+
+const setStoredValue = (key: string, value: string) => {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    console.error(`Failed to write ${key} to localStorage`, error);
+  }
+};
+
 export default function TimerApp({
   settingsUpdated,
   onRecordSaved,
@@ -199,7 +216,7 @@ export default function TimerApp({
       currentIntervalStart: currentStart, // SAVE IT
       lastUpdated: Date.now(),
     };
-    localStorage.setItem("fomopomo_full_state", JSON.stringify(state));
+    setStoredValue("fomopomo_full_state", JSON.stringify(state));
   }, []);
 
   // --- Handlers ---
@@ -482,7 +499,7 @@ export default function TimerApp({
   // --- Restore ---
   useEffect(() => {
     const restoreState = () => {
-      const savedStateJson = localStorage.getItem("fomopomo_full_state");
+      const savedStateJson = getStoredValue("fomopomo_full_state");
       if (savedStateJson) {
         try {
           const state = JSON.parse(savedStateJson) as SavedAppState;
@@ -573,7 +590,7 @@ export default function TimerApp({
     const syncServerState = async () => {
       try {
         // 로컬에서 이미 실행 중으로 복원된 경우 확인 (로컬 스토리지에서)
-        const savedState = localStorage.getItem("fomopomo_full_state");
+        const savedState = getStoredValue("fomopomo_full_state");
         let localIsRunning = false;
         let localIsStopwatchRunning = false;
         let localElapsed = 0;
@@ -709,7 +726,10 @@ export default function TimerApp({
 
   // Persist Task
   useEffect(() => {
-    localStorage.setItem("fomopomo_task_state", JSON.stringify({ taskId: selectedTaskId, taskTitle: selectedTask }));
+    setStoredValue(
+      "fomopomo_task_state",
+      JSON.stringify({ taskId: selectedTaskId, taskTitle: selectedTask })
+    );
   }, [selectedTaskId, selectedTask]);
 
   const handleSpaceToggle = useEffectEvent((event: KeyboardEvent) => {

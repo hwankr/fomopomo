@@ -49,10 +49,19 @@ export default function Home() {
     });
   };
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-[#f8f9fa] dark:bg-[#0f172a]"
+        suppressHydrationWarning
+      >
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900 dark:border-white" />
+      </div>
+    );
+  }
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
+    <div className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
@@ -91,6 +100,6 @@ export default function Home() {
           onOpenLogin={() => setIsLoginModalOpen(true)}
         />
       </div>
-    </main>
+    </div>
   );
 }
