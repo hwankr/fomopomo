@@ -1,5 +1,25 @@
+👉 **라이브 서비스**: [https://fomopomo.com/](https://fomopomo.com/)
 
-👉 **라이브 서비스**: [https://fomopomo.com/)
+## Development Environment
+
+This project supports native Windows development and WSL.
+
+- Native Windows is the default supported setup for this repository.
+- Run `npm install`, `npm run dev`, `npm run build`, and test commands from PowerShell or Command Prompt.
+- Recommended Windows clone location: `C:\dev\fomopomo`
+- WSL is also supported. Recommended WSL clone location: `~/projects/fomopomo`
+- Avoid `/mnt/c/...` when working inside WSL. It works, but file watching and disk access can be slower.
+
+### Recommended Setup
+
+```powershell
+mkdir C:\dev -Force
+cd C:\dev
+git clone <repo-url> fomopomo
+cd .\fomopomo
+npm install
+npm run dev
+```
 
 ---
 
