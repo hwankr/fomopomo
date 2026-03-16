@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import Link from 'next/link';
@@ -17,6 +17,10 @@ interface Group {
     leader_id: string;
 }
 
+type GroupMembershipRow = {
+    groups: Group | Group[] | null;
+};
+
 export default function GroupsPage() {
     const { session, loading: sessionLoading } = useAuthSession();
     const { isDarkMode, toggleDarkMode } = useTheme();
@@ -26,7 +30,7 @@ export default function GroupsPage() {
     const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
-    const fetchGroups = async () => {
+    const fetchGroups = useCallback(async () => {
         if (!session?.user) return;
 
         try {
@@ -38,15 +42,23 @@ export default function GroupsPage() {
             if (error) throw error;
 
             if (data) {
-                // @ts-ignore
-                setGroups(data.map((item: any) => item.groups).filter(Boolean));
+                const groupRows = (data ?? []) as GroupMembershipRow[];
+                setGroups(
+                    groupRows
+                        .map((item) =>
+                            Array.isArray(item.groups)
+                                ? item.groups[0] ?? null
+                                : item.groups
+                        )
+                        .filter((group): group is Group => group !== null)
+                );
             }
         } catch (error) {
             console.error('Error fetching groups:', error);
         } finally {
             setGroupsLoading(false);
         }
-    };
+    }, [session?.user]);
 
     useEffect(() => {
         if (session?.user) {
@@ -54,7 +66,7 @@ export default function GroupsPage() {
         } else if (!sessionLoading) {
             setGroupsLoading(false);
         }
-    }, [session, sessionLoading]);
+    }, [fetchGroups, session, sessionLoading]);
 
     const handleActionClick = (action: () => void) => {
         if (!session) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { Pencil, Trash2, Check, X, AlertTriangle, Bell, BellOff } from 'lucide-react';
@@ -32,6 +32,10 @@ interface Friendship {
   friend: FriendProfile;
 }
 
+type FriendshipRow = Omit<Friendship, 'friend'> & {
+  friend: FriendProfile[] | null;
+};
+
 export default function FriendList({ session, refreshTrigger }: FriendListProps) {
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +45,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
   const [selectedFriendForReport, setSelectedFriendForReport] = useState<{ id: string; name: string } | null>(null);
   const [studyTimes, setStudyTimes] = useState<Record<string, number>>({});
 
-  const fetchStudyTimes = async () => {
+  const fetchStudyTimes = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
       const { data, error } = await supabase.rpc('get_friends_study_time', {
@@ -64,7 +68,49 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
     } catch (error) {
       console.error('Error fetching friends study time:', error);
     }
-  };
+  }, [session.user.id]);
+
+  const fetchFriends = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('friendships')
+        .select(`
+          id,
+          friend_email,
+          friend_id,
+          nickname,
+          created_at,
+          is_notification_enabled,
+          friend:friend_id (
+            status,
+            current_task,
+            last_active_at,
+            study_start_time,
+            total_stopwatch_time
+          )
+        `)
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const friendshipRows = (data ?? []) as FriendshipRow[];
+      setFriends(
+        friendshipRows.flatMap((row) => {
+          const friend = row.friend?.[0];
+          if (!friend) {
+            return [];
+          }
+
+          return [{ ...row, friend }];
+        })
+      );
+    } catch (error) {
+      console.error('Error fetching friends:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [session.user.id]);
 
   useEffect(() => {
     fetchFriends();
@@ -109,38 +155,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [session, refreshTrigger]);
-
-  const fetchFriends = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('friendships')
-        .select(`
-          id,
-          friend_email,
-          friend_id,
-          nickname,
-          created_at,
-          is_notification_enabled,
-          friend:friend_id (
-            status,
-            current_task,
-            last_active_at,
-            study_start_time,
-            total_stopwatch_time
-          )
-        `)
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setFriends(data as any || []);
-    } catch (error) {
-      console.error('Error fetching friends:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchFriends, fetchStudyTimes, refreshTrigger]);
 
   const confirmDelete = (friend: Friendship) => {
     setDeletingFriend({

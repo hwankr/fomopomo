@@ -18,6 +18,13 @@ type Friendship = {
     is_notification_enabled: boolean;
 };
 
+type FriendshipRow = {
+    friend_id: string;
+    nickname: string | null;
+    friend_email: string | null;
+    is_notification_enabled: boolean | null;
+};
+
 export default function FriendNotificationListener() {
     const [userId, setUserId] = useState<string | null>(null);
     const friendsRef = useRef<Map<string, Friendship>>(new Map());
@@ -35,28 +42,30 @@ export default function FriendNotificationListener() {
                 .select('friend_id, nickname, friend_email, is_notification_enabled')
                 .eq('user_id', user.id);
 
-            if (friendships) {
-                friendships.forEach((f: any) => {
-                    friendsRef.current.set(f.friend_id, {
-                        friend_id: f.friend_id,
-                        nickname: f.nickname,
-                        friend_email: f.friend_email,
-                        is_notification_enabled: f.is_notification_enabled ?? true,
+            const friendshipRows = (friendships ?? []) as FriendshipRow[];
+
+            if (friendshipRows.length > 0) {
+                friendshipRows.forEach((friendship) => {
+                    friendsRef.current.set(friendship.friend_id, {
+                        friend_id: friendship.friend_id,
+                        nickname: friendship.nickname,
+                        friend_email: friendship.friend_email,
+                        is_notification_enabled: friendship.is_notification_enabled ?? true,
                     });
                 });
             }
 
             // Fetch initial profiles of friends to know their names
-            if (friendships && friendships.length > 0) {
-                const friendIds = friendships.map((f: any) => f.friend_id);
+            if (friendshipRows.length > 0) {
+                const friendIds = friendshipRows.map((friendship) => friendship.friend_id);
                 const { data: profiles } = await supabase
                     .from('profiles')
                     .select('id, username, status')
                     .in('id', friendIds);
 
                 if (profiles) {
-                    profiles.forEach((p: any) => {
-                        profilesRef.current.set(p.id, p);
+                    (profiles as FriendProfile[]).forEach((profile) => {
+                        profilesRef.current.set(profile.id, profile);
                     });
                 }
             }
@@ -77,7 +86,7 @@ export default function FriendNotificationListener() {
                 },
                 (payload) => {
                     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                        const newFriend = payload.new as any;
+                        const newFriend = payload.new as FriendshipRow;
                         friendsRef.current.set(newFriend.friend_id, {
                             friend_id: newFriend.friend_id,
                             nickname: newFriend.nickname,

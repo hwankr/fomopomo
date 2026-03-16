@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Coffee, X } from 'lucide-react';
 
 interface DonationSectionProps {
@@ -21,9 +22,11 @@ const KakaoIcon = ({ className }: { className?: string }) => (
 
 // 토스 아이콘 (이미지)
 const TossIcon = ({ className }: { className?: string }) => (
-  <img 
+  <Image
     src="/toss-icon.png" 
     alt="Toss" 
+    width={24}
+    height={24}
     className={`${className} rounded-full`}
     style={{ objectFit: 'contain' }}
   />
@@ -78,8 +81,10 @@ function QRModal({
         {/* QR 이미지 */}
         <div className="flex justify-center">
           <div className="p-4 bg-white rounded-xl shadow-inner border border-gray-200">
-            <img 
+            <Image
               src={isKakao ? '/kakaopay-qr.png' : '/toss-qr.jpg'}
+              width={256}
+              height={256}
               alt={isKakao ? '카카오페이 QR' : '토스 QR'}
               className="w-64 h-64 object-contain"
             />

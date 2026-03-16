@@ -2,13 +2,25 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
+type ProfileStatusUpdate = {
+  status: 'studying' | 'paused' | 'online' | 'offline';
+  current_task: string | null;
+  last_active_at: string;
+  study_start_time: string | null;
+  timer_type: 'timer' | 'stopwatch';
+  timer_mode: 'focus' | 'shortBreak' | 'longBreak';
+  timer_duration: number;
+  total_stopwatch_time?: number;
+};
+
 // Helper to generate UUID
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 };
@@ -71,7 +83,7 @@ export const useStudySession = ({
       const { data } = await supabase.from('profiles').select('is_task_public').eq('id', user.id).single();
       const isPublic = data?.is_task_public ?? true;
 
-      const updateData: any = {
+      const updateData: ProfileStatusUpdate = {
         status,
         current_task: isPublic ? taskTitle : null,
         last_active_at: new Date().toISOString(),

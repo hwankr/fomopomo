@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Session } from '@supabase/supabase-js';
-import { Menu, X, Sun, Moon, Settings, Flag, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
+import { Menu, X, Sun, Moon, Settings, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 import appIcon from '@/app/icon.png';
 import { usePathname } from 'next/navigation';
 import { useFriendRequestCount } from '@/hooks/useFriendRequestCount';

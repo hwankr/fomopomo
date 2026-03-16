@@ -23,6 +23,43 @@ type GroupedFriends = {
     [key: string]: Profile[];
 };
 
+type FriendRow = {
+    nickname: string | null;
+    group_name: string | null;
+    friend:
+      | {
+        id: string;
+        username: string;
+        status: Profile['status'];
+        current_task: string | null;
+        last_active_at: string;
+        is_task_public: boolean | null;
+      }
+      | {
+        id: string;
+        username: string;
+        status: Profile['status'];
+        current_task: string | null;
+        last_active_at: string;
+        is_task_public: boolean | null;
+      }[]
+      | null;
+};
+
+const mapFriendRows = (rows: FriendRow[] | null | undefined): Profile[] =>
+    (rows ?? [])
+        .map((row) => ({
+            ...row,
+            friend: Array.isArray(row.friend) ? row.friend[0] ?? null : row.friend,
+        }))
+        .filter((row): row is FriendRow & { friend: Exclude<FriendRow['friend'], null | FriendRow['friend'][]> } => row.friend !== null)
+        .map((row) => ({
+            ...row.friend,
+            nickname: row.nickname ?? undefined,
+            group_name: row.group_name || 'Uncategorized',
+            is_task_public: row.friend.is_task_public ?? undefined,
+        }));
+
 export default function FriendsSection({ user }: { user: User }) {
     const [friends, setFriends] = useState<Profile[]>([]);
     const [showAddFriend, setShowAddFriend] = useState(false);
@@ -65,11 +102,7 @@ export default function FriendsSection({ user }: { user: User }) {
                 .eq('user_id', user.id);
 
             if (data) {
-                setFriends(data.map((f: any) => ({
-                    ...f.friend,
-                    nickname: f.nickname,
-                    group_name: f.group_name || 'Uncategorized'
-                })));
+                setFriends(mapFriendRows(data as FriendRow[]));
             }
         };
 
@@ -169,11 +202,7 @@ export default function FriendsSection({ user }: { user: User }) {
             `)
                     .eq('user_id', user.id);
                 if (data) {
-                    setFriends(data.map((f: any) => ({
-                        ...f.friend,
-                        nickname: f.nickname,
-                        group_name: f.group_name || 'Uncategorized'
-                    })));
+                    setFriends(mapFriendRows(data as FriendRow[]));
                 }
             }
         } finally {

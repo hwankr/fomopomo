@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, use } from 'react';
+import type { RealtimePostgresChangesPayload, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 import { useRouter } from 'next/navigation';
@@ -33,12 +34,25 @@ interface GroupDetail {
     leader_id: string;
 }
 
+type GroupMemberRow = Omit<Member, 'profiles'> & {
+    profiles: Member['profiles'] | Member['profiles'][] | null;
+};
+
+type StudyTimeRow = {
+    user_id: string;
+    total_seconds: number;
+};
+
+type StudySessionChangeRow = {
+    user_id: string | null;
+};
+
 export default function GroupDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
     const [group, setGroup] = useState<GroupDetail | null>(null);
     const [members, setMembers] = useState<Member[]>([]);
-    const [currentUser, setCurrentUser] = useState<any>(null);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [editingNickname, setEditingNickname] = useState(false);
     const [tempNickname, setTempNickname] = useState('');
@@ -98,8 +112,19 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
             if (membersError) throw membersError;
 
-            // @ts-ignore
-            setMembers(membersData || []);
+            const groupMembers = ((membersData ?? []) as GroupMemberRow[])
+                .map((member) => ({
+                    ...member,
+                    profiles: Array.isArray(member.profiles)
+                        ? member.profiles[0] ?? null
+                        : member.profiles,
+                }))
+                .filter(
+                    (member): member is GroupMemberRow & { profiles: Member['profiles'] } =>
+                        member.profiles !== null
+                );
+
+            setMembers(groupMembers);
 
             // 3. Fetch Study Times
             // Get today's start and end time (based on 5 AM reset)
@@ -118,7 +143,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                 console.error('Params:', { p_group_id: id, p_start_time: start, p_end_time: end });
             } else {
                 const timeMap: Record<string, number> = {};
-                studyTimeData.forEach((item: { user_id: string; total_seconds: number }) => {
+                (studyTimeData as StudyTimeRow[]).forEach((item) => {
                     timeMap[item.user_id] = item.total_seconds;
                 });
                 setStudyTimes(timeMap);
@@ -200,9 +225,11 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     schema: 'public',
                     table: 'study_sessions',
                 },
-                (payload: any) => {
+                (payload: RealtimePostgresChangesPayload<StudySessionChangeRow>) => {
                     // 그룹 멤버의 세션이 변경되면 공부 시간 다시 fetch
-                    const userId = payload.new?.user_id || payload.old?.user_id;
+                    const nextRow = payload.new as StudySessionChangeRow | undefined;
+                    const previousRow = payload.old as StudySessionChangeRow | undefined;
+                    const userId = nextRow?.user_id || previousRow?.user_id;
                     console.log('[Group Realtime] study_sessions change detected for user:', userId);
 
                     // 현재 멤버 목록에 있는 사용자인지 확인
@@ -224,7 +251,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
                                 if (studyTimeData) {
                                     const timeMap: Record<string, number> = {};
-                                    studyTimeData.forEach((item: { user_id: string; total_seconds: number }) => {
+                                    (studyTimeData as StudyTimeRow[]).forEach((item) => {
                                         timeMap[item.user_id] = item.total_seconds;
                                     });
                                     setStudyTimes(timeMap);
@@ -255,12 +282,13 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
     const handleUpdateNickname = async () => {
         if (!tempNickname.trim()) return;
+        if (!currentUser) return;
         try {
             const { error } = await supabase
                 .from('group_members')
                 .update({ nickname: tempNickname.trim() })
                 .eq('group_id', id)
-                .eq('user_id', currentUser.id);
+                .eq('user_id', currentUser?.id ?? '');
 
             if (error) throw error;
 
@@ -315,7 +343,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                 .from('group_members')
                 .delete()
                 .eq('group_id', id)
-                .eq('user_id', currentUser.id);
+                .eq('user_id', currentUser?.id ?? '');
 
             if (error) throw error;
             toast.success('그룹을 떠났습니다');
@@ -486,9 +514,10 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                             return nameA.localeCompare(nameB);
                         })
                         .map((member, index) => {
-                            const isCurrentUser = member.user_id === currentUser.id;
+                            const isCurrentUser = member.user_id === currentUser?.id;
                             const displayName = member.nickname || (member.profiles.email ? member.profiles.email.split('@')[0] : '멤버');
                             const savedStudyTime = studyTimes[member.user_id] || 0;
+                            void formatStudyTime(savedStudyTime);
                             const rank = index + 1;
 
                             return (
@@ -533,7 +562,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     groupId={group.id}
                     groupName={group.name}
                     members={members}
-                    currentUserId={currentUser.id}
+                    currentUserId={currentUser?.id ?? ''}
                     onTransferred={fetchGroupData}
                 />
             )}
