@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS: Settings = {
   ],
 };
 
+// useSyncExternalStore requires stable snapshot identity until the store changes.
+let cachedRawSettings: string | null = null;
+let cachedSettingsSnapshot: Settings = DEFAULT_SETTINGS;
+
 function normalizeSettings(rawSettings: Partial<Settings> | null | undefined): Settings {
   return {
     ...DEFAULT_SETTINGS,
@@ -58,21 +62,39 @@ function readSettingsSnapshot(): Settings {
 
   try {
     const savedSettings = window.localStorage.getItem(SETTINGS_KEY);
-    if (!savedSettings) {
-      return DEFAULT_SETTINGS;
+    if (savedSettings === cachedRawSettings) {
+      return cachedSettingsSnapshot;
     }
 
-    return normalizeSettings(JSON.parse(savedSettings) as Partial<Settings>);
+    if (!savedSettings) {
+      cachedRawSettings = null;
+      cachedSettingsSnapshot = DEFAULT_SETTINGS;
+      return cachedSettingsSnapshot;
+    }
+
+    cachedRawSettings = savedSettings;
+    cachedSettingsSnapshot = normalizeSettings(
+      JSON.parse(savedSettings) as Partial<Settings>
+    );
+    return cachedSettingsSnapshot;
   } catch (error) {
+    cachedRawSettings = null;
+    cachedSettingsSnapshot = DEFAULT_SETTINGS;
     console.error('Failed to parse settings', error);
-    return DEFAULT_SETTINGS;
+    return cachedSettingsSnapshot;
   }
 }
 
 function writeSettingsSnapshot(settings: Settings) {
   if (typeof window === 'undefined') return;
 
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  const normalizedSettings = normalizeSettings(settings);
+  const serializedSettings = JSON.stringify(normalizedSettings);
+
+  cachedRawSettings = serializedSettings;
+  cachedSettingsSnapshot = normalizedSettings;
+
+  window.localStorage.setItem(SETTINGS_KEY, serializedSettings);
   window.dispatchEvent(new Event('settingsChanged'));
 }
 

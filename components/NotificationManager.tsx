@@ -1,10 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import toast from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
+
+const subscribeToHydration = () => () => {};
+
+function useHydrated() {
+  return useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false
+  );
+}
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -27,6 +42,7 @@ export default function NotificationManager({
 }: {
   mode?: 'floating' | 'inline';
 }) {
+  const isHydrated = useHydrated();
   const [permission, setPermission] =
     useState<NotificationPermission>('default');
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -231,7 +247,7 @@ export default function NotificationManager({
   };
 
   if (mode === 'floating') {
-    if (permission === 'granted' || !isVisible) return null;
+    if (!isHydrated || permission === 'granted' || !isVisible) return null;
 
     return (
       <div className="fixed bottom-20 right-4 z-50 flex animate-bounce items-center gap-2">
