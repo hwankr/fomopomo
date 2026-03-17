@@ -5,15 +5,12 @@ import {
   endOfDay,
   endOfYear,
   startOfYear,
-  getDay,
   subDays,
   isSameDay,
   isSameMonth,
   startOfWeek,
-  endOfWeek
+  
 } from 'date-fns';
-import { ko } from 'date-fns/locale';
-import { Tooltip } from 'recharts'; // reusing rechart tooltip style logic if needed, or custom
 
 interface ContributionGraphProps {
   data: { date: string; count: number }[];
@@ -65,9 +62,13 @@ export default function ContributionGraph({
     return resolvedEndDate;
   }, [year, resolvedEndDate]);
 
-  useEffect(() => {
-    setSelectedData(null);
-  }, [year]);
+  const visibleSelectedData = useMemo(() => {
+    if (!selectedData) return null;
+    if (typeof year === 'number' && selectedData.date.getFullYear() !== year) {
+      return null;
+    }
+    return selectedData;
+  }, [selectedData, year]);
 
   // Auto-scroll to end when days change or on mount
   useEffect(() => {
@@ -172,7 +173,7 @@ export default function ContributionGraph({
                 const isLeftEdge = currentColumn < 3; // Align left for first 3 columns
                 const isRightEdge = currentColumn >= totalColumns - 3; // Align right for last 3 columns
 
-                const isSelected = selectedData && isSameDay(day, selectedData.date);
+                const isSelected = visibleSelectedData && isSameDay(day, visibleSelectedData.date);
                 const isToday = isSameDay(day, new Date());
 
                 // Determine tooltip position class
@@ -213,9 +214,9 @@ export default function ContributionGraph({
 
       {/* Selected Date Info (Mobile Friendly) - Moved outside scrollable area */}
       <div className="mt-3 py-2 px-3 rounded-lg bg-gray-50 dark:bg-slate-800/50 flex items-center justify-between">
-        {selectedData ? (
+        {visibleSelectedData ? (
           <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            📅 {format(selectedData.date, 'M월 d일')}: <span className="text-rose-500">{Math.floor(selectedData.minutes / 60)}시간 {selectedData.minutes % 60}분</span>
+            📅 {format(visibleSelectedData.date, 'M월 d일')}: <span className="text-rose-500">{Math.floor(visibleSelectedData.minutes / 60)}시간 {visibleSelectedData.minutes % 60}분</span>
           </span>
         ) : (
           <span className="text-sm text-gray-500 dark:text-gray-400">📅 날짜를 클릭하여 상세 정보를 확인하세요</span>

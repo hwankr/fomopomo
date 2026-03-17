@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 import { X } from 'lucide-react';
@@ -29,13 +29,7 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
         return `${m}m`;
     };
 
-    useEffect(() => {
-        if (isOpen && userId) {
-            fetchReportData();
-        }
-    }, [isOpen, userId]);
-
-    const fetchReportData = async () => {
+    const fetchReportData = useCallback(async () => {
         console.log('Fetching report data for:', userId);
         setLoading(true);
 
@@ -79,7 +73,13 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
         } finally {
             setLoading(false);
         }
-    };
+    }, [userId]);
+
+    useEffect(() => {
+        if (isOpen && userId) {
+            fetchReportData();
+        }
+    }, [fetchReportData, isOpen, userId]);
 
     if (!isOpen) return null;
 

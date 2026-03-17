@@ -10,7 +10,7 @@ import LoginModal from '@/components/LoginModal';
 import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
-import { ArrowLeft, Heart, Server, Sparkles } from 'lucide-react';
+import { ArrowLeft, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SupportPage() {

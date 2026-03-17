@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
     { id: '3', label: '작업3', minutes: 90 },
   ],
 };
-let cachedSettingsRaw: string | null = null;
+let cachedRawSettings: string | null = null;
 let cachedSettingsSnapshot: Settings = DEFAULT_SETTINGS;
 
 function normalizeSettings(rawSettings: Partial<Settings> | null | undefined): Settings {
@@ -60,35 +60,37 @@ function readSettingsSnapshot(): Settings {
 
   try {
     const savedSettings = window.localStorage.getItem(SETTINGS_KEY);
-    if (!savedSettings) {
-      cachedSettingsRaw = null;
-      cachedSettingsSnapshot = DEFAULT_SETTINGS;
-      return DEFAULT_SETTINGS;
-    }
-
-    if (savedSettings === cachedSettingsRaw) {
+    if (savedSettings === cachedRawSettings) {
       return cachedSettingsSnapshot;
     }
 
-    cachedSettingsRaw = savedSettings;
+    if (!savedSettings) {
+      cachedRawSettings = null;
+      cachedSettingsSnapshot = DEFAULT_SETTINGS;
+      return cachedSettingsSnapshot;
+    }
+
+    cachedRawSettings = savedSettings;
     cachedSettingsSnapshot = normalizeSettings(
       JSON.parse(savedSettings) as Partial<Settings>
     );
     return cachedSettingsSnapshot;
   } catch (error) {
-    console.error('Failed to parse settings', error);
-    cachedSettingsRaw = null;
+    cachedRawSettings = null;
     cachedSettingsSnapshot = DEFAULT_SETTINGS;
-    return DEFAULT_SETTINGS;
+    console.error('Failed to parse settings', error);
+    return cachedSettingsSnapshot;
   }
 }
 
 function writeSettingsSnapshot(settings: Settings) {
   if (typeof window === 'undefined') return;
 
-  const serializedSettings = JSON.stringify(settings);
-  cachedSettingsRaw = serializedSettings;
-  cachedSettingsSnapshot = settings;
+  const normalizedSettings = normalizeSettings(settings);
+  const serializedSettings = JSON.stringify(normalizedSettings);
+
+  cachedRawSettings = serializedSettings;
+  cachedSettingsSnapshot = normalizedSettings;
   window.localStorage.setItem(SETTINGS_KEY, serializedSettings);
   window.dispatchEvent(new Event('settingsChanged'));
 }

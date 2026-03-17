@@ -40,7 +40,6 @@ export default function ProfilePage() {
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0); // For compatibility if needed, or just refresh
 
   useEffect(() => {
     if (session?.user) {
@@ -82,7 +81,9 @@ export default function ProfilePage() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
-        onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
+        onSave={() => {
+          fetchStats('year', new Date(selectedYear, 0, 1));
+        }}
       />
 
       <Navbar

@@ -69,6 +69,6 @@ export type Database = {
       // ... truncated ...
     }
 
-    Functions: {}
+    Functions: Record<string, never>
   }
 }

@@ -1,7 +1,5 @@
 import { Session } from '@supabase/supabase-js';
 import { useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import AddFriend from './AddFriend';
 import FriendRequestList from './FriendRequestList';

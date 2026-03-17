@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   BarChart,
   Bar,
@@ -16,7 +16,6 @@ import {
   startOfMonth,
   endOfMonth,
   startOfYear,
-  endOfYear,
   addDays,
   format,
   subMonths,
@@ -33,7 +32,7 @@ export default function StudyReport() {
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [activeMonth, setActiveMonth] = useState(new Date());
   const [activeWeekStart, setActiveWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
-  const [selectedBucket, setSelectedBucket] = useState<ChartData | null>(null);
+  const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
 
@@ -57,8 +56,8 @@ export default function StudyReport() {
     }
   }, [chartData, viewMode]);
 
-  const currentYear = new Date().getFullYear();
-  const today = new Date();
+  const today = useMemo(() => new Date(), []);
+  const currentYear = today.getFullYear();
 
   // Navigation functions
   const goToPrevMonth = () => setActiveMonth(prev => subMonths(prev, 1));
@@ -116,26 +115,34 @@ export default function StudyReport() {
     }, 0);
   }, [viewMode, activeYear, activeMonth, activeWeekStart, fetchStats]);
 
-  // Set selected bucket when data changes
-  useEffect(() => {
-    if (chartData.length > 0) {
-      const referenceDate =
-        viewMode === 'year'
-          ? new Date(activeYear, today.getMonth(), today.getDate())
-          : today;
-      const todayKey =
-        viewMode === 'year'
-          ? format(referenceDate, 'yyyy-MM')
-          : format(referenceDate, 'yyyy-MM-dd');
-      
-      const preferredBucket =
-        chartData.find((bucket) => bucket.bucketKey === todayKey) ??
-        chartData[chartData.length - 1] ??
-        null;
-        
-      setSelectedBucket(preferredBucket);
+  const selectedBucket = useMemo(() => {
+    const manuallySelectedBucket = selectedBucketKey
+      ? chartData.find((bucket) => bucket.bucketKey === selectedBucketKey) ?? null
+      : null;
+
+    if (manuallySelectedBucket) {
+      return manuallySelectedBucket;
     }
-  }, [chartData, viewMode, activeYear]); // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (chartData.length === 0) {
+      return null;
+    }
+
+    const referenceDate =
+      viewMode === 'year'
+        ? new Date(activeYear, today.getMonth(), today.getDate())
+        : today;
+    const todayKey =
+      viewMode === 'year'
+        ? format(referenceDate, 'yyyy-MM')
+        : format(referenceDate, 'yyyy-MM-dd');
+
+    return (
+      chartData.find((bucket) => bucket.bucketKey === todayKey) ??
+      chartData[chartData.length - 1] ??
+      null
+    );
+  }, [activeYear, chartData, selectedBucketKey, today, viewMode]);
 
 
   const tabBase = 'px-4 py-1.5 text-xs font-bold rounded-md transition-all';
@@ -355,7 +362,7 @@ export default function StudyReport() {
                         maxBarSize={50}
                         onClick={(data) => {
                           if (data && 'payload' in data) {
-                            setSelectedBucket(data.payload as ChartData);
+                            setSelectedBucketKey((data.payload as ChartData).bucketKey);
                           }
                         }}
                       >

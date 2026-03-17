@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 
@@ -20,11 +20,7 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchRequests();
-  }, [session, refreshTrigger]);
-
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('friend_requests')
@@ -40,7 +36,11 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
     } finally {
       setLoading(false);
     }
-  };
+  }, [session.user.id]);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [fetchRequests, refreshTrigger]);
 
   const handleAccept = async (requestId: string) => {
     try {

@@ -2,39 +2,39 @@
 
 ## Development Environment
 
-This project is configured for WSL/Linux-first development.
+This project supports native Windows development and WSL.
 
-- Run `npm install`, `npm run dev`, `npm run build`, and test commands inside WSL.
-- Do not develop this project with native Windows `node`/`npm`.
-- Recommended clone location inside WSL: `~/projects/fomopomo`
-- Avoid `/mnt/c/...` for day-to-day development. It is slower and can cause file watching and native module issues.
-- If you want to open the project from Windows Explorer, use `\\wsl.localhost\Ubuntu\home\<your-user>\projects\fomopomo`
+- Native Windows is the default supported setup for this repository.
+- Run `npm install`, `npm run dev`, `npm run build`, and test commands from PowerShell or Command Prompt.
+- Recommended Windows clone location: `C:\dev\fomopomo`
+- WSL is also supported. Recommended WSL clone location: `~/projects/fomopomo`
+- Avoid `/mnt/c/...` when working inside WSL. It works, but file watching and disk access can be slower.
 
 ### Recommended Setup
 
-```bash
-mkdir -p ~/projects
-cd ~/projects
+```powershell
+mkdir C:\dev -Force
+cd C:\dev
 git clone <repo-url> fomopomo
-cd fomopomo
+cd .\fomopomo
 npm install
 npm run dev
 ```
 
 ---
 
-## ✨ 주요 기능 (Key Features)
+## 주요 기능 (Key Features)
 
-- **⏱️ 스마트 타이머**: 뽀모도로(집중), 짧은 휴식, 긴 휴식 모드 자동 전환 및 커스텀 타이머 지원.
-- **📝 태스크 관리**: 집중 시간 종료 시 수행한 태스크를 기록하고 관리.
-- **📊 상세 리포트**: 주/월/년 단위의 집중 시간 통계 및 태스크별 분포 차트 제공.
-- **☁️ 클라우드 동기화**: 구글 로그인으로 기기 간 설정 및 기록 동기화 (비로그인 시 로컬 저장 지원).
-- **📱 PWA 지원**: 모바일 홈 화면에 추가하여 앱처럼 사용 가능.
-- **🌙 다크 모드**: 눈이 편안한 다크 모드 및 로컬 상태 복원 기능.
+- **뽀모도로 타이머**: 집중, 짧은 휴식, 긴 휴식 모드 전환 및 커스텀 타이머 지원
+- **할 일 리스트 관리**: 집중 시간 종료 후 실행한 작업을 기록하고 관리
+- **상세 리포트**: 주간/월간/연간 집중 시간 통계 및 작업별 분포 차트 제공
+- **크로스 디바이스 동기화**: Google 로그인으로 기기 간 설정 및 기록 동기화
+- **PWA 지원**: 모바일 홈 화면에 추가하여 앱처럼 사용 가능
+- **다크 모드**: 라이트 테마와 다크 테마 전환 및 상태 복원
 
 ---
 
-## 🛠️ 기술 스택 (Tech Stack)
+## 프로젝트 기술 스택 (Tech Stack)
 
 | Category | Technology |
 |----------|------------|
@@ -47,9 +47,9 @@ npm run dev
 
 ---
 
-## 🤝 기여하기 (Contributing)
+## 기여하기 (Contributing)
 
-버그 제보나 기능 제안은 [Issues](https://github.com/hwankr/pomofomo/issues)를 이용해 주세요. Pull Request도 환영합니다!
+버그 제보와 기능 제안은 [Issues](https://github.com/hwankr/pomofomo/issues)를 이용해 주세요. Pull Request도 환영합니다.
 
 ---
 
