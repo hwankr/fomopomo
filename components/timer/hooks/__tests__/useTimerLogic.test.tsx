@@ -18,6 +18,8 @@ const defaultSettings: Settings = {
   volume: 0.5,
   isMuted: false,
   taskPopupEnabled: true,
+  snowEnabled: true,
+  tasks: ['국어', '수학', '영어'],
   presets: []
 };
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import { Session } from '@supabase/supabase-js';
+import { loadTaskOptions as loadPersistedTaskOptions } from './timer/hooks/settingsStore';
 
 type StudySession = {
   id: number;
@@ -32,30 +33,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
 
   const loadTaskOptions = async () => {
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData.user;
-
-      let tasks: string[] | null = null;
-
-      if (user) {
-        const { data } = await supabase
-          .from('user_settings')
-          .select('settings')
-          .eq('user_id', user.id)
-          .single();
-
-        if (data?.settings?.tasks && data.settings.tasks.length > 0) {
-          tasks = data.settings.tasks;
-        }
-      }
-
-      if (!tasks) {
-        const localSaved = localStorage.getItem('fomopomo_settings');
-        if (localSaved) {
-          const parsed = JSON.parse(localSaved);
-          if (parsed.tasks && parsed.tasks.length > 0) tasks = parsed.tasks;
-        }
-      }
+      const tasks = await loadPersistedTaskOptions();
 
       setTaskOptions(tasks ?? ['국어', '수학', '영어']);
     } catch (error) {

@@ -15,23 +15,13 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import { useSettings, type Settings } from '../useSettings';
+import {
+  DEFAULT_FOMOPOMO_SETTINGS,
+  SETTINGS_CHANGED_EVENT,
+  SETTINGS_KEY,
+} from '../settingsStore';
 
-const DEFAULT_SETTINGS: Settings = {
-  pomoTime: 25,
-  shortBreak: 5,
-  longBreak: 15,
-  autoStartBreaks: false,
-  autoStartPomos: false,
-  longBreakInterval: 4,
-  volume: 50,
-  isMuted: false,
-  taskPopupEnabled: true,
-  presets: [
-    { id: '1', label: '작업1', minutes: 25 },
-    { id: '2', label: '작업2', minutes: 50 },
-    { id: '3', label: '작업3', minutes: 90 },
-  ],
-};
+const DEFAULT_SETTINGS: Settings = DEFAULT_FOMOPOMO_SETTINGS;
 
 describe('useSettings', () => {
   const upsertMock = vi.fn();
@@ -56,12 +46,13 @@ describe('useSettings', () => {
 
   it('returns a stable snapshot reference when settings have not changed', () => {
     window.localStorage.setItem(
-      'fomopomo_settings',
+      SETTINGS_KEY,
       JSON.stringify({
         ...DEFAULT_SETTINGS,
         pomoTime: 30,
         shortBreak: 10,
         longBreak: 20,
+        tasks: ['집중'],
         presets: [{ id: '1', label: '집중', minutes: 30 }],
       })
     );
@@ -74,12 +65,13 @@ describe('useSettings', () => {
     expect(result.current.settings).toBe(firstSnapshot);
   });
 
-  it('fills missing values from defaults when stored settings are partial', () => {
+  it('fills missing values from canonical defaults when stored settings are partial', () => {
     window.localStorage.setItem(
-      'fomopomo_settings',
+      SETTINGS_KEY,
       JSON.stringify({
         pomoTime: 40,
         shortBreak: 8,
+        snowEnabled: false,
         presets: [],
       })
     );
@@ -90,6 +82,7 @@ describe('useSettings', () => {
       ...DEFAULT_SETTINGS,
       pomoTime: 40,
       shortBreak: 8,
+      snowEnabled: false,
     });
   });
 
@@ -97,7 +90,8 @@ describe('useSettings', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
-    window.localStorage.setItem('fomopomo_settings', 'not-json');
+
+    window.localStorage.setItem(SETTINGS_KEY, 'not-json');
 
     const { result } = renderHook(() => useSettings(0));
 
@@ -105,7 +99,7 @@ describe('useSettings', () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
-  it('setSettings persists normalized values and dispatches settingsChanged', () => {
+  it('setSettings persists normalized values and dispatches the shared event', () => {
     const { result } = renderHook(() => useSettings(0));
 
     act(() => {
@@ -113,24 +107,27 @@ describe('useSettings', () => {
         ...DEFAULT_SETTINGS,
         pomoTime: 55,
         taskPopupEnabled: false,
+        snowEnabled: false,
+        tasks: [],
         presets: [],
       });
     });
 
     const storedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(SETTINGS_KEY) ?? '{}'
     ) as Settings;
 
     expect(storedSettings).toEqual({
       ...DEFAULT_SETTINGS,
       pomoTime: 55,
       taskPopupEnabled: false,
+      snowEnabled: false,
     });
     expect(
       dispatchSpy.mock.calls.some((call: unknown[]) => {
         const event = call[0] as Event | undefined;
         return event instanceof Event
-          ? event.type === 'settingsChanged'
+          ? event.type === SETTINGS_CHANGED_EVENT
           : false;
       })
     ).toBe(true);
@@ -142,10 +139,12 @@ describe('useSettings', () => {
     });
     upsertMock.mockImplementation(async () => {
       const currentSettings = JSON.parse(
-        window.localStorage.getItem('fomopomo_settings') ?? '{}'
+        window.localStorage.getItem(SETTINGS_KEY) ?? '{}'
       ) as Settings;
+
       expect(currentSettings.pomoTime).toBe(45);
       expect(currentSettings.taskPopupEnabled).toBe(false);
+      expect(currentSettings.snowEnabled).toBe(false);
       return { error: null };
     });
 
@@ -156,6 +155,7 @@ describe('useSettings', () => {
         ...DEFAULT_SETTINGS,
         pomoTime: 45,
         taskPopupEnabled: false,
+        snowEnabled: false,
       });
     });
 
@@ -164,6 +164,7 @@ describe('useSettings', () => {
       settings: expect.objectContaining({
         pomoTime: 45,
         taskPopupEnabled: false,
+        snowEnabled: false,
       }),
     });
   });
@@ -179,7 +180,7 @@ describe('useSettings', () => {
     });
 
     const storedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(SETTINGS_KEY) ?? '{}'
     ) as Settings;
 
     expect(storedSettings.volume).toBe(25);

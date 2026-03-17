@@ -1,6 +1,11 @@
 'use client';
 
 import { useMemo, useSyncExternalStore } from 'react';
+import {
+  DEFAULT_FOMOPOMO_SETTINGS,
+  readSettingsSnapshot,
+  subscribeSettings,
+} from './timer/hooks/settingsStore';
 
 type ParticleType = 'snowflake' | 'star' | 'sparkle';
 
@@ -60,45 +65,9 @@ export default function SnowEffect() {
     () => false
   );
   const isEnabled = useSyncExternalStore(
-    (onStoreChange) => {
-      if (typeof window === 'undefined') {
-        return () => {};
-      }
-
-      const handleStorageChange = (event: StorageEvent) => {
-        if (event.key === 'fomopomo_settings') {
-          onStoreChange();
-        }
-      };
-      const handleSettingsChange = () => {
-        onStoreChange();
-      };
-
-      window.addEventListener('storage', handleStorageChange);
-      window.addEventListener('settingsChanged', handleSettingsChange);
-
-      return () => {
-        window.removeEventListener('storage', handleStorageChange);
-        window.removeEventListener('settingsChanged', handleSettingsChange);
-      };
-    },
-    () => {
-      if (typeof window === 'undefined') {
-        return true;
-      }
-
-      try {
-        const rawSettings = window.localStorage.getItem('fomopomo_settings');
-        if (!rawSettings) return true;
-
-        const settings = JSON.parse(rawSettings);
-        return settings.snowEnabled !== false;
-      } catch (error) {
-        console.error('Failed to parse snow settings', error);
-        return true;
-      }
-    },
-    () => true
+    subscribeSettings,
+    () => readSettingsSnapshot().snowEnabled,
+    () => DEFAULT_FOMOPOMO_SETTINGS.snowEnabled
   );
 
   const particles = useMemo(() => buildParticles(), []);

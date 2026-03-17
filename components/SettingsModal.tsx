@@ -1,10 +1,17 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import NotificationManager from './NotificationManager';
 import ConfirmModal from './ConfirmModal';
+import {
+  DEFAULT_FOMOPOMO_SETTINGS,
+  loadPersistedSettings,
+  persistSettings as persistStoredSettings,
+  type FomopomoSettings,
+  type Preset,
+} from './timer/hooks/settingsStore';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -12,50 +19,10 @@ interface SettingsModalProps {
   onSave: () => void;
 }
 
-type Preset = {
-  id: string;
-  label: string;
-  minutes: number;
-};
-
-type Settings = {
-  pomoTime: number;
-  shortBreak: number;
-  longBreak: number;
-  autoStartBreaks: boolean;
-  autoStartPomos: boolean;
-  longBreakInterval: number;
-  volume: number;
-  isMuted: boolean;
-  taskPopupEnabled: boolean;
-  snowEnabled: boolean; // ❄️ 눈 효과
-  tasks: string[];
-  presets: Preset[];
-};
-
 type ConflictPayload = {
   groups?: { name?: string | null }[];
   error?: string;
   message?: string;
-};
-
-const DEFAULT_SETTINGS = {
-  pomoTime: 25,
-  shortBreak: 5,
-  longBreak: 15,
-  autoStartBreaks: false,
-  autoStartPomos: false,
-  longBreakInterval: 4,
-  volume: 50,
-  isMuted: false, // ✨ 기본값 추가
-  taskPopupEnabled: true,
-  snowEnabled: true, // ❄️ 눈 효과 (기본값: 켜짐)
-  tasks: ['국어', '수학', '영어'],
-  presets: [
-    { id: '1', label: '프리셋1', minutes: 25 },
-    { id: '2', label: '프리셋2', minutes: 50 },
-    { id: '3', label: '프리셋3', minutes: 90 },
-  ],
 };
 
 export default function SettingsModal({
@@ -63,139 +30,82 @@ export default function SettingsModal({
   onClose,
   onSave,
 }: SettingsModalProps) {
-  const [pomoTime, setPomoTime] = useState(DEFAULT_SETTINGS.pomoTime);
-  const [shortBreak, setShortBreak] = useState(DEFAULT_SETTINGS.shortBreak);
-  const [longBreak, setLongBreak] = useState(DEFAULT_SETTINGS.longBreak);
+  const [pomoTime, setPomoTime] = useState(DEFAULT_FOMOPOMO_SETTINGS.pomoTime);
+  const [shortBreak, setShortBreak] = useState(DEFAULT_FOMOPOMO_SETTINGS.shortBreak);
+  const [longBreak, setLongBreak] = useState(DEFAULT_FOMOPOMO_SETTINGS.longBreak);
   const [autoStartBreaks, setAutoStartBreaks] = useState(
-    DEFAULT_SETTINGS.autoStartBreaks
+    DEFAULT_FOMOPOMO_SETTINGS.autoStartBreaks
   );
   const [autoStartPomos, setAutoStartPomos] = useState(
-    DEFAULT_SETTINGS.autoStartPomos
+    DEFAULT_FOMOPOMO_SETTINGS.autoStartPomos
   );
   const [longBreakInterval, setLongBreakInterval] = useState(
-    DEFAULT_SETTINGS.longBreakInterval
+    DEFAULT_FOMOPOMO_SETTINGS.longBreakInterval
   );
-  const [volume, setVolume] = useState(DEFAULT_SETTINGS.volume);
-  const [isMuted, setIsMuted] = useState(DEFAULT_SETTINGS.isMuted); // ✨ 상태 추가
+  const [volume, setVolume] = useState(DEFAULT_FOMOPOMO_SETTINGS.volume);
+  const [isMuted, setIsMuted] = useState(DEFAULT_FOMOPOMO_SETTINGS.isMuted);
   const [taskPopupEnabled, setTaskPopupEnabled] = useState(
-    DEFAULT_SETTINGS.taskPopupEnabled
+    DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled
   );
-  const [snowEnabled, setSnowEnabled] = useState(DEFAULT_SETTINGS.snowEnabled); // ❄️ 눈 효과
-  const [tasks, setTasks] = useState<string[]>(DEFAULT_SETTINGS.tasks);
-  const [presets, setPresets] = useState<Preset[]>(DEFAULT_SETTINGS.presets);
+  const [snowEnabled, setSnowEnabled] = useState(DEFAULT_FOMOPOMO_SETTINGS.snowEnabled);
+  const [tasks, setTasks] = useState<string[]>(DEFAULT_FOMOPOMO_SETTINGS.tasks);
+  const [presets, setPresets] = useState<Preset[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
   const [isResetSettingsConfirmOpen, setIsResetSettingsConfirmOpen] = useState(false);
   const [isResetAccountConfirmOpen, setIsResetAccountConfirmOpen] = useState(false);
   const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
 
+  const applySettingsToForm = useCallback((settings: FomopomoSettings) => {
+    setPomoTime(settings.pomoTime);
+    setShortBreak(settings.shortBreak);
+    setLongBreak(settings.longBreak);
+    setAutoStartBreaks(settings.autoStartBreaks);
+    setAutoStartPomos(settings.autoStartPomos);
+    setLongBreakInterval(settings.longBreakInterval);
+    setVolume(settings.volume);
+    setIsMuted(settings.isMuted);
+    setTaskPopupEnabled(settings.taskPopupEnabled);
+    setSnowEnabled(settings.snowEnabled);
+    setTasks(settings.tasks);
+    setPresets(settings.presets);
+  }, []);
+
+  const buildSettingsFromForm = (): FomopomoSettings => ({
+    pomoTime,
+    shortBreak,
+    longBreak,
+    autoStartBreaks,
+    autoStartPomos,
+    longBreakInterval,
+    volume,
+    isMuted,
+    taskPopupEnabled,
+    snowEnabled,
+    tasks,
+    presets,
+  });
+
   useEffect(() => {
     const loadSettings = async () => {
-      if (isOpen) {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        let loadedSettings = null;
-
-        if (user) {
-          const { data } = await supabase
-            .from('user_settings')
-            .select('settings')
-            .eq('user_id', user.id)
-            .single();
-          if (data) loadedSettings = data.settings;
-        }
-
-        if (!loadedSettings) {
-          const localSaved = localStorage.getItem('fomopomo_settings');
-          if (localSaved) loadedSettings = JSON.parse(localSaved);
-        }
-
-        if (loadedSettings) {
-          setPomoTime(loadedSettings.pomoTime ?? DEFAULT_SETTINGS.pomoTime);
-          setShortBreak(
-            loadedSettings.shortBreak ?? DEFAULT_SETTINGS.shortBreak
-          );
-          setLongBreak(loadedSettings.longBreak ?? DEFAULT_SETTINGS.longBreak);
-          setAutoStartBreaks(
-            loadedSettings.autoStartBreaks ?? DEFAULT_SETTINGS.autoStartBreaks
-          );
-          setAutoStartPomos(
-            loadedSettings.autoStartPomos ?? DEFAULT_SETTINGS.autoStartPomos
-          );
-          setLongBreakInterval(
-            loadedSettings.longBreakInterval ??
-            DEFAULT_SETTINGS.longBreakInterval
-          );
-          setVolume(loadedSettings.volume ?? DEFAULT_SETTINGS.volume);
-          setIsMuted(loadedSettings.isMuted ?? DEFAULT_SETTINGS.isMuted); // ✨ 로드
-          setTaskPopupEnabled(
-            loadedSettings.taskPopupEnabled ?? DEFAULT_SETTINGS.taskPopupEnabled
-          );
-          setSnowEnabled(loadedSettings.snowEnabled ?? DEFAULT_SETTINGS.snowEnabled); // ❄️ 로드
-          if (loadedSettings.tasks && loadedSettings.tasks.length > 0) {
-            setTasks(loadedSettings.tasks);
-          }
-          if (loadedSettings.presets && loadedSettings.presets.length > 0) {
-            setPresets(loadedSettings.presets);
-          }
-        }
+      if (!isOpen) {
+        return;
       }
-    };
-    loadSettings();
-  }, [isOpen]);
 
-  const saveToAll = async (newSettings: Settings) => {
-    localStorage.setItem('fomopomo_settings', JSON.stringify(newSettings));
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        settings: newSettings,
-      });
-    }
-  };
+      applySettingsToForm(await loadPersistedSettings());
+    };
+
+    loadSettings();
+  }, [applySettingsToForm, isOpen]);
 
   const handleSave = async () => {
-    const newSettings = {
-      pomoTime,
-      shortBreak,
-      longBreak,
-      autoStartBreaks,
-      autoStartPomos,
-      longBreakInterval,
-      volume,
-      isMuted,
-      taskPopupEnabled,
-      snowEnabled, // ❄️ 눈 효과
-      tasks,
-      presets,
-    };
-    await saveToAll(newSettings);
-    // ❄️ SnowEffect 컴포넌트에 알리기
-    window.dispatchEvent(new Event('settingsChanged'));
+    await persistStoredSettings(buildSettingsFromForm());
     toast.success('설정이 저장되었습니다!');
     onSave();
     onClose();
   };
 
   const handleResetSettings = async () => {
-    setPomoTime(DEFAULT_SETTINGS.pomoTime);
-    setShortBreak(DEFAULT_SETTINGS.shortBreak);
-    setLongBreak(DEFAULT_SETTINGS.longBreak);
-    setAutoStartBreaks(DEFAULT_SETTINGS.autoStartBreaks);
-    setAutoStartPomos(DEFAULT_SETTINGS.autoStartPomos);
-    setLongBreakInterval(DEFAULT_SETTINGS.longBreakInterval);
-    setVolume(DEFAULT_SETTINGS.volume);
-    setIsMuted(DEFAULT_SETTINGS.isMuted);
-    setTaskPopupEnabled(DEFAULT_SETTINGS.taskPopupEnabled);
-    setSnowEnabled(DEFAULT_SETTINGS.snowEnabled);
-    setTasks(DEFAULT_SETTINGS.tasks);
-    setPresets(DEFAULT_SETTINGS.presets);
-
-    await saveToAll(DEFAULT_SETTINGS);
-    // 설정 변경 이벤트 발생 (눈 효과 등 즉시 반영)
-    window.dispatchEvent(new Event('settingsChanged'));
+    applySettingsToForm(DEFAULT_FOMOPOMO_SETTINGS);
+    await persistStoredSettings(DEFAULT_FOMOPOMO_SETTINGS);
     toast.success('설정이 기본값으로 초기화되었습니다!');
     onSave();
     onClose();
