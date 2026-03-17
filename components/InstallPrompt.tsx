@@ -20,10 +20,20 @@ type IOSNavigator = Navigator & {
 };
 
 const PROMPT_DISMISSED_KEY = 'pwa_prompt_dismissed_at';
+const PROMPT_PERMANENTLY_DISMISSED_KEY = 'pwa_prompt_permanently_dismissed';
 const PROMPT_COOLDOWN_DAYS = 7;
+
+function isPromptPermanentlyDismissed() {
+  if (typeof window === 'undefined') return false;
+
+  return (
+    window.localStorage.getItem(PROMPT_PERMANENTLY_DISMISSED_KEY) === 'true'
+  );
+}
 
 function shouldShowPrompt() {
   if (typeof window === 'undefined') return false;
+  if (isPromptPermanentlyDismissed()) return false;
 
   const dismissedAt = window.localStorage.getItem(PROMPT_DISMISSED_KEY);
   if (!dismissedAt) return true;
@@ -66,6 +76,15 @@ export default function InstallPrompt() {
   const [showAndroidPrompt, setShowAndroidPrompt] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
+  const hidePrompt = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsIOSPromptVisible(false);
+      setShowAndroidPrompt(false);
+      setIsClosing(false);
+    }, 300);
+  };
+
   useEffect(() => {
     if (!installContext.canShowPrompt || installContext.isStandalone) return;
 
@@ -100,13 +119,12 @@ export default function InstallPrompt() {
 
   const handleClose = () => {
     window.localStorage.setItem(PROMPT_DISMISSED_KEY, Date.now().toString());
+    hidePrompt();
+  };
 
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsIOSPromptVisible(false);
-      setShowAndroidPrompt(false);
-      setIsClosing(false);
-    }, 300);
+  const handlePermanentDismiss = () => {
+    window.localStorage.setItem(PROMPT_PERMANENTLY_DISMISSED_KEY, 'true');
+    hidePrompt();
   };
 
   if (!installContext.canShowPrompt || installContext.isStandalone) {
@@ -135,6 +153,7 @@ export default function InstallPrompt() {
         >
           <button
             onClick={handleClose}
+            aria-label="Close install prompt"
             className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
           >
             <X className="h-5 w-5" />
@@ -148,6 +167,12 @@ export default function InstallPrompt() {
               <Share className="h-5 w-5 text-blue-500" />
               <span>then choose Add to Home Screen.</span>
             </div>
+            <button
+              onClick={handlePermanentDismiss}
+              className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
+            >
+              Don&apos;t show again
+            </button>
           </div>
         </div>
       </>
@@ -176,6 +201,7 @@ export default function InstallPrompt() {
         >
           <button
             onClick={handleClose}
+            aria-label="Close install prompt"
             className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
           >
             <X className="h-5 w-5" />
@@ -190,6 +216,12 @@ export default function InstallPrompt() {
             >
               <Download className="h-4 w-4" />
               Install app
+            </button>
+            <button
+              onClick={handlePermanentDismiss}
+              className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
+            >
+              Don&apos;t show again
             </button>
           </div>
         </div>
