@@ -33,8 +33,18 @@ interface Friendship {
 }
 
 type FriendshipRow = Omit<Friendship, 'friend'> & {
-  friend: FriendProfile[] | null;
+  friend: FriendProfile | FriendProfile[] | null;
 };
+
+function normalizeFriendProfile(
+  friend: FriendshipRow['friend']
+): FriendProfile | null {
+  if (Array.isArray(friend)) {
+    return friend[0] ?? null;
+  }
+
+  return friend;
+}
 
 export default function FriendList({ session, refreshTrigger }: FriendListProps) {
   const [friends, setFriends] = useState<Friendship[]>([]);
@@ -97,7 +107,7 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
       const friendshipRows = (data ?? []) as FriendshipRow[];
       setFriends(
         friendshipRows.flatMap((row) => {
-          const friend = row.friend?.[0];
+          const friend = normalizeFriendProfile(row.friend);
           if (!friend) {
             return [];
           }
