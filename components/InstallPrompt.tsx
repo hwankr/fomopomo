@@ -153,25 +153,25 @@ export default function InstallPrompt() {
         >
           <button
             onClick={handleClose}
-            aria-label="Close install prompt"
+            aria-label="설치 안내 닫기"
             className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
           >
             <X className="h-5 w-5" />
           </button>
           <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
             <p className="text-sm font-medium text-gray-800">
-              Install this app for faster access.
+              더 빠르게 이용하려면 앱을 설치하세요.
             </p>
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span>Tap</span>
+              <span>공유 버튼을 누른 뒤</span>
               <Share className="h-5 w-5 text-blue-500" />
-              <span>then choose Add to Home Screen.</span>
+              <span>홈 화면에 추가를 선택하세요.</span>
             </div>
             <button
               onClick={handlePermanentDismiss}
               className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
             >
-              Don&apos;t show again
+              다시 보지 않기
             </button>
           </div>
         </div>
@@ -201,27 +201,27 @@ export default function InstallPrompt() {
         >
           <button
             onClick={handleClose}
-            aria-label="Close install prompt"
+            aria-label="설치 안내 닫기"
             className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
           >
             <X className="h-5 w-5" />
           </button>
           <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
             <p className="text-sm font-medium text-gray-800">
-              Install this app for faster access.
+              더 빠르게 이용하려면 앱을 설치하세요.
             </p>
             <button
               onClick={handleInstallClick}
               className="flex items-center gap-2 rounded-full bg-rose-500 px-4 py-2 font-medium text-white transition-colors hover:bg-rose-600"
             >
               <Download className="h-4 w-4" />
-              Install app
+              앱 설치하기
             </button>
             <button
               onClick={handlePermanentDismiss}
               className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
             >
-              Don&apos;t show again
+              다시 보지 않기
             </button>
           </div>
         </div>

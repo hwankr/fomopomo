@@ -77,10 +77,10 @@ describe('InstallPrompt', () => {
     render(<InstallPrompt />);
 
     expect(
-      screen.getByText('Install this app for faster access.')
+      screen.getByText('더 빠르게 이용하려면 앱을 설치하세요.')
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: "Don't show again" })
+      screen.getByRole('button', { name: '다시 보지 않기' })
     ).toBeInTheDocument();
   });
 
@@ -88,7 +88,7 @@ describe('InstallPrompt', () => {
     render(<InstallPrompt />);
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Close install prompt' }));
+      fireEvent.click(screen.getByRole('button', { name: '설치 안내 닫기' }));
       vi.runAllTimers();
     });
 
@@ -102,7 +102,7 @@ describe('InstallPrompt', () => {
     render(<InstallPrompt />);
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: "Don't show again" }));
+      fireEvent.click(screen.getByRole('button', { name: '다시 보지 않기' }));
       vi.runAllTimers();
     });
 
@@ -111,7 +111,7 @@ describe('InstallPrompt', () => {
     ).toBe('true');
 
     expect(
-      screen.queryByText('Install this app for faster access.')
+      screen.queryByText('더 빠르게 이용하려면 앱을 설치하세요.')
     ).not.toBeInTheDocument();
   });
 
@@ -121,7 +121,7 @@ describe('InstallPrompt', () => {
     render(<InstallPrompt />);
 
     expect(
-      screen.queryByText('Install this app for faster access.')
+      screen.queryByText('더 빠르게 이용하려면 앱을 설치하세요.')
     ).not.toBeInTheDocument();
   });
 
@@ -138,10 +138,10 @@ describe('InstallPrompt', () => {
     });
 
     expect(
-      screen.getByRole('button', { name: 'Install app' })
+      screen.getByRole('button', { name: '앱 설치하기' })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: "Don't show again" })
+      screen.getByRole('button', { name: '다시 보지 않기' })
     ).toBeInTheDocument();
   });
 });
