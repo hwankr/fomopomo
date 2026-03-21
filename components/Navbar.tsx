@@ -107,7 +107,7 @@ export default function Navbar({
                             <button
                                 onClick={toggleDarkMode}
                                 className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-amber-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-yellow-400 transition-all duration-200"
-                                aria-label="Toggle Dark Mode"
+                                aria-label="다크 모드 전환"
                             >
                                 {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                             </button>
@@ -116,7 +116,7 @@ export default function Navbar({
                                 <Link
                                     href="/profile"
                                     className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-rose-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-rose-400 transition-all duration-200"
-                                    aria-label="Profile"
+                                    aria-label="프로필"
                                 >
                                     <UserIcon className="w-5 h-5" />
                                 </Link>
@@ -126,7 +126,7 @@ export default function Navbar({
                                 <button
                                     onClick={onOpenSettings}
                                     className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-indigo-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-indigo-400 transition-all duration-200"
-                                    aria-label="Settings"
+                                    aria-label="설정"
                                 >
                                     <Settings className="w-5 h-5" />
                                 </button>
@@ -145,10 +145,10 @@ export default function Navbar({
                                                 src={
                                                     session.user.user_metadata.avatar_url ||
                                                     `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                        session.user.email?.split('@')[0] || 'User'
+                                                        session.user.email?.split('@')[0] || '사용자'
                                                     )}&background=random&color=fff`
                                                 }
-                                                alt="User"
+                                                alt="사용자"
                                                 fill
                                                 className="object-cover"
                                             />
@@ -187,7 +187,7 @@ export default function Navbar({
                                                 className="w-full text-left px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 flex items-center gap-2 transition-colors"
                                                 >
                                                     <LogOut className="w-4 h-4" />
-                                                    Sign out
+                                                    로그아웃
                                                 </button>
                                             </div>
                                         </>
@@ -209,7 +209,7 @@ export default function Navbar({
                                 onClick={toggleMenu}
                                 className="inline-flex items-center justify-center p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"
                             >
-                                <span className="sr-only">Open main menu</span>
+                                <span className="sr-only">메인 메뉴 열기</span>
                                 {isMenuOpen ? (
                                     <X className="block h-6 w-6" aria-hidden="true" />
                                 ) : (
@@ -260,10 +260,10 @@ export default function Navbar({
                                                 src={
                                                     session.user.user_metadata.avatar_url ||
                                                     `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                        session.user.email?.split('@')[0] || 'User'
+                                                        session.user.email?.split('@')[0] || '사용자'
                                                     )}&background=random&color=fff`
                                                 }
-                                                alt="User"
+                                                alt="사용자"
                                                 fill
                                                 className="object-cover"
                                             />

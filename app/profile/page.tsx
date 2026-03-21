@@ -107,7 +107,7 @@ export default function ProfilePage() {
           <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
             <span>공부 기록</span>
             <select
-              aria-label="Year"
+              aria-label="연도"
               value={selectedYear}
               onChange={(event) => setSelectedYear(Number(event.target.value))}
               className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-rose-400/50"

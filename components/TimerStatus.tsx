@@ -142,7 +142,7 @@ export default function TimerStatus() {
     `}>
             <span>{getIcon()}</span>
             <span className="tabular-nums tracking-wide">{status.text}</span>
-            {!status.isRunning && <span className="text-xs ml-1 opacity-75">(Paused)</span>}
+            {!status.isRunning && <span className="text-xs ml-1 opacity-75">(일시정지)</span>}
         </div>
     );
 }
