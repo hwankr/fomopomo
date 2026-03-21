@@ -56,9 +56,17 @@ const mapFriendRows = (rows: FriendRow[] | null | undefined): Profile[] =>
         .map((row) => ({
             ...row.friend,
             nickname: row.nickname ?? undefined,
-            group_name: row.group_name || 'Uncategorized',
+            group_name: normalizeGroupName(row.group_name),
             is_task_public: row.friend.is_task_public ?? undefined,
         }));
+
+const LEGACY_DEFAULT_GROUP_NAME = 'Uncategorized';
+const DEFAULT_GROUP_NAME = '미분류';
+
+const normalizeGroupName = (groupName?: string | null) => groupName || DEFAULT_GROUP_NAME;
+
+const isDefaultGroupName = (groupName?: string | null) =>
+    !groupName || groupName === LEGACY_DEFAULT_GROUP_NAME || groupName === DEFAULT_GROUP_NAME;
 
 export default function FriendsSection({ user }: { user: User }) {
     const [friends, setFriends] = useState<Profile[]>([]);
@@ -139,11 +147,11 @@ export default function FriendsSection({ user }: { user: User }) {
         setIsTaskPublic(newValue);
         try {
             await supabase.from('profiles').update({ is_task_public: newValue }).eq('id', user.id);
-            toast.success(newValue ? 'Task visibility enabled' : 'Task visibility disabled');
+            toast.success(newValue ? '할 일 공개를 켰어요.' : '할 일 공개를 껐어요.');
         } catch (e) {
             console.error(e);
             setIsTaskPublic(!newValue); // Revert
-            toast.error('Failed to update privacy settings');
+            toast.error('공개 설정을 변경하지 못했어요.');
         }
     };
 
@@ -160,12 +168,12 @@ export default function FriendsSection({ user }: { user: User }) {
                 .single();
 
             if (findError || !friend) {
-                toast.error('User not found');
+                toast.error('사용자를 찾을 수 없어요.');
                 return;
             }
 
             if (friend.id === user.id) {
-                toast.error('You cannot add yourself');
+                toast.error('자기 자신은 추가할 수 없어요.');
                 return;
             }
 
@@ -177,12 +185,12 @@ export default function FriendsSection({ user }: { user: User }) {
             if (addError) {
                 console.error(addError);
                 if (addError.message.includes('Already friends')) {
-                    toast.error('Already friends');
+                    toast.error('이미 친구예요.');
                 } else {
-                    toast.error('Failed to add friend');
+                    toast.error('친구를 추가하지 못했어요.');
                 }
             } else {
-                toast.success(`Added ${friend.username}!`);
+                toast.success(`${friend.username}님을 친구로 추가했어요!`);
                 setInviteCode('');
                 setShowAddFriend(false);
                 // Refresh list
@@ -211,7 +219,7 @@ export default function FriendsSection({ user }: { user: User }) {
     };
 
     const handleRemoveFriend = async (friendId: string, friendName: string) => {
-        if (!confirm(`Are you sure you want to remove ${friendName}?`)) return;
+        if (!confirm(`${friendName}님을 친구 목록에서 삭제할까요?`)) return;
 
         try {
             // Remove bidirectional friendship
@@ -221,15 +229,15 @@ export default function FriendsSection({ user }: { user: User }) {
                 .or(`and(user_id.eq.${user.id},friend_id.eq.${friendId}),and(user_id.eq.${friendId},friend_id.eq.${user.id})`);
 
             if (error) {
-                toast.error('Failed to remove friend');
+                toast.error('친구를 삭제하지 못했어요.');
                 console.error(error);
             } else {
-                toast.success(`Removed ${friendName}`);
+                toast.success(`${friendName}님을 친구 목록에서 삭제했어요.`);
                 setFriends((prev) => prev.filter((f) => f.id !== friendId));
             }
         } catch (e) {
             console.error(e);
-            toast.error('Error removing friend');
+            toast.error('친구 삭제 중 오류가 발생했어요.');
         }
     };
 
@@ -243,14 +251,14 @@ export default function FriendsSection({ user }: { user: User }) {
 
             if (error) throw error;
 
-            toast.success('Updated friend info');
+            toast.success('친구 정보를 수정했어요.');
             setFriends(prev => prev.map(f =>
-                f.id === friendId ? { ...f, nickname, group_name: groupName || 'Uncategorized' } : f
+                f.id === friendId ? { ...f, nickname, group_name: normalizeGroupName(groupName) } : f
             ));
             setEditingFriend(null);
         } catch (e) {
             console.error(e);
-            toast.error('Failed to update');
+            toast.error('수정하지 못했어요.');
         }
     };
 
@@ -261,13 +269,13 @@ export default function FriendsSection({ user }: { user: User }) {
         setEditingFriend(friend.id);
         setEditForm({
             nickname: friend.nickname || '',
-            group_name: friend.group_name === 'Uncategorized' ? '' : friend.group_name || ''
+            group_name: isDefaultGroupName(friend.group_name) ? '' : friend.group_name || ''
         });
     };
 
     // Group friends
     const groupedFriends = friends.reduce((acc, friend) => {
-        const group = friend.group_name || 'Uncategorized';
+        const group = normalizeGroupName(friend.group_name);
         if (!acc[group]) acc[group] = [];
         acc[group].push(friend);
         return acc;
@@ -288,7 +296,7 @@ export default function FriendsSection({ user }: { user: User }) {
             <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <Users size={20} />
-                    Friends
+                    친구
                 </h2>
                 <div className="flex items-center gap-2">
                     <button
@@ -298,7 +306,7 @@ export default function FriendsSection({ user }: { user: User }) {
                             : 'bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600'
                             }`}
                     >
-                        {isTaskPublic ? 'Public Tasks' : 'Private Tasks'}
+                        {isTaskPublic ? '할 일 공개' : '할 일 비공개'}
                     </button>
                     <button
                         onClick={() => setShowAddFriend(!showAddFriend)}
@@ -311,13 +319,13 @@ export default function FriendsSection({ user }: { user: User }) {
 
             {showAddFriend && (
                 <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-700">
-                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">My Invite Code: <span className="font-mono font-bold text-gray-900 dark:text-white select-all">{myInviteCode}</span></div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">내 초대 코드: <span className="font-mono font-bold text-gray-900 dark:text-white select-all">{myInviteCode}</span></div>
                     <div className="flex gap-2">
                         <input
                             type="text"
                             value={inviteCode}
                             onChange={(e) => setInviteCode(e.target.value)}
-                            placeholder="Enter friend's invite code"
+                            placeholder="친구 초대 코드를 입력하세요"
                             className="flex-1 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-rose-500"
                         />
                         <button
@@ -325,7 +333,7 @@ export default function FriendsSection({ user }: { user: User }) {
                             disabled={loading}
                             className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
                         >
-                            {loading ? '...' : 'Add'}
+                            {loading ? '...' : '추가'}
                         </button>
                     </div>
                 </div>
@@ -334,7 +342,7 @@ export default function FriendsSection({ user }: { user: User }) {
             <div className="space-y-4">
                 {friends.length === 0 ? (
                     <p className="text-gray-500 dark:text-gray-400 text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-                        No friends yet. Add some!
+                        아직 친구가 없어요. 친구를 추가해보세요!
                     </p>
                 ) : (
                     Object.entries(groupedFriends).map(([group, groupFriends]) => (
@@ -362,13 +370,13 @@ export default function FriendsSection({ user }: { user: User }) {
                                                     <input
                                                         value={editForm.nickname}
                                                         onChange={e => setEditForm({ ...editForm, nickname: e.target.value })}
-                                                        placeholder="Nickname"
+                                                        placeholder="별명"
                                                         className="p-1 text-sm border rounded bg-transparent dark:text-white dark:border-gray-600"
                                                     />
                                                     <input
                                                         value={editForm.group_name}
                                                         onChange={e => setEditForm({ ...editForm, group_name: e.target.value })}
-                                                        placeholder="Group"
+                                                        placeholder="그룹"
                                                         className="p-1 text-sm border rounded bg-transparent dark:text-white dark:border-gray-600"
                                                     />
                                                     <button onClick={() => handleUpdateFriend(friend.id, editForm.nickname, editForm.group_name)} className="text-green-500"><Check size={16} /></button>
@@ -407,14 +415,14 @@ export default function FriendsSection({ user }: { user: User }) {
                                                                     friend.status === 'studying' ? 'text-green-600 dark:text-green-400 font-medium' :
                                                                         friend.status === 'paused' ? 'text-yellow-600 dark:text-yellow-400' : ''
                                                                 }>
-                                                                    {friend.status === 'studying' ? 'Studying' :
-                                                                        friend.status === 'paused' ? 'Paused' : 'Offline'}
+                                                                    {friend.status === 'studying' ? '공부 중' :
+                                                                        friend.status === 'paused' ? '일시정지' : '오프라인'}
                                                                 </span>
                                                                 {friend.status === 'studying' && (
                                                                     <>
                                                                         <span className="text-gray-300 dark:text-gray-600">•</span>
                                                                         <span className="truncate max-w-[150px]">
-                                                                            {friend.is_task_public !== false ? (friend.current_task || 'No Task') : '🔒 Secret Task'}
+                                                                            {friend.is_task_public !== false ? (friend.current_task || '할 일 없음') : '🔒 비공개 할 일'}
                                                                         </span>
                                                                     </>
                                                                 )}
@@ -427,7 +435,7 @@ export default function FriendsSection({ user }: { user: User }) {
                                                             handleRemoveFriend(friend.id, friend.username);
                                                         }}
                                                         className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                                                        title="Remove friend"
+                                                        title="친구 삭제"
                                                     >
                                                         <UserMinus size={16} />
                                                     </button>
