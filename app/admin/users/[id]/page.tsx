@@ -16,14 +16,14 @@ interface PageProps {
 function formatTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
+  return `${hours}시간 ${minutes}분`;
 }
 
 function getStatusLabel(status: Profile['status']) {
-  if (status === 'studying') return 'Studying';
-  if (status === 'online') return 'Online';
-  if (status === 'paused') return 'Paused';
-  return 'Offline';
+  if (status === 'studying') return '공부 중';
+  if (status === 'online') return '온라인';
+  if (status === 'paused') return '일시정지';
+  return '오프라인';
 }
 
 export default function UserDetailPage({ params }: PageProps) {
@@ -57,7 +57,7 @@ export default function UserDetailPage({ params }: PageProps) {
       setSessions(studySessions as StudySession[]);
     } catch (error) {
       console.error('Error fetching user detail:', error);
-      toast.error('Failed to load user detail.');
+      toast.error('사용자 상세 정보를 불러오지 못했습니다.');
       router.replace('/admin');
     } finally {
       setLoading(false);
@@ -112,7 +112,7 @@ export default function UserDetailPage({ params }: PageProps) {
             className="mb-6 flex items-center gap-2 text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back
+            뒤로
           </button>
 
           <div className="mb-8 rounded-2xl border border-gray-100 bg-white p-8 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -122,7 +122,7 @@ export default function UserDetailPage({ params }: PageProps) {
               </div>
               <div>
                 <h1 className="mb-1 text-2xl font-bold text-gray-900 dark:text-white">
-                  {user.nickname || 'No nickname'}
+                  {user.nickname || '닉네임 없음'}
                 </h1>
                 <p className="text-gray-500 dark:text-gray-400">{user.email}</p>
                 <div className="mt-3 flex gap-2">
@@ -130,7 +130,7 @@ export default function UserDetailPage({ params }: PageProps) {
                     {getStatusLabel(user.status)}
                   </span>
                   <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
-                    {user.role === 'admin' ? 'Admin' : 'User'}
+                    {user.role === 'admin' ? '관리자' : '사용자'}
                   </span>
                 </div>
               </div>
@@ -144,7 +144,7 @@ export default function UserDetailPage({ params }: PageProps) {
                   <Clock className="h-5 w-5" />
                 </div>
                 <span className="text-sm font-medium text-gray-500">
-                  Total study time
+                  총 공부 시간
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -158,7 +158,7 @@ export default function UserDetailPage({ params }: PageProps) {
                   <BookOpen className="h-5 w-5" />
                 </div>
                 <span className="text-sm font-medium text-gray-500">
-                  Sessions
+                  세션 수
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -172,7 +172,7 @@ export default function UserDetailPage({ params }: PageProps) {
                   <Calendar className="h-5 w-5" />
                 </div>
                 <span className="text-sm font-medium text-gray-500">
-                  Joined
+                  가입일
                 </span>
               </div>
               <p className="text-lg font-bold text-gray-900 dark:text-white">
@@ -186,17 +186,17 @@ export default function UserDetailPage({ params }: PageProps) {
           <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
             <div className="border-b border-gray-100 p-6 dark:border-gray-700">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                Recent sessions
+                최근 세션
               </h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
                   <tr>
-                    <th className="px-6 py-3 font-medium">Date</th>
-                    <th className="px-6 py-3 font-medium">Task</th>
-                    <th className="px-6 py-3 font-medium">Mode</th>
-                    <th className="px-6 py-3 font-medium">Duration</th>
+                    <th className="px-6 py-3 font-medium">날짜</th>
+                    <th className="px-6 py-3 font-medium">작업</th>
+                    <th className="px-6 py-3 font-medium">모드</th>
+                    <th className="px-6 py-3 font-medium">시간</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -219,7 +219,7 @@ export default function UserDetailPage({ params }: PageProps) {
                               : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
                           }`}
                         >
-                          {session.mode === 'focus' ? 'Focus' : 'Break'}
+                          {session.mode === 'focus' ? '집중' : '휴식'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600 dark:text-gray-300">

@@ -45,10 +45,10 @@ function StudyDuration({ startTime }: { startTime: string }) {
 }
 
 function getStatusLabel(user: Profile) {
-  if (user.status === 'studying') return 'Studying';
-  if (user.status === 'online') return 'Online';
-  if (user.status === 'paused') return 'Paused';
-  return 'Offline';
+  if (user.status === 'studying') return '공부 중';
+  if (user.status === 'online') return '온라인';
+  if (user.status === 'paused') return '일시정지';
+  return '오프라인';
 }
 
 function getTimestamp(value?: string | null) {
@@ -94,25 +94,25 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
     <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <div className="flex flex-col justify-between gap-4 border-b border-gray-100 p-4 dark:border-gray-700 sm:flex-row sm:items-center">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-          Users ({filteredUsers.length})
+          사용자 ({filteredUsers.length})
         </h2>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <label className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            <span>Sort</span>
+            <span>정렬</span>
             <select
               value={sortBy}
               onChange={(event) => setSortBy(event.target.value as SortOption)}
               className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-200"
             >
-              <option value="recentAccess">Recent access</option>
-              <option value="joined">Recently joined</option>
+              <option value="recentAccess">최근 접속</option>
+              <option value="joined">최근 가입</option>
             </select>
           </label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by email or nickname"
+              placeholder="이메일 또는 닉네임으로 검색"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 sm:w-72"
@@ -125,11 +125,11 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
         <table className="w-full text-left text-sm">
           <thead className="bg-gray-50 text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
             <tr>
-              <th className="px-6 py-3 font-medium">User</th>
-              <th className="px-6 py-3 font-medium">Status</th>
-              <th className="px-6 py-3 font-medium">Current task</th>
-              <th className="px-6 py-3 font-medium">Last active</th>
-              <th className="px-6 py-3 font-medium">Joined</th>
+              <th className="px-6 py-3 font-medium">사용자</th>
+              <th className="px-6 py-3 font-medium">상태</th>
+              <th className="px-6 py-3 font-medium">현재 작업</th>
+              <th className="px-6 py-3 font-medium">최근 활동</th>
+              <th className="px-6 py-3 font-medium">가입일</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -146,7 +146,7 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
-                        {user.nickname || 'No nickname'}
+                        {user.nickname || '닉네임 없음'}
                         {user.role === 'admin' && (
                           <Shield className="h-3 w-3 fill-current text-indigo-500" />
                         )}

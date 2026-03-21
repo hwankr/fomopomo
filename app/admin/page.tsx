@@ -61,7 +61,7 @@ export default function AdminPage() {
       setUsers(profiles as Profile[]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
-      toast.error('Failed to load admin dashboard data.');
+      toast.error('관리자 대시보드 데이터를 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
@@ -132,20 +132,20 @@ export default function AdminPage() {
         <div className="mx-auto max-w-7xl">
           <div className="mb-8 flex items-center justify-between">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              Admin Dashboard
+              관리자 대시보드
             </h1>
             <div className="flex gap-3">
               <button
                 onClick={() => router.push('/admin/changelog')}
                 className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600"
               >
-                Changelog
+                변경 내역
               </button>
               <button
                 onClick={() => router.push('/')}
                 className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
               >
-                Back to home
+                홈으로 돌아가기
               </button>
             </div>
           </div>

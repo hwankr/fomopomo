@@ -13,7 +13,7 @@ function formatTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
 
-  return `${hours}h ${minutes}m`;
+  return `${hours}시간 ${minutes}분`;
 }
 
 export default function DashboardStats({
@@ -24,28 +24,28 @@ export default function DashboardStats({
 }: DashboardStatsProps) {
   const stats = [
     {
-      label: 'Total users',
+      label: '전체 사용자',
       value: totalUsers.toLocaleString(),
       icon: Users,
       color: 'text-blue-600',
       bg: 'bg-blue-50 dark:bg-blue-900/20',
     },
     {
-      label: 'Active today',
+      label: '오늘 활동 사용자',
       value: activeUsersToday.toLocaleString(),
       icon: Activity,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50 dark:bg-emerald-900/20',
     },
     {
-      label: 'Total study time',
+      label: '총 공부 시간',
       value: formatTime(totalStudyTime),
       icon: Clock,
       color: 'text-rose-600',
       bg: 'bg-rose-50 dark:bg-rose-900/20',
     },
     {
-      label: 'New today',
+      label: '오늘 신규 가입',
       value: newUsersToday.toLocaleString(),
       icon: Calendar,
       color: 'text-purple-600',

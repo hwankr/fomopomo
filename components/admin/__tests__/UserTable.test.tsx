@@ -62,7 +62,7 @@ describe('UserTable', () => {
   it('switches to joined date sorting', () => {
     render(<UserTable users={users} onUserClick={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: /sort/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /정렬/i }), {
       target: { value: 'joined' },
     });
 
