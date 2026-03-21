@@ -181,7 +181,7 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
     event.preventDefault();
     if (!newPlanTitle.trim()) return;
     if (!userId) {
-      alert('Please log in to add plans.');
+      alert('주간 목표를 추가하려면 로그인해주세요.');
       return;
     }
 
@@ -333,16 +333,16 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
       >
         <div className="custom-scrollbar min-h-[100px] max-h-[300px] flex-1 space-y-3 overflow-y-auto">
           {loading ? (
-            <div className="py-6 text-center text-gray-400">Loading...</div>
+            <div className="py-6 text-center text-gray-400">불러오는 중...</div>
           ) : plans.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center py-6 text-gray-400">
-              <p className="text-sm">No weekly goals yet.</p>
+              <p className="text-sm">아직 주간 목표가 없어요.</p>
               {!isAdding && (
                 <button
                   onClick={() => setIsAdding(true)}
                   className="mt-2 text-sm font-medium text-indigo-500 hover:text-indigo-600"
                 >
-                  + Add a goal
+                  + 목표 추가
                 </button>
               )}
             </div>
@@ -437,7 +437,7 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
                 type="text"
                 value={newPlanTitle}
                 onChange={(event) => setNewPlanTitle(event.target.value)}
-                placeholder="Add a weekly goal..."
+                placeholder="주간 목표를 입력하세요"
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
@@ -447,14 +447,14 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
                   onClick={() => setIsAdding(false)}
                   className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  Cancel
+                  취소
                 </button>
                 <button
                   type="submit"
                   disabled={!newPlanTitle.trim()}
                   className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Add
+                  추가
                 </button>
               </div>
             </form>
@@ -464,7 +464,7 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
               className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-3 text-sm font-medium text-gray-400 transition-all hover:border-indigo-200 hover:text-indigo-500 dark:border-gray-700 dark:hover:border-indigo-800 dark:hover:text-indigo-400"
             >
               <Plus className="h-4 w-4" />
-              Add weekly goal
+              주간 목표 추가
             </button>
           )}
         </div>
@@ -474,10 +474,10 @@ export default function WeeklyPlan({ userId }: WeeklyPlanProps) {
         isOpen={!!deletingPlanId}
         onClose={() => setDeletingPlanId(null)}
         onConfirm={confirmDelete}
-        title="Delete goal"
-        message="Delete this weekly goal? This action cannot be undone."
-        confirmText="Delete"
-        cancelText="Cancel"
+        title="목표 삭제"
+        message="이 주간 목표를 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+        confirmText="삭제"
+        cancelText="취소"
         isDangerous={true}
       />
     </div>

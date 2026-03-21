@@ -223,7 +223,7 @@ function SortableTaskItem({
                 ? 'text-amber-500 hover:text-amber-600'
                 : 'text-gray-400 hover:text-amber-500'
             )}
-            title={isPinned ? 'Unpin task' : 'Pin task'}
+            title={isPinned ? '작업 고정 해제' : '작업 고정'}
           >
             <Pin className={cn('h-4 w-4', isPinned && 'fill-current')} />
           </button>
@@ -528,7 +528,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     event.preventDefault();
     if (!newTaskTitle.trim()) return;
     if (!userId) {
-      alert('Please log in to add tasks.');
+      alert('작업을 추가하려면 로그인해주세요.');
       return;
     }
 
@@ -620,18 +620,18 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
     <div className="flex h-full flex-col">
       <div className="min-h-[300px] flex-1 space-y-3 overflow-y-auto">
         {loading && tasks.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">Loading tasks...</div>
+          <div className="py-10 text-center text-gray-400">작업을 불러오는 중...</div>
         ) : tasks.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center py-10 text-gray-400">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
               <span className="text-2xl">-</span>
             </div>
-            <p>No tasks for this day.</p>
+            <p>오늘은 작업이 없어요.</p>
             <button
               onClick={() => setIsAdding(true)}
               className="mt-4 text-sm font-medium text-rose-500 hover:text-rose-600"
             >
-              + Add your first task
+              + 첫 작업 추가하기
             </button>
           </div>
         ) : (
@@ -669,7 +669,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
               type="text"
               value={newTaskTitle}
               onChange={(event) => setNewTaskTitle(event.target.value)}
-              placeholder="Enter a task title..."
+              placeholder="작업 제목을 입력하세요"
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               autoFocus
             />
@@ -679,14 +679,14 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
                 onClick={() => setIsAdding(false)}
                 className="rounded-xl px-4 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                Cancel
+                취소
               </button>
               <button
                 type="submit"
                 disabled={!newTaskTitle.trim()}
                 className="rounded-xl bg-rose-500 px-6 py-2 font-bold text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Add
+                추가
               </button>
             </div>
           </form>
@@ -696,7 +696,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
             className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-4 font-medium text-gray-400 transition-all hover:border-gray-300 hover:text-gray-600 dark:border-gray-700 dark:hover:border-gray-600 dark:hover:text-gray-300"
           >
             <Plus className="h-5 w-5" />
-            Add task
+            작업 추가
           </button>
         )}
       </div>
@@ -705,10 +705,10 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
         isOpen={!!deletingTaskId}
         onClose={() => setDeletingTaskId(null)}
         onConfirm={confirmDelete}
-        title="Delete task"
-        message="Delete this task? This action cannot be undone."
-        confirmText="Delete"
-        cancelText="Cancel"
+        title="작업 삭제"
+        message="이 작업을 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+        confirmText="삭제"
+        cancelText="취소"
         isDangerous={true}
       />
     </div>

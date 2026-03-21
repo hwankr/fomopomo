@@ -160,11 +160,11 @@ describe('WeeklyPlan', () => {
 
     expect(await screen.findByText('Read chapter 1')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Add weekly goal/i }));
-    fireEvent.change(screen.getByPlaceholderText('Add a weekly goal...'), {
+    fireEvent.click(screen.getByRole('button', { name: /주간 목표 추가/i }));
+    fireEvent.change(screen.getByPlaceholderText('주간 목표를 입력하세요'), {
       target: { value: 'Practice essay' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
 
     await waitFor(() => {
       expect(screen.getByText('Practice essay')).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe('WeeklyPlan', () => {
 
     const card = getCardForTitle('Read chapter 1');
     fireEvent.click(within(card).getAllByRole('button')[2]);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     await waitFor(() => {
       expect(screen.queryByText('Read chapter 1')).not.toBeInTheDocument();

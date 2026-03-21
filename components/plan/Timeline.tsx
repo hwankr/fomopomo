@@ -149,13 +149,13 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
   }, [fetchSessions, userId]);
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading timeline...</div>;
+    return <div className="p-4 text-center text-gray-500">타임라인을 불러오는 중...</div>;
   }
 
   if (sessions.length === 0) {
     return (
       <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800">
-        <p>No activity recorded for this day.</p>
+        <p>이날 기록된 활동이 없어요.</p>
       </div>
     );
   }
@@ -167,7 +167,7 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-          Timeline
+          타임라인
         </h3>
         <div className="text-gray-400 lg:hidden">
           {isExpanded ? (

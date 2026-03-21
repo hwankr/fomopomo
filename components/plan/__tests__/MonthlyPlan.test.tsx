@@ -160,11 +160,11 @@ describe('MonthlyPlan', () => {
 
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Add monthly goal/i }));
-    fireEvent.change(screen.getByPlaceholderText('Add a monthly goal...'), {
+    fireEvent.click(screen.getByRole('button', { name: /월간 목표 추가/i }));
+    fireEvent.change(screen.getByPlaceholderText('월간 목표를 입력하세요'), {
       target: { value: 'Ship landing page' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
 
     await waitFor(() => {
       expect(screen.getByText('Ship landing page')).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe('MonthlyPlan', () => {
 
     const card = getCardForTitle('Finish portfolio');
     fireEvent.click(within(card).getAllByRole('button')[2]);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     await waitFor(() => {
       expect(screen.queryByText('Finish portfolio')).not.toBeInTheDocument();

@@ -178,7 +178,7 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
     event.preventDefault();
     if (!newPlanTitle.trim()) return;
     if (!userId) {
-      alert('Please log in to add plans.');
+      alert('월간 목표를 추가하려면 로그인해주세요.');
       return;
     }
 
@@ -330,16 +330,16 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
       >
         <div className="custom-scrollbar min-h-[100px] max-h-[300px] flex-1 space-y-3 overflow-y-auto">
           {loading ? (
-            <div className="py-6 text-center text-gray-400">Loading...</div>
+            <div className="py-6 text-center text-gray-400">불러오는 중...</div>
           ) : plans.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center py-6 text-gray-400">
-              <p className="text-sm">No monthly goals yet.</p>
+              <p className="text-sm">아직 월간 목표가 없어요.</p>
               {!isAdding && (
                 <button
                   onClick={() => setIsAdding(true)}
                   className="mt-2 text-sm font-medium text-purple-500 hover:text-purple-600"
                 >
-                  + Add a goal
+                  + 목표 추가
                 </button>
               )}
             </div>
@@ -434,7 +434,7 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
                 type="text"
                 value={newPlanTitle}
                 onChange={(event) => setNewPlanTitle(event.target.value)}
-                placeholder="Add a monthly goal..."
+                placeholder="월간 목표를 입력하세요"
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
@@ -444,14 +444,14 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
                   onClick={() => setIsAdding(false)}
                   className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  Cancel
+                  취소
                 </button>
                 <button
                   type="submit"
                   disabled={!newPlanTitle.trim()}
                   className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Add
+                  추가
                 </button>
               </div>
             </form>
@@ -461,7 +461,7 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
               className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-3 text-sm font-medium text-gray-400 transition-all hover:border-purple-200 hover:text-purple-500 dark:border-gray-700 dark:hover:border-purple-800 dark:hover:text-purple-400"
             >
               <Plus className="h-4 w-4" />
-              Add monthly goal
+              월간 목표 추가
             </button>
           )}
         </div>
@@ -471,10 +471,10 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
         isOpen={!!deletingPlanId}
         onClose={() => setDeletingPlanId(null)}
         onConfirm={confirmDelete}
-        title="Delete goal"
-        message="Delete this monthly goal? This action cannot be undone."
-        confirmText="Delete"
-        cancelText="Cancel"
+        title="목표 삭제"
+        message="이 월간 목표를 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+        confirmText="삭제"
+        cancelText="취소"
         isDangerous={true}
       />
     </div>
