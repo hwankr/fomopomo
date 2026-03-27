@@ -71,7 +71,7 @@ describe('useSettings', () => {
       JSON.stringify({
         pomoTime: 40,
         shortBreak: 8,
-        snowEnabled: false,
+        seasonalEffectEnabled: false,
         presets: [],
       })
     );
@@ -82,7 +82,7 @@ describe('useSettings', () => {
       ...DEFAULT_SETTINGS,
       pomoTime: 40,
       shortBreak: 8,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
     });
   });
 
@@ -107,7 +107,7 @@ describe('useSettings', () => {
         ...DEFAULT_SETTINGS,
         pomoTime: 55,
         taskPopupEnabled: false,
-        snowEnabled: false,
+        seasonalEffectEnabled: false,
         tasks: [],
         presets: [],
       });
@@ -121,7 +121,7 @@ describe('useSettings', () => {
       ...DEFAULT_SETTINGS,
       pomoTime: 55,
       taskPopupEnabled: false,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
     });
     expect(
       dispatchSpy.mock.calls.some((call: unknown[]) => {
@@ -144,7 +144,7 @@ describe('useSettings', () => {
 
       expect(currentSettings.pomoTime).toBe(45);
       expect(currentSettings.taskPopupEnabled).toBe(false);
-      expect(currentSettings.snowEnabled).toBe(false);
+      expect(currentSettings.seasonalEffectEnabled).toBe(false);
       return { error: null };
     });
 
@@ -155,7 +155,7 @@ describe('useSettings', () => {
         ...DEFAULT_SETTINGS,
         pomoTime: 45,
         taskPopupEnabled: false,
-        snowEnabled: false,
+        seasonalEffectEnabled: false,
       });
     });
 
@@ -164,7 +164,7 @@ describe('useSettings', () => {
       settings: expect.objectContaining({
         pomoTime: 45,
         taskPopupEnabled: false,
-        snowEnabled: false,
+        seasonalEffectEnabled: false,
       }),
     });
   });

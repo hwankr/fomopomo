@@ -16,7 +16,7 @@ export type FomopomoSettings = {
   volume: number;
   isMuted: boolean;
   taskPopupEnabled: boolean;
-  snowEnabled: boolean;
+  seasonalEffectEnabled: boolean;
   tasks: string[];
   presets: Preset[];
 };
@@ -39,7 +39,7 @@ export const DEFAULT_FOMOPOMO_SETTINGS: FomopomoSettings = {
   volume: 50,
   isMuted: false,
   taskPopupEnabled: true,
-  snowEnabled: true,
+  seasonalEffectEnabled: true,
   tasks: DEFAULT_TASK_OPTIONS,
   presets: [
     { id: '1', label: '프리셋1', minutes: 25 },
@@ -80,14 +80,17 @@ const getValidPresets = (
 export function normalizeSettings(
   rawSettings: PartialFomopomoSettings | null | undefined
 ): FomopomoSettings {
+  const raw = rawSettings as (PartialFomopomoSettings & { snowEnabled?: boolean }) | null | undefined;
   return {
     ...DEFAULT_FOMOPOMO_SETTINGS,
     ...rawSettings,
     taskPopupEnabled:
-      rawSettings?.taskPopupEnabled ??
+      raw?.taskPopupEnabled ??
       DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled,
-    snowEnabled:
-      rawSettings?.snowEnabled ?? DEFAULT_FOMOPOMO_SETTINGS.snowEnabled,
+    seasonalEffectEnabled:
+      raw?.seasonalEffectEnabled ??
+      raw?.snowEnabled ??
+      DEFAULT_FOMOPOMO_SETTINGS.seasonalEffectEnabled,
     tasks: getValidTasks(
       rawSettings?.tasks,
       DEFAULT_FOMOPOMO_SETTINGS.tasks

@@ -8,7 +8,7 @@ import InstallPrompt from '@/components/InstallPrompt';
 import NotificationManager from '@/components/NotificationManager';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import FloatingTimerButton from '@/components/FloatingTimerButton';
-import SnowEffect from '@/components/SnowEffect'; // ❄️ 겨울 눈 효과 (삭제 시 이 줄 제거)
+import SeasonalEffect from '@/components/SeasonalEffect'; // 🌸 계절 효과 (삭제 시 이 줄 제거)
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import GoogleAnalytics from '../components/GoogleAnalytics';
@@ -78,7 +78,7 @@ export default function RootLayout({
     <html lang="ko" suppressHydrationWarning>
       <body className={`${inter.className} flex flex-col min-h-screen`}>
         <ThemeProvider>
-          <SnowEffect /> {/* ❄️ 겨울 눈 효과 (삭제 시 이 줄 제거) */}
+          <SeasonalEffect /> {/* 🌸 계절 효과 (삭제 시 이 줄 제거) */}
           <Toaster position="top-center" />
           <FriendNotificationListener />
           <main className="flex-grow">{children}</main>

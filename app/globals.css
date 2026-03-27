@@ -21,6 +21,36 @@
   --foreground: #ededed;
 }
 
+/* 봄 모드 (벚꽃 테마) — 라이트 */
+.seasonal-spring {
+  --background: #fff5f7;
+  --foreground: #4a2030;
+
+  /* Tailwind v4 color variable overrides */
+  --color-white: #fff8f9;
+  --color-gray-50: #fff0f3;
+  --color-gray-100: #ffe4ea;
+  --color-gray-200: #ffd6df;
+  --color-gray-300: #f5b8c6;
+  --color-gray-400: #d4899d;
+  --color-gray-500: #b0607a;
+  --color-gray-600: #8c4460;
+  --color-gray-700: #6b3049;
+  --color-gray-800: #4a2034;
+  --color-gray-900: #2d1220;
+  --color-gray-950: #1a0a13;
+}
+
+/* 봄 모드 (벚꽃 테마) — 다크 */
+.seasonal-spring.dark {
+  --background: #1a0f14;
+  --foreground: #fde2e8;
+
+  --color-slate-700: #4a2040;
+  --color-slate-800: #2d1228;
+  --color-slate-900: #1a0f14;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

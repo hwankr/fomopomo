@@ -82,12 +82,13 @@ export default function Dashboard({ session }: DashboardProps) {
     await supabase.auth.signOut();
   };
 
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans p-4 sm:p-6 lg:p-8">
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onLogout={handleLogout}

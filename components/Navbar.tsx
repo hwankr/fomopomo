@@ -4,13 +4,16 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Session } from '@supabase/supabase-js';
-import { Menu, X, Sun, Moon, Settings, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
+import { Menu, X, Sun, Moon, Cherry, Settings, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 import appIcon from '@/app/icon.png';
 import { usePathname } from 'next/navigation';
 import { useFriendRequestCount } from '@/hooks/useFriendRequestCount';
 
+type Theme = 'light' | 'dark' | 'spring';
+
 interface NavbarProps {
     session: Session | null;
+    theme: Theme;
     isDarkMode: boolean;
     toggleDarkMode: () => void;
     onOpenSettings?: () => void;
@@ -18,8 +21,22 @@ interface NavbarProps {
     onLogout?: () => void;
 }
 
+// 현재 테마 아이콘/라벨
+const themeIcon = (theme: Theme, size: string) => {
+    if (theme === 'dark') return <Moon className={`${size} text-indigo-500`} />;
+    if (theme === 'spring') return <Cherry className={`${size} text-pink-500`} />;
+    return <Sun className={`${size} text-amber-500`} />;
+};
+
+const themeLabel = (theme: Theme) => {
+    if (theme === 'dark') return '다크';
+    if (theme === 'spring') return '봄';
+    return '라이트';
+};
+
 export default function Navbar({
     session,
+    theme,
     isDarkMode,
     toggleDarkMode,
     onOpenSettings,
@@ -107,9 +124,9 @@ export default function Navbar({
                             <button
                                 onClick={toggleDarkMode}
                                 className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-amber-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-yellow-400 transition-all duration-200"
-                                aria-label="다크 모드 전환"
+                                aria-label="테마 전환"
                             >
-                                {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                {themeIcon(theme, 'w-5 h-5')}
                             </button>
 
                             {session && (
@@ -289,9 +306,9 @@ export default function Navbar({
                                     onClick={toggleDarkMode}
                                     className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
                                 >
-                                    {isDarkMode ? <Sun className="w-6 h-6 mb-2 text-amber-500" /> : <Moon className="w-6 h-6 mb-2 text-indigo-500" />}
+                                    <span className="mb-2">{themeIcon(theme, 'w-6 h-6')}</span>
                                     <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                                        {isDarkMode ? '라이트' : '다크'}
+                                        {themeLabel(theme)}
                                     </span>
                                 </button>
 

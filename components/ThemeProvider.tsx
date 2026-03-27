@@ -7,7 +7,10 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+export type Theme = 'light' | 'dark' | 'spring';
+
 type ThemeContextType = {
+  theme: Theme;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
 };
@@ -15,16 +18,20 @@ type ThemeContextType = {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 const THEME_KEY = 'theme';
 
-function getThemeSnapshot() {
+const THEME_CYCLE: Theme[] = ['light', 'dark', 'spring'];
+
+function getThemeSnapshot(): Theme {
   if (typeof window === 'undefined') {
-    return false;
+    return 'light';
   }
 
   const savedTheme = window.localStorage.getItem(THEME_KEY);
-  if (savedTheme === 'dark') return true;
-  if (savedTheme === 'light') return false;
+  if (savedTheme === 'dark' || savedTheme === 'spring') return savedTheme;
+  if (savedTheme === 'light') return 'light';
 
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
 }
 
 function subscribeTheme(onStoreChange: () => void) {
@@ -51,30 +58,39 @@ function subscribeTheme(onStoreChange: () => void) {
   };
 }
 
-function writeTheme(isDarkMode: boolean) {
+function writeTheme(theme: Theme) {
   if (typeof window === 'undefined') return;
 
-  window.localStorage.setItem(THEME_KEY, isDarkMode ? 'dark' : 'light');
+  window.localStorage.setItem(THEME_KEY, theme);
   window.dispatchEvent(new Event('themeChanged'));
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const isDarkMode = useSyncExternalStore(
+  const theme = useSyncExternalStore(
     subscribeTheme,
     getThemeSnapshot,
-    () => false
+    () => 'light' as Theme
   );
 
+  const isDarkMode = theme === 'dark';
+
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDarkMode);
-  }, [isDarkMode]);
+    document.documentElement.classList.remove('dark', 'seasonal-spring');
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else if (theme === 'spring') {
+      document.documentElement.classList.add('seasonal-spring');
+    }
+  }, [theme]);
 
   const toggleDarkMode = () => {
-    writeTheme(!isDarkMode);
+    const currentIndex = THEME_CYCLE.indexOf(theme);
+    const nextIndex = (currentIndex + 1) % THEME_CYCLE.length;
+    writeTheme(THEME_CYCLE[nextIndex]);
   };
 
   return (
-    <ThemeContext.Provider value={{ isDarkMode, toggleDarkMode }}>
+    <ThemeContext.Provider value={{ theme, isDarkMode, toggleDarkMode }}>
       {children}
     </ThemeContext.Provider>
   );

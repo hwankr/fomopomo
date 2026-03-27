@@ -47,7 +47,7 @@ export default function SettingsModal({
   const [taskPopupEnabled, setTaskPopupEnabled] = useState(
     DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled
   );
-  const [snowEnabled, setSnowEnabled] = useState(DEFAULT_FOMOPOMO_SETTINGS.snowEnabled);
+  const [seasonalEffectEnabled, setSeasonalEffectEnabled] = useState(DEFAULT_FOMOPOMO_SETTINGS.seasonalEffectEnabled);
   const [tasks, setTasks] = useState<string[]>(DEFAULT_FOMOPOMO_SETTINGS.tasks);
   const [presets, setPresets] = useState<Preset[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
   const [isResetSettingsConfirmOpen, setIsResetSettingsConfirmOpen] = useState(false);
@@ -64,7 +64,7 @@ export default function SettingsModal({
     setVolume(settings.volume);
     setIsMuted(settings.isMuted);
     setTaskPopupEnabled(settings.taskPopupEnabled);
-    setSnowEnabled(settings.snowEnabled);
+    setSeasonalEffectEnabled(settings.seasonalEffectEnabled);
     setTasks(settings.tasks);
     setPresets(settings.presets);
   }, []);
@@ -79,7 +79,7 @@ export default function SettingsModal({
     volume,
     isMuted,
     taskPopupEnabled,
-    snowEnabled,
+    seasonalEffectEnabled,
     tasks,
     presets,
   });
@@ -573,32 +573,30 @@ export default function SettingsModal({
               <NotificationManager mode="inline" />
             </section>
 
-            {/* ❄️ 겨울 눈 효과 (관리자: 이 섹션 삭제 가능) */}
+            {/* 🌸 계절 효과 (관리자: 이 섹션 삭제 가능) */}
             <hr className="border-gray-100" />
             <section className="space-y-3">
-              {/* 눈 효과 토글 */}
+              {/* 벚꽃 효과 토글 */}
               <div className="flex justify-between items-center">
                 <div>
                   <span className="text-gray-600 text-sm font-medium flex items-center gap-2">
-                    ❄️ 겨울 효과
+                    🌸 벚꽃 효과
                   </span>
                   <p className="text-[11px] text-gray-400 mt-1">
-                    화면에 눈이 내려요 ⛄
+                    화면에 벚꽃이 흩날려요
                   </p>
                 </div>
                 <button
-                  onClick={() => setSnowEnabled(!snowEnabled)}
-                  className={`${toggleBase} ${snowEnabled ? 'bg-sky-400' : 'bg-gray-300'
+                  onClick={() => setSeasonalEffectEnabled(!seasonalEffectEnabled)}
+                  className={`${toggleBase} ${seasonalEffectEnabled ? 'bg-pink-400' : 'bg-gray-300'
                     }`}
                 >
                   <span
-                    className={`${toggleDot} ${snowEnabled ? 'translate-x-5' : 'translate-x-0'
+                    className={`${toggleDot} ${seasonalEffectEnabled ? 'translate-x-5' : 'translate-x-0'
                       }`}
                   ></span>
                 </button>
               </div>
-
-
 
             </section>
 

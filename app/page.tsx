@@ -23,7 +23,7 @@ export default function Home() {
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
 
   // ✨ [추가] 기록 목록 새로고침을 위한 트리거 상태
@@ -76,6 +76,7 @@ export default function Home() {
 
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsModalOpen(true)}

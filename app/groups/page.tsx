@@ -23,7 +23,7 @@ type GroupMembershipRow = {
 
 export default function GroupsPage() {
     const { session, loading: sessionLoading } = useAuthSession();
-    const { isDarkMode, toggleDarkMode } = useTheme();
+    const { theme, isDarkMode, toggleDarkMode } = useTheme();
     const [groups, setGroups] = useState<Group[]>([]);
     const [groupsLoading, setGroupsLoading] = useState(true);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -91,6 +91,7 @@ export default function GroupsPage() {
             />
             <Navbar
                 session={session}
+                theme={theme}
                 isDarkMode={isDarkMode}
                 toggleDarkMode={toggleDarkMode}
                 onLogout={() => supabase.auth.signOut()}

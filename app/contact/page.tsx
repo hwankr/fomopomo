@@ -14,7 +14,7 @@ import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 
 export default function ContactPage() {
   const { session, loading: isAuthLoading } = useAuthSession();
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -55,6 +55,7 @@ export default function ContactPage() {
 
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsModalOpen(true)}

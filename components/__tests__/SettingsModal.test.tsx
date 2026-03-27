@@ -48,7 +48,7 @@ type SettingsShape = {
   volume: number;
   isMuted: boolean;
   taskPopupEnabled: boolean;
-  snowEnabled: boolean;
+  seasonalEffectEnabled: boolean;
   tasks: string[];
   presets: Array<{ id: string; label: string; minutes: number }>;
 };
@@ -75,7 +75,7 @@ const DEFAULT_SETTINGS: SettingsShape = {
   volume: 50,
   isMuted: false,
   taskPopupEnabled: true,
-  snowEnabled: true,
+  seasonalEffectEnabled: true,
   tasks: ['국어', '수학', '영어'],
   presets: [
     { id: '1', label: '프리셋1', minutes: 25 },
@@ -226,7 +226,8 @@ describe('SettingsModal', () => {
           longBreakInterval: 9,
           volume: 12,
           taskPopupEnabled: false,
-          snowEnabled: false,
+          seasonalEffectEnabled: false,
+          seasonalTheme: 'spring' as const,
           tasks: ['물리'],
           presets: [{ id: 'remote', label: '심화', minutes: 61 }],
         },

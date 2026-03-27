@@ -24,7 +24,7 @@ export default function ProfilePage() {
     earliestYear,
     loading: statsLoading,
   } = useStudyStats();
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
@@ -88,6 +88,7 @@ export default function ProfilePage() {
 
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsModalOpen(true)}

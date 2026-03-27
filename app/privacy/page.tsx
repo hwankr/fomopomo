@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 
 export default function PrivacyPage() {
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
@@ -28,6 +28,7 @@ export default function PrivacyPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onLogout={() => supabase.auth.signOut()}

@@ -7,7 +7,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 
 export default function TermsPage() {
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
@@ -28,6 +28,7 @@ export default function TermsPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <Navbar
         session={session}
+        theme={theme}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
         onLogout={() => supabase.auth.signOut()}

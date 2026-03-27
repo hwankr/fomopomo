@@ -63,7 +63,7 @@ describe('settingsStore', () => {
     dispatchSpy = vi.spyOn(window, 'dispatchEvent');
   });
 
-  it('normalizes missing snow, tasks, and presets from canonical defaults', () => {
+  it('normalizes missing seasonal effect, tasks, and presets from canonical defaults', () => {
     expect(
       normalizeSettings({
         pomoTime: 40,
@@ -92,7 +92,7 @@ describe('settingsStore', () => {
   it('writes normalized settings locally and dispatches the shared event', () => {
     writeSettingsSnapshot({
       ...DEFAULT_FOMOPOMO_SETTINGS,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
       tasks: [],
       presets: [],
     });
@@ -101,7 +101,7 @@ describe('settingsStore', () => {
       JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? '{}')
     ).toEqual({
       ...DEFAULT_FOMOPOMO_SETTINGS,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
     });
     expect(
       dispatchSpy.mock.calls.some((call: unknown[]) => {
@@ -122,7 +122,7 @@ describe('settingsStore', () => {
         settings: {
           ...DEFAULT_FOMOPOMO_SETTINGS,
           pomoTime: 77,
-          snowEnabled: false,
+          seasonalEffectEnabled: false,
           tasks: ['원격 작업'],
         },
       },
@@ -140,7 +140,7 @@ describe('settingsStore', () => {
     await expect(loadPersistedSettings()).resolves.toEqual({
       ...DEFAULT_FOMOPOMO_SETTINGS,
       pomoTime: 77,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
       tasks: ['원격 작업'],
     });
   });
@@ -200,7 +200,7 @@ describe('settingsStore', () => {
       ).toEqual(
         expect.objectContaining({
           pomoTime: 45,
-          snowEnabled: false,
+          seasonalEffectEnabled: false,
         })
       );
 
@@ -210,14 +210,14 @@ describe('settingsStore', () => {
     await persistSettings({
       ...DEFAULT_FOMOPOMO_SETTINGS,
       pomoTime: 45,
-      snowEnabled: false,
+      seasonalEffectEnabled: false,
     });
 
     expect(upsertMock).toHaveBeenCalledWith({
       user_id: 'user-1',
       settings: expect.objectContaining({
         pomoTime: 45,
-        snowEnabled: false,
+        seasonalEffectEnabled: false,
       }),
     });
   });
