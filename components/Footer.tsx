@@ -21,11 +21,11 @@ export default function Footer() {
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Contact: <button 
                 onClick={() => {
-                  navigator.clipboard.writeText('fomopomokr@gmail.com');
+                  navigator.clipboard.writeText('fabronjeon@naver.com');
                   toast.success('이메일이 복사되었습니다');
                 }}
                 className="hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
-              >fomopomokr@gmail.com</button>
+              >fabronjeon@naver.com</button>
             </p>
           </div>
 

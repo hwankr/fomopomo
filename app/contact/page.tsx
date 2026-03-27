@@ -88,7 +88,7 @@ export default function ContactPage() {
           {/* 이메일 */}
           <button 
             onClick={() => {
-              navigator.clipboard.writeText('fomopomokr@gmail.com');
+              navigator.clipboard.writeText('fabronjeon@naver.com');
               toast.success('이메일이 복사되었습니다');
             }}
             className="group w-full flex items-center gap-4 p-5 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors text-left cursor-pointer"
@@ -98,7 +98,7 @@ export default function ContactPage() {
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-900 dark:text-white">이메일</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">fomopomokr@gmail.com</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">fabronjeon@naver.com</p>
             </div>
             <Copy className="w-4 h-4 text-gray-400 dark:text-gray-500 group-hover:text-rose-500 dark:group-hover:text-rose-400 transition-colors" />
           </button>
