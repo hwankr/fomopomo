@@ -17,6 +17,7 @@ import { TaskModal } from './timer/ui/TaskModal';
 import { TimerDisplay } from './timer/ui/TimerDisplay';
 import { StopwatchDisplay } from './timer/ui/StopwatchDisplay';
 import { ThemeBackground } from './timer/ui/ThemeBackground';
+import { getDisplayCycleCount } from './timer/ui/timerDisplayUtils';
 
 // Helper to format time for Tab Title
 const formatTimeForTitle = (seconds: number) => {
@@ -756,6 +757,11 @@ export default function TimerApp({
     return () => window.removeEventListener('keydown', listener);
   }, []);
 
+  const displayCycleCount = getDisplayCycleCount(
+    cycleCount,
+    settings.longBreakInterval
+  );
+
   // Update Document Title
   useEffect(() => {
     let modeString = 'fomopomo';
@@ -818,7 +824,7 @@ export default function TimerApp({
           <div className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${tab === 'stopwatch' ? 'bg-indigo-50 dark:bg-indigo-950/30' : (timerMode === 'focus' ? 'bg-rose-50 dark:bg-rose-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30')}`}>
             {tab === 'timer' ? (
               <TimerDisplay
-                timerMode={timerMode} timeLeft={timeLeft} isRunning={isRunning} isSaving={isSaving} cycleCount={cycleCount} longBreakInterval={settings.longBreakInterval} presets={settings.presets}
+                timerMode={timerMode} timeLeft={timeLeft} isRunning={isRunning} isSaving={isSaving} cycleCount={displayCycleCount} longBreakInterval={settings.longBreakInterval} presets={settings.presets}
                 showSaveButton={timerMode === 'focus' && !isRunning && (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60)) - timeLeft - focusLoggedSeconds > 0}
                 showResetButton={!isRunning && timeLeft !== (timerMode === 'focus' ? (settings.pomoTime * 60) : (timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60))}
                 onToggleTimer={handleToggleTimer}

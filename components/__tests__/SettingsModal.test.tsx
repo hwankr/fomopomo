@@ -49,6 +49,7 @@ type SettingsShape = {
   isMuted: boolean;
   taskPopupEnabled: boolean;
   seasonalEffectEnabled: boolean;
+  seasonalTheme?: 'light' | 'dark' | 'spring';
   tasks: string[];
   presets: Array<{ id: string; label: string; minutes: number }>;
 };
