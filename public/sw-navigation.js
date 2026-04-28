@@ -1,7 +1,11 @@
 (function attachFomopomoSwNavigation(globalScope) {
   function resolveTargetUrl(rawUrl, origin) {
     try {
-      return new URL(rawUrl || '/', origin).href;
+      const resolvedUrl = new URL(rawUrl || '/', origin);
+      if (resolvedUrl.origin !== origin) {
+        return new URL('/', origin).href;
+      }
+      return resolvedUrl.href;
     } catch {
       return new URL('/', origin).href;
     }

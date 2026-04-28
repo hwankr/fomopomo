@@ -105,6 +105,45 @@ describe('sw-navigation', () => {
     expect(clientsApi.openWindow).toHaveBeenCalledWith('https://fomopomo.test/timer');
   });
 
+  it('navigates an existing same-origin app window to root for absolute cross-origin targets', async () => {
+    const { focusOrOpenNotificationTarget } = loadNavigationHelper();
+    const existingClient = createClient('https://fomopomo.test/profile');
+    const clientsApi = {
+      matchAll: vi.fn().mockResolvedValue([existingClient]),
+      openWindow: vi.fn(),
+    };
+
+    await focusOrOpenNotificationTarget({
+      clientsApi,
+      targetUrl: 'https://evil.example/phish',
+      origin: 'https://fomopomo.test',
+    });
+
+    expect(existingClient.navigate).toHaveBeenCalledWith('https://fomopomo.test/');
+    expect(existingClient.navigate).not.toHaveBeenCalledWith('https://evil.example/phish');
+    expect(existingClient.lastNavigatedClient.focus).toHaveBeenCalledTimes(1);
+    expect(clientsApi.openWindow).not.toHaveBeenCalled();
+  });
+
+  it('opens app root instead of an absolute cross-origin target when no app window exists', async () => {
+    const { focusOrOpenNotificationTarget } = loadNavigationHelper();
+    const crossOriginClient = createClient('https://example.test/timer');
+    const clientsApi = {
+      matchAll: vi.fn().mockResolvedValue([crossOriginClient]),
+      openWindow: vi.fn().mockResolvedValue({ url: 'https://fomopomo.test/' }),
+    };
+
+    await focusOrOpenNotificationTarget({
+      clientsApi,
+      targetUrl: 'https://evil.example/phish',
+      origin: 'https://fomopomo.test',
+    });
+
+    expect(crossOriginClient.navigate).not.toHaveBeenCalled();
+    expect(clientsApi.openWindow).toHaveBeenCalledWith('https://fomopomo.test/');
+    expect(clientsApi.openWindow).not.toHaveBeenCalledWith('https://evil.example/phish');
+  });
+
   it('falls back to root for invalid notification URLs', async () => {
     const { focusOrOpenNotificationTarget } = loadNavigationHelper();
     const clientsApi = {
