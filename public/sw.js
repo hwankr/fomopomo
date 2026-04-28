@@ -1,3 +1,5 @@
+importScripts('/sw-navigation.js');
+
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
@@ -34,7 +36,14 @@ self.addEventListener('push', function (event) {
 self.addEventListener('notificationclick', function (event) {
   console.log('Notification click received.');
   event.notification.close();
+
+  const targetUrl = event.notification.data && event.notification.data.url;
+
   event.waitUntil(
-    clients.openWindow(event.notification.data.url)
+    self.FomopomoSwNavigation.focusOrOpenNotificationTarget({
+      clientsApi: clients,
+      targetUrl,
+      origin: self.location.origin,
+    })
   );
 });
