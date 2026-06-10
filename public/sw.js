@@ -9,32 +9,26 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', function (event) {
-  console.log('[SW] Push Received!'); // ✨ Debug Log
   if (event.data) {
     const data = event.data.json();
-    console.log('[SW] Push Data:', data); // ✨ Debug Log
     const options = {
       body: data.body,
-      requireInteraction: true, // ✨ Keep notification until user interacts
+      requireInteraction: true, // 사용자가 상호작용할 때까지 알림 유지
       data: {
         dateOfArrival: Date.now(),
         primaryKey: '2',
         url: data.url || '/',
       },
     };
-    
-    console.log('[SW] Showing notification with options:', options); // ✨ Debug Log
 
     event.waitUntil(
       self.registration.showNotification(data.title, options)
-        .then(() => console.log('[SW] showNotification success'))
         .catch((err) => console.error('[SW] showNotification error:', err))
     );
   }
 });
 
 self.addEventListener('notificationclick', function (event) {
-  console.log('Notification click received.');
   event.notification.close();
 
   const targetUrl = event.notification.data && event.notification.data.url;
