@@ -159,7 +159,10 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     };
 
     useEffect(() => {
-        fetchGroupData();
+        const loadGroupData = async () => {
+            await fetchGroupData();
+        };
+        void loadGroupData();
 
         console.log('[Group Realtime] Setting up subscription for group:', id);
 

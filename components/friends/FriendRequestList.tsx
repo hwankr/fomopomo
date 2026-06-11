@@ -39,7 +39,11 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
   }, [session.user.id]);
 
   useEffect(() => {
-    fetchRequests();
+    const load = async () => {
+      await fetchRequests();
+    };
+
+    void load();
   }, [fetchRequests, refreshTrigger]);
 
   const handleAccept = async (requestId: string) => {

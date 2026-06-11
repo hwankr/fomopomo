@@ -30,14 +30,16 @@ export default function GroupsPage() {
     const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
+    const user = session?.user;
+
     const fetchGroups = useCallback(async () => {
-        if (!session?.user) return;
+        if (!user) return;
 
         try {
             const { data, error } = await supabase
                 .from('group_members')
                 .select('groups (id, name, leader_id)')
-                .eq('user_id', session.user.id);
+                .eq('user_id', user.id);
 
             if (error) throw error;
 
@@ -58,15 +60,19 @@ export default function GroupsPage() {
         } finally {
             setGroupsLoading(false);
         }
-    }, [session?.user]);
+    }, [user]);
 
     useEffect(() => {
-        if (session?.user) {
-            fetchGroups();
-        } else if (!sessionLoading) {
-            setGroupsLoading(false);
-        }
-    }, [fetchGroups, session, sessionLoading]);
+        if (!user) return;
+
+        const load = async () => {
+            await fetchGroups();
+        };
+        void load();
+    }, [fetchGroups, user]);
+
+    // 세션 확인이 끝났고 로그인하지 않았다면 그룹 로딩을 기다릴 필요가 없다
+    const showLoading = groupsLoading && (sessionLoading || !!user);
 
     const handleActionClick = (action: () => void) => {
         if (!session) {
@@ -118,7 +124,7 @@ export default function GroupsPage() {
                     </div>
                 </div>
 
-                {groupsLoading ? (
+                {showLoading ? (
                     <div className="text-center py-12">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-500 mx-auto"></div>
                     </div>

@@ -37,7 +37,6 @@ const themeLabel = (theme: Theme) => {
 export default function Navbar({
     session,
     theme,
-    isDarkMode,
     toggleDarkMode,
     onOpenSettings,
     onOpenLogin,

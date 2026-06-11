@@ -193,10 +193,12 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
     }
   };
 
-  // ✨ updateTrigger가 변경될 때마다 다시 로드
+  // updateTrigger가 변경될 때마다 다시 로드
   useEffect(() => {
-    loadTaskOptions();
-    fetchHistory();
+    const load = async () => {
+      await Promise.all([loadTaskOptions(), fetchHistory()]);
+    };
+    void load();
   }, [updateTrigger]);
 
   const formatDuration = (seconds: number) => {

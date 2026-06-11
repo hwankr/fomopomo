@@ -123,8 +123,10 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
   }, [session.user.id]);
 
   useEffect(() => {
-    fetchFriends();
-    fetchStudyTimes();
+    const load = async () => {
+      await Promise.all([fetchFriends(), fetchStudyTimes()]);
+    };
+    void load();
 
     const channel = supabase
       .channel('friend-list-updates')

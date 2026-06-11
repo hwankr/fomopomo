@@ -77,7 +77,10 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
 
     useEffect(() => {
         if (isOpen && userId) {
-            fetchReportData();
+            const load = async () => {
+                await fetchReportData();
+            };
+            void load();
         }
     }, [fetchReportData, isOpen, userId]);
 

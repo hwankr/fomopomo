@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
 import { getAdminStatus } from '@/lib/admin';
@@ -10,33 +10,41 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
 
-  const checkAdmin = useCallback(async () => {
-    try {
-      const { user, isAdmin: hasAdminAccess } = await getAdminStatus();
-
-      if (!user) {
-        router.replace('/');
-        return;
-      }
-
-      if (!hasAdminAccess) {
-        toast.error('관리자 권한이 필요합니다.');
-        router.replace('/');
-        return;
-      }
-
-      setIsAdmin(true);
-    } catch (error) {
-      console.error('Admin check failed:', error);
-      router.replace('/');
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-
   useEffect(() => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
+      try {
+        const { user, isAdmin: hasAdminAccess } = await getAdminStatus();
+        if (cancelled) return;
+
+        if (!user) {
+          router.replace('/');
+          return;
+        }
+
+        if (!hasAdminAccess) {
+          toast.error('관리자 권한이 필요합니다.');
+          router.replace('/');
+          return;
+        }
+
+        setIsAdmin(true);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Admin check failed:', error);
+        router.replace('/');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
     void checkAdmin();
-  }, [checkAdmin]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   if (loading) {
     return (
