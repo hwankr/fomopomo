@@ -27,7 +27,8 @@ begin
     (select count(distinct ss.user_id)
        from public.study_sessions ss
       where ss.created_at >= p_day_start),
-    (select coalesce(sum(ss.duration), 0) from public.study_sessions ss),
+    -- sum(bigint) returns numeric; cast back to match the declared bigint column
+    (select coalesce(sum(ss.duration), 0)::bigint from public.study_sessions ss),
     (select count(*) from public.profiles p where p.created_at >= p_day_start);
 end;
 $$;
@@ -51,7 +52,7 @@ begin
   end if;
 
   return query
-  select coalesce(sum(ss.duration), 0), count(*)
+  select coalesce(sum(ss.duration), 0)::bigint, count(*)
   from public.study_sessions ss
   where ss.user_id = p_user_id;
 end;
