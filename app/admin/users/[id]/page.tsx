@@ -26,10 +26,13 @@ function getStatusLabel(status: Profile['status']) {
   return '오프라인';
 }
 
+const RECENT_SESSION_LIMIT = 20;
+
 export default function UserDetailPage({ params }: PageProps) {
   const router = useRouter();
   const [user, setUser] = useState<Profile | null>(null);
   const [sessions, setSessions] = useState<StudySession[]>([]);
+  const [summary, setSummary] = useState({ totalStudyTime: 0, sessionCount: 0 });
   const [loading, setLoading] = useState(true);
 
   const resolvedParams = use(params);
@@ -37,24 +40,34 @@ export default function UserDetailPage({ params }: PageProps) {
 
   const fetchUserDetail = useCallback(async () => {
     try {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+      const [profileResult, sessionsResult, summaryResult] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userId).single(),
+        supabase
+          .from('study_sessions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(RECENT_SESSION_LIMIT),
+        supabase
+          .rpc('get_admin_user_study_summary', { p_user_id: userId })
+          .single(),
+      ]);
 
-      if (profileError) throw profileError;
+      if (profileResult.error) throw profileResult.error;
+      if (sessionsResult.error) throw sessionsResult.error;
+      if (summaryResult.error) throw summaryResult.error;
 
-      const { data: studySessions, error: sessionsError } = await supabase
-        .from('study_sessions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const studySummary = summaryResult.data as {
+        total_study_time: number;
+        session_count: number;
+      };
 
-      if (sessionsError) throw sessionsError;
-
-      setUser(profile as Profile);
-      setSessions(studySessions as StudySession[]);
+      setUser(profileResult.data as Profile);
+      setSessions(sessionsResult.data as StudySession[]);
+      setSummary({
+        totalStudyTime: studySummary.total_study_time,
+        sessionCount: studySummary.session_count,
+      });
     } catch (error) {
       console.error('Error fetching user detail:', error);
       toast.error('사용자 상세 정보를 불러오지 못했습니다.');
@@ -97,11 +110,6 @@ export default function UserDetailPage({ params }: PageProps) {
   }
 
   if (!user) return null;
-
-  const totalStudyTime = sessions.reduce(
-    (accumulator, session) => accumulator + session.duration,
-    0
-  );
 
   return (
     <AdminGuard>
@@ -148,7 +156,7 @@ export default function UserDetailPage({ params }: PageProps) {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                {formatTime(totalStudyTime)}
+                {formatTime(summary.totalStudyTime)}
               </p>
             </div>
 
@@ -162,7 +170,7 @@ export default function UserDetailPage({ params }: PageProps) {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                {sessions.length}
+                {summary.sessionCount.toLocaleString()}
               </p>
             </div>
 
@@ -200,7 +208,7 @@ export default function UserDetailPage({ params }: PageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {sessions.slice(0, 20).map((session) => (
+                  {sessions.map((session) => (
                     <tr
                       key={session.id}
                       className="hover:bg-gray-50 dark:hover:bg-gray-700/50"

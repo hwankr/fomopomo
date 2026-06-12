@@ -23,42 +23,38 @@ export default function AdminPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (profilesError) throw profilesError;
-
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const { data: sessions, error: sessionsError } = await supabase
-        .from('study_sessions')
-        .select('duration, created_at, user_id');
+      const [profilesResult, statsResult] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .rpc('get_admin_dashboard_stats', {
+            p_day_start: today.toISOString(),
+          })
+          .single(),
+      ]);
 
-      if (sessionsError) throw sessionsError;
+      if (profilesResult.error) throw profilesResult.error;
+      if (statsResult.error) throw statsResult.error;
 
-      const totalUsers = profiles?.length || 0;
-      const activeUserIds = new Set(
-        sessions
-          ?.filter((session) => new Date(session.created_at) >= today)
-          .map((session) => session.user_id)
-      );
-      const activeUsersToday = activeUserIds.size;
-      const totalStudyTime =
-        sessions?.reduce((acc, current) => acc + current.duration, 0) || 0;
-      const newUsersToday =
-        profiles?.filter((profile) => new Date(profile.created_at!) >= today)
-          .length || 0;
+      const dashboardStats = statsResult.data as {
+        total_users: number;
+        active_users_today: number;
+        total_study_time: number;
+        new_users_today: number;
+      };
 
       setStats({
-        totalUsers,
-        activeUsersToday,
-        totalStudyTime,
-        newUsersToday,
+        totalUsers: dashboardStats.total_users,
+        activeUsersToday: dashboardStats.active_users_today,
+        totalStudyTime: dashboardStats.total_study_time,
+        newUsersToday: dashboardStats.new_users_today,
       });
-      setUsers(profiles as Profile[]);
+      setUsers(profilesResult.data as Profile[]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
       toast.error('관리자 대시보드 데이터를 불러오지 못했습니다.');
