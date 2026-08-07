@@ -224,7 +224,7 @@ export default function TimerApp({
   // --- Handlers ---
 
   // Saving Logic Helper
-  const triggerSave = useCallback(async (recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number) => {
+  const triggerSave = useCallback(async function attemptSave(recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number) {
     // Prevent duplicate trigger if already saving
     if (isSaving) {
       console.log('[triggerSave] Already saving, ignoring duplicate request');
@@ -244,8 +244,31 @@ export default function TimerApp({
       setPendingRecord({ mode: recordMode, duration, onAfterSave });
       setTaskModalOpen(true);
     } else {
-      await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
-      if (onAfterSave) onAfterSave();
+      const result = await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
+      if (result === 'saved') {
+        // Reset/close only after the insert is confirmed, so a failed save
+        // keeps the timer state and intervals for a retry.
+        if (onAfterSave) onAfterSave();
+      } else if (result === 'failed') {
+        toast(
+          (t) => (
+            <div className="flex items-center gap-3">
+              <span>저장에 실패했습니다. 기록은 보관 중입니다.</span>
+              <button
+                onClick={() => {
+                  toast.dismiss(t.id);
+                  void attemptSave(recordMode, duration, onAfterSave, forcedEndTime);
+                }}
+                className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-bold text-white"
+              >
+                재시도
+              </button>
+            </div>
+          ),
+          { duration: 12000, icon: '⚠️' }
+        );
+      }
+      // 'skipped': another save is in flight (or nothing to save) - leave state untouched.
     }
   }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
 
@@ -485,7 +508,9 @@ export default function TimerApp({
     await persistSettings(updated);
     toast.success('자동 팝업을 끄고 바로 저장합니다. 설정에서 다시 켤 수 있어요.');
     if (pendingRecord) {
-      await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+      const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+      // Keep the modal and pending record on failure so the user can retry.
+      if (result !== 'saved') return;
       if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
       setPendingRecord(null);
       setSelectedTask('');
@@ -495,7 +520,9 @@ export default function TimerApp({
 
   const handleTaskSubmit = async () => {
     if (!pendingRecord) return;
-    await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+    // Keep the modal and pending record on failure so the user can retry.
+    if (result !== 'saved') return;
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);
@@ -505,7 +532,9 @@ export default function TimerApp({
 
   const handleTaskSkip = async () => {
     if (!pendingRecord) return;
-    await saveRecord(pendingRecord.mode, pendingRecord.duration);
+    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration);
+    // Keep the modal and pending record on failure so the user can retry.
+    if (result !== 'saved') return;
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);

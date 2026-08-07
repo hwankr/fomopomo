@@ -53,6 +53,61 @@ const splitIntervalAtMidnight = (interval: { start: number; end: number }): { st
   return result;
 };
 
+export type SaveRecordResult = 'saved' | 'failed' | 'skipped';
+
+type StudySessionRow = {
+  mode: string;
+  duration: number;
+  user_id: string;
+  task: string | null;
+  task_id: string | null;
+  created_at: string;
+  group_id: string;
+};
+
+type PendingSessionDraft = {
+  sessionId: string;
+  rows: StudySessionRow[];
+  failedAt: number;
+};
+
+// Durable outbox for failed saves: drafts survive reloads so a failed insert
+// never silently discards study time. Keyed by the stable per-session id.
+const PENDING_SESSIONS_KEY = 'fomopomo_pending_sessions';
+
+const readPendingSessions = (): Record<string, PendingSessionDraft> => {
+  try {
+    const raw = window.localStorage.getItem(PENDING_SESSIONS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    console.error('Failed to read pending sessions outbox', e);
+    return {};
+  }
+};
+
+const writePendingSessions = (drafts: Record<string, PendingSessionDraft>) => {
+  try {
+    window.localStorage.setItem(PENDING_SESSIONS_KEY, JSON.stringify(drafts));
+  } catch (e) {
+    console.error('Failed to write pending sessions outbox', e);
+  }
+};
+
+const upsertPendingSession = (draft: PendingSessionDraft) => {
+  const drafts = readPendingSessions();
+  drafts[draft.sessionId] = draft;
+  writePendingSessions(drafts);
+};
+
+const removePendingSession = (sessionId: string) => {
+  const drafts = readPendingSessions();
+  if (!(sessionId in drafts)) return;
+  delete drafts[sessionId];
+  writePendingSessions(drafts);
+};
+
 interface UseStudySessionProps {
   isLoggedIn: boolean;
   onRecordSaved: () => void;
@@ -71,6 +126,10 @@ export const useStudySession = ({
   // Ref-based lock to prevent duplicate saves (sync check, unlike useState)
   const isSavingRef = useRef(false);
   const currentIntervalStartRef = useRef<number | null>(null);
+  // Stable id for the session being saved: kept across failed attempts so a
+  // retry reuses the same outbox key and group_id (no duplicate rows), and
+  // only reset once an insert has been confirmed.
+  const pendingSessionIdRef = useRef<string | null>(null);
 
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
     try {
@@ -104,21 +163,21 @@ export const useStudySession = ({
   }, [selectedTaskTitle]);
 
   const saveRecord = useCallback(
-    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number) => {
+    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number): Promise<SaveRecordResult> => {
       // Prevent duplicate saves using ref (synchronous check)
       if (isSavingRef.current) {
         console.log('[saveRecord] Already saving, ignoring duplicate request');
-        return;
+        return 'skipped';
       }
 
       if (duration < 10) {
         toast.error('10초 미만은 저장되지 않습니다.');
-        return;
+        return 'skipped';
       }
 
       if (!isLoggedIn) {
         toast.error('로그인이 필요한 기능입니다.');
-        return;
+        return 'skipped';
       }
 
       // Set ref immediately (synchronous) to block rapid duplicate calls
@@ -132,12 +191,17 @@ export const useStudySession = ({
         return `${minutes}분 ${seconds}초`;
       };
 
-      const groupId = generateUUID();
+      // Reuse the pending session id on retries so the outbox draft and the
+      // rows' group_id stay stable until the save is confirmed.
+      const sessionId = pendingSessionIdRef.current ?? generateUUID();
+      pendingSessionIdRef.current = sessionId;
+      const groupId = sessionId;
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         isSavingRef.current = false;
-        return;
+        toast.error('로그인이 필요한 기능입니다.');
+        return 'skipped';
       }
 
       setIsSaving(true);
@@ -150,67 +214,75 @@ export const useStudySession = ({
         },
       });
 
+      const now = Date.now();
+      const endTimeToUse = forcedEndTime || now; // Use forced time if provided
+
+      let currentSessionIntervals = [...intervals];
+
+      if (currentIntervalStartRef.current) {
+        currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: endTimeToUse });
+      }
+
+      currentSessionIntervals = currentSessionIntervals.filter(i => i.start > 0 && i.end > 0);
+
+      if (currentSessionIntervals.length === 0) {
+        if (duration > 0 && duration < 24 * 60 * 60) {
+          currentSessionIntervals.push({ start: endTimeToUse - duration * 1000, end: endTimeToUse });
+        }
+      }
+
+      const rowsToInsert: StudySessionRow[] = currentSessionIntervals
+        // First, split each interval at midnight boundaries
+        .flatMap(interval => splitIntervalAtMidnight(interval))
+        // Then, convert each split interval to a row
+        .map(interval => ({
+          mode: recordMode,
+          duration: Math.round((interval.end - interval.start) / 1000),
+          user_id: user.id,
+          task: taskText.trim() || null,
+          task_id: selectedTaskId,
+          created_at: new Date(interval.end).toISOString(),
+          group_id: groupId,
+        }))
+        .filter(row => row.duration >= 10 && row.duration < 24 * 60 * 60);
+
+      if (rowsToInsert.length === 0) {
+        rowsToInsert.push({
+          mode: recordMode,
+          duration,
+          user_id: user.id,
+          task: taskText.trim() || null,
+          task_id: selectedTaskId,
+          created_at: new Date(endTimeToUse).toISOString(),
+          group_id: groupId,
+        });
+      }
+
       try {
-        const now = Date.now();
-        const endTimeToUse = forcedEndTime || now; // Use forced time if provided
-
-        let currentSessionIntervals = [...intervals];
-
-        if (currentIntervalStartRef.current) {
-          currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: endTimeToUse });
-        }
-
-        currentSessionIntervals = currentSessionIntervals.filter(i => i.start > 0 && i.end > 0);
-
-        if (currentSessionIntervals.length === 0) {
-          if (duration > 0 && duration < 24 * 60 * 60) {
-            currentSessionIntervals.push({ start: endTimeToUse - duration * 1000, end: endTimeToUse });
-          }
-        }
-
-        const rowsToInsert = currentSessionIntervals
-          // First, split each interval at midnight boundaries
-          .flatMap(interval => splitIntervalAtMidnight(interval))
-          // Then, convert each split interval to a row
-          .map(interval => ({
-            mode: recordMode,
-            duration: Math.round((interval.end - interval.start) / 1000),
-            user_id: user.id,
-            task: taskText.trim() || null,
-            task_id: selectedTaskId,
-            created_at: new Date(interval.end).toISOString(),
-            group_id: groupId,
-          }))
-          .filter(row => row.duration >= 10 && row.duration < 24 * 60 * 60);
-
-        if (rowsToInsert.length === 0) {
-          rowsToInsert.push({
-            mode: recordMode,
-            duration,
-            user_id: user.id,
-            task: taskText.trim() || null,
-            task_id: selectedTaskId,
-            created_at: new Date(endTimeToUse).toISOString(),
-            group_id: groupId,
-          });
-        }
-
         const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
         if (error) throw error;
+
+        // Cleanup only after the insert is confirmed; a failed save must keep
+        // the intervals (and its outbox draft) so the time can be retried.
+        removePendingSession(sessionId);
+        pendingSessionIdRef.current = null;
+        setIntervals([]);
+        currentIntervalStartRef.current = null;
 
         // Calculate actual saved duration from rowsToInsert
         const actualSavedDuration = rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
         toast.success(`${formatDurationForToast(actualSavedDuration)} 기록 저장 완료!`, { id: toastId });
         onRecordSaved();
+        return 'saved';
       } catch (error) {
         console.error(error);
+        upsertPendingSession({ sessionId, rows: rowsToInsert, failedAt: Date.now() });
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        toast.error(`저장 실패: ${errorMessage}`, { id: toastId, duration: 5000 });
+        toast.error(`저장 실패: ${errorMessage}\n기록은 임시 보관 중이니 다시 시도해주세요.`, { id: toastId, duration: 5000 });
+        return 'failed';
       } finally {
         isSavingRef.current = false;
         setIsSaving(false);
-        setIntervals([]);
-        currentIntervalStartRef.current = null;
       }
     },
     [onRecordSaved, intervals, selectedTaskId, isLoggedIn]
