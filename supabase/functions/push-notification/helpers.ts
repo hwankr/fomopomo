@@ -1,6 +1,7 @@
 const textEncoder = new TextEncoder();
 
 export type RuntimeConfig = {
+  serviceApiKey: string;
   webhookSecret: string;
   vapidPublicKey: string;
   vapidPrivateKey: string;
@@ -9,17 +10,50 @@ export type RuntimeConfig = {
 
 export type RuntimeConfigValidation =
   | { ok: true; config: RuntimeConfig }
-  | { ok: false; reason: "missing_webhook_secret" | "missing_vapid_config" };
+  | {
+    ok: false;
+    reason:
+      | "missing_service_api_key"
+      | "missing_webhook_secret"
+      | "missing_vapid_config";
+  };
+
+export function resolveServiceApiKey(
+  secretKeysJson: string | undefined,
+  legacyServiceRoleKey: string | undefined,
+): string {
+  if (secretKeysJson?.trim()) {
+    try {
+      const secretKeys = JSON.parse(secretKeysJson) as Record<string, unknown>;
+
+      for (const keyName of ["backend_api", "default"]) {
+        const value = secretKeys[keyName];
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      }
+    } catch {
+      // Fall through to the legacy key during the zero-downtime migration.
+    }
+  }
+
+  return legacyServiceRoleKey?.trim() ?? "";
+}
 
 export function validateRuntimeConfig(
   input: Partial<RuntimeConfig>,
 ): RuntimeConfigValidation {
   const config: RuntimeConfig = {
+    serviceApiKey: input.serviceApiKey?.trim() ?? "",
     webhookSecret: input.webhookSecret?.trim() ?? "",
     vapidPublicKey: input.vapidPublicKey?.trim() ?? "",
     vapidPrivateKey: input.vapidPrivateKey?.trim() ?? "",
     vapidSubject: input.vapidSubject?.trim() ?? "",
   };
+
+  if (!config.serviceApiKey) {
+    return { ok: false, reason: "missing_service_api_key" };
+  }
 
   if (!config.webhookSecret) {
     return { ok: false, reason: "missing_webhook_secret" };

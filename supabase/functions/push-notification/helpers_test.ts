@@ -1,6 +1,7 @@
 import {
   extractWebhookSecret,
   isAuthorizedWebhook,
+  resolveServiceApiKey,
   sanitizeError,
   sanitizeWebPushError,
   shouldDeleteSubscription,
@@ -11,6 +12,7 @@ import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 
 Deno.test("validateRuntimeConfig rejects missing webhook secret", () => {
   const result = validateRuntimeConfig({
+    serviceApiKey: "secret-api-key",
     vapidPublicKey: "public",
     vapidPrivateKey: "private",
     vapidSubject: "mailto:test@example.com",
@@ -21,6 +23,7 @@ Deno.test("validateRuntimeConfig rejects missing webhook secret", () => {
 
 Deno.test("validateRuntimeConfig rejects missing vapid values", () => {
   const result = validateRuntimeConfig({
+    serviceApiKey: "secret-api-key",
     webhookSecret: "secret",
     vapidPublicKey: "public",
     vapidPrivateKey: "",
@@ -32,6 +35,7 @@ Deno.test("validateRuntimeConfig rejects missing vapid values", () => {
 
 Deno.test("validateRuntimeConfig trims and accepts complete config", () => {
   const result = validateRuntimeConfig({
+    serviceApiKey: " secret-api-key ",
     webhookSecret: " secret ",
     vapidPublicKey: " public ",
     vapidPrivateKey: " private ",
@@ -41,12 +45,43 @@ Deno.test("validateRuntimeConfig trims and accepts complete config", () => {
   assert(result.ok);
   if (result.ok) {
     assertEquals(result.config, {
+      serviceApiKey: "secret-api-key",
       webhookSecret: "secret",
       vapidPublicKey: "public",
       vapidPrivateKey: "private",
       vapidSubject: "mailto:test@example.com",
     });
   }
+});
+
+Deno.test("validateRuntimeConfig rejects a missing service API key", () => {
+  const result = validateRuntimeConfig({
+    webhookSecret: "secret",
+    vapidPublicKey: "public",
+    vapidPrivateKey: "private",
+    vapidSubject: "mailto:test@example.com",
+  });
+
+  assertEquals(result, { ok: false, reason: "missing_service_api_key" });
+});
+
+Deno.test("resolveServiceApiKey prefers the dedicated backend key", () => {
+  assertEquals(
+    resolveServiceApiKey(
+      JSON.stringify({ default: "default-key", backend_api: " backend-key " }),
+      "legacy-key",
+    ),
+    "backend-key",
+  );
+});
+
+Deno.test("resolveServiceApiKey supports default and legacy transitions", () => {
+  assertEquals(
+    resolveServiceApiKey(JSON.stringify({ default: "default-key" }), undefined),
+    "default-key",
+  );
+  assertEquals(resolveServiceApiKey("not-json", " legacy-key "), "legacy-key");
+  assertEquals(resolveServiceApiKey(undefined, undefined), "");
 });
 
 Deno.test("extractWebhookSecret reads only x-webhook-secret", () => {

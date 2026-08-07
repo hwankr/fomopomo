@@ -2,15 +2,21 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import webpush from "npm:web-push";
 import {
   isAuthorizedWebhook,
+  resolveServiceApiKey,
   sanitizeError,
   sanitizeWebPushError,
   shouldDeleteSubscription,
   validateRuntimeConfig,
 } from "./helpers.ts";
 
+const serviceApiKey = resolveServiceApiKey(
+  Deno.env.get("SUPABASE_SECRET_KEYS"),
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+);
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  serviceApiKey,
 );
 
 const unauthorizedResponse = () =>
@@ -39,6 +45,7 @@ async function insertDebugLog(
 
 function loadRuntimeConfig() {
   return validateRuntimeConfig({
+    serviceApiKey,
     webhookSecret: Deno.env.get("WEBHOOK_SECRET"),
     vapidPublicKey: Deno.env.get("VAPID_PUBLIC_KEY"),
     vapidPrivateKey: Deno.env.get("VAPID_PRIVATE_KEY"),
