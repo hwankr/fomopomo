@@ -28,6 +28,10 @@ function makeServiceRoleKey(ref: string) {
   return `${header}.${payload}.signature`;
 }
 
+function makeOpaqueServiceRoleKey() {
+  return 'sb_secret_test_opaque_key';
+}
+
 function createMockClient(overrides: MockClientOverrides = {}) {
   const state = {
     deleteEqCalls: [] as Array<{ table: string; column: string; value: unknown }>,
@@ -123,17 +127,41 @@ function createMockClient(overrides: MockClientOverrides = {}) {
   return { client, state };
 }
 
-async function loadPostHandler(client: ReturnType<typeof createMockClient>['client']) {
+async function loadPostHandler(
+  client: ReturnType<typeof createMockClient>['client'],
+  envOverrides: {
+    supabaseUrl?: string;
+    serviceRoleKey?: string;
+    projectRef?: string | undefined;
+    allowedProjectRefs?: string | undefined;
+  } = {}
+) {
   vi.resetModules();
   const createClientMock = vi.fn(() => client);
   vi.doMock('@supabase/supabase-js', () => ({
     createClient: createClientMock,
   }));
 
-  process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://project123.supabase.co';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = makeServiceRoleKey('project123');
-  process.env.SUPABASE_PROJECT_REF = 'project123';
-  process.env.SUPABASE_ALLOWED_PROJECT_REFS = 'project123';
+  process.env.NEXT_PUBLIC_SUPABASE_URL =
+    envOverrides.supabaseUrl ?? 'https://project123.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY =
+    envOverrides.serviceRoleKey ?? makeServiceRoleKey('project123');
+
+  if (envOverrides.projectRef === undefined) {
+    process.env.SUPABASE_PROJECT_REF = 'project123';
+  } else if (envOverrides.projectRef === '') {
+    delete process.env.SUPABASE_PROJECT_REF;
+  } else {
+    process.env.SUPABASE_PROJECT_REF = envOverrides.projectRef;
+  }
+
+  if (envOverrides.allowedProjectRefs === undefined) {
+    process.env.SUPABASE_ALLOWED_PROJECT_REFS = 'project123';
+  } else if (envOverrides.allowedProjectRefs === '') {
+    delete process.env.SUPABASE_ALLOWED_PROJECT_REFS;
+  } else {
+    process.env.SUPABASE_ALLOWED_PROJECT_REFS = envOverrides.allowedProjectRefs;
+  }
 
   const routeModule = await import('../route');
   return {
@@ -203,6 +231,70 @@ describe('account-reset route', () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid auth token' });
+  });
+
+  it('accepts opaque service role keys when the configured project ref matches the URL', async () => {
+    const { client } = createMockClient();
+    const { POST } = await loadPostHandler(client, {
+      serviceRoleKey: makeOpaqueServiceRoleKey(),
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/account-reset', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+        },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+  });
+
+  it('fails closed for opaque service role keys when the configured project ref mismatches the URL', async () => {
+    const { client } = createMockClient();
+    const { POST, createClientMock } = await loadPostHandler(client, {
+      serviceRoleKey: makeOpaqueServiceRoleKey(),
+      projectRef: 'other-project',
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/account-reset', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+        },
+      })
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Supabase config mismatch',
+    });
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for unknown non-JWT service role keys', async () => {
+    const { client } = createMockClient();
+    const { POST, createClientMock } = await loadPostHandler(client, {
+      serviceRoleKey: 'not-a-jwt-or-secret',
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/account-reset', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+        },
+      })
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Supabase config mismatch',
+    });
+    expect(createClientMock).not.toHaveBeenCalled();
   });
 
   it('returns 200 and resets the profile instead of deleting the auth user', async () => {

@@ -39,6 +39,47 @@ const getProjectRefFromServiceKey = (token: string) => {
   }
 };
 
+const getServiceRoleKeyKind = (token: string) => {
+  if (token.startsWith('sb_secret_')) return 'opaque_secret';
+  if (token.split('.').length === 3) return 'legacy_jwt';
+  return 'unknown';
+};
+
+const validateServiceRoleKeyProjectRef = ({
+  serviceRoleKey,
+  urlProjectRef,
+  expectedProjectRef,
+}: {
+  serviceRoleKey: string;
+  urlProjectRef: string;
+  expectedProjectRef?: string;
+}) => {
+  const keyKind = getServiceRoleKeyKind(serviceRoleKey);
+
+  if (keyKind === 'opaque_secret') {
+    return {
+      keyKind,
+      keyProjectRef: null,
+      ok: expectedProjectRef === urlProjectRef,
+    };
+  }
+
+  if (keyKind === 'legacy_jwt') {
+    const keyProjectRef = getProjectRefFromServiceKey(serviceRoleKey);
+    return {
+      keyKind,
+      keyProjectRef,
+      ok: keyProjectRef === urlProjectRef,
+    };
+  }
+
+  return {
+    keyKind,
+    keyProjectRef: null,
+    ok: false,
+  };
+};
+
 const getAccessToken = (request: NextRequest) => {
   const authHeader = request.headers.get('authorization') || '';
   if (!authHeader.startsWith('Bearer ')) return null;
@@ -68,11 +109,23 @@ export async function POST(request: NextRequest) {
   }
 
   const urlProjectRef = getProjectRefFromUrl(supabaseUrl);
-  const keyProjectRef = getProjectRefFromServiceKey(serviceRoleKey);
-  if (!urlProjectRef || !keyProjectRef || urlProjectRef !== keyProjectRef) {
+  const expectedProjectRef = process.env.SUPABASE_PROJECT_REF;
+  const serviceRoleKeyValidation = urlProjectRef
+    ? validateServiceRoleKeyProjectRef({
+        serviceRoleKey,
+        urlProjectRef,
+        expectedProjectRef,
+      })
+    : { keyKind: 'unknown', keyProjectRef: null, ok: false };
+  if (!urlProjectRef || !serviceRoleKeyValidation.ok) {
     console.error('Supabase project ref mismatch', {
       urlProjectRef,
-      keyProjectRef,
+      keyProjectRef: serviceRoleKeyValidation.keyProjectRef,
+      keyKind: serviceRoleKeyValidation.keyKind,
+      expectedProjectRef:
+        serviceRoleKeyValidation.keyKind === 'opaque_secret'
+          ? expectedProjectRef ?? null
+          : undefined,
     });
     return NextResponse.json(
       { error: 'Supabase config mismatch' },
@@ -80,7 +133,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const expectedProjectRef = process.env.SUPABASE_PROJECT_REF;
   if (expectedProjectRef && expectedProjectRef !== urlProjectRef) {
     console.error('Supabase project ref does not match expected', {
       urlProjectRef,
