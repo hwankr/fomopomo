@@ -5,14 +5,28 @@
 with expected_authenticated_functions(signature) as (
   values
     ('public.accept_friend_request(uuid)'),
+    ('public.create_group(text)'),
     ('public.delete_friend(uuid)'),
+    ('public.feedback_image_path_matches_user(uuid,text)'),
+    ('public.get_group_invite_code(uuid)'),
     ('public.get_admin_dashboard_stats(timestamp with time zone)'),
     ('public.get_admin_user_study_summary(uuid)'),
     ('public.get_friends_study_time(uuid,text)'),
     ('public.get_group_study_time_v3(uuid,timestamp with time zone,timestamp with time zone)'),
     ('public.is_admin()'),
     ('public.is_group_member(uuid)'),
-    ('public.send_friend_request(text)')
+    ('public.is_group_leader(uuid)'),
+    ('public.is_safe_push_endpoint(text)'),
+    ('public.join_group_by_code(text)'),
+    ('public.send_friend_request(text)'),
+    ('public.transfer_group_leadership(uuid,uuid)')
+),
+expected_service_role_functions(signature) as (
+  values
+    ('public.claim_push_notification_event(uuid,uuid,text,integer)'),
+    ('public.complete_push_notification_event(uuid,text)'),
+    ('public.feedback_image_path_matches_user(uuid,text)'),
+    ('public.is_safe_push_endpoint(text)')
 ),
 checks(check_name, passed) as (
   values
@@ -111,6 +125,44 @@ checks(check_name, passed) as (
       )
     ),
     (
+      'groups.code SELECT is revoked from authenticated',
+      not has_column_privilege(
+        'authenticated',
+        'public.groups',
+        'code',
+        'SELECT'
+      )
+    ),
+    (
+      'group members keep non-sensitive group SELECT access',
+      has_column_privilege('authenticated', 'public.groups', 'name', 'SELECT')
+        and has_column_privilege(
+          'authenticated',
+          'public.groups',
+          'created_at',
+          'SELECT'
+        )
+    ),
+    (
+      'direct group membership INSERT is revoked',
+      not has_table_privilege('authenticated', 'public.group_members', 'INSERT')
+    ),
+    (
+      'group nickname-only UPDATE remains available',
+      has_column_privilege(
+        'authenticated',
+        'public.group_members',
+        'nickname',
+        'UPDATE'
+      )
+        and not has_column_privilege(
+          'authenticated',
+          'public.group_members',
+          'user_id',
+          'UPDATE'
+        )
+    ),
+    (
       'push subscription table-wide UPDATE is revoked',
       not has_table_privilege(
         'authenticated',
@@ -125,6 +177,25 @@ checks(check_name, passed) as (
         'public.push_subscriptions',
         'keys',
         'UPDATE'
+      )
+    ),
+    (
+      'push subscription safe-endpoint constraint exists',
+      exists (
+        select 1
+        from pg_catalog.pg_constraint as c
+        where c.conrelid = 'public.push_subscriptions'::regclass
+          and c.conname = 'push_subscriptions_safe_endpoint_check'
+      )
+    ),
+    (
+      'push subscription guard trigger is installed',
+      exists (
+        select 1
+        from pg_catalog.pg_trigger as t
+        where t.tgrelid = 'public.push_subscriptions'::regclass
+          and t.tgname = 'guard_push_subscription_identity'
+          and not t.tgisinternal
       )
     ),
     (
@@ -188,16 +259,26 @@ checks(check_name, passed) as (
       )
     ),
     (
-      'service role can execute no application functions',
+      'service role function allowlist is exact',
       not exists (
         select 1
-        from pg_catalog.pg_proc as p
-        join pg_catalog.pg_namespace as n
-          on n.oid = p.pronamespace
-        where n.nspname in ('public', 'private')
-          and p.prokind = 'f'
-          and has_function_privilege('service_role', p.oid, 'EXECUTE')
+        from expected_service_role_functions as expected
+        where to_regprocedure(expected.signature) is null
+          or not has_function_privilege(
+            'service_role',
+            to_regprocedure(expected.signature),
+            'EXECUTE'
+          )
       )
+        and (
+          select count(*)
+          from pg_catalog.pg_proc as p
+          join pg_catalog.pg_namespace as n
+            on n.oid = p.pronamespace
+          where n.nspname in ('public', 'private')
+            and p.prokind = 'f'
+            and has_function_privilege('service_role', p.oid, 'EXECUTE')
+        ) = (select count(*) from expected_service_role_functions)
     ),
     (
       'authenticated function allowlist is exact',
@@ -220,6 +301,74 @@ checks(check_name, passed) as (
             and p.prokind = 'f'
             and has_function_privilege('authenticated', p.oid, 'EXECUTE')
         ) = (select count(*) from expected_authenticated_functions)
+    ),
+    (
+      'feedback image metadata table exists and rejects browser UPDATE',
+      to_regclass('public.feedback_images') is not null
+        and not has_table_privilege('authenticated', 'public.feedback_images', 'UPDATE')
+        and has_table_privilege('authenticated', 'public.feedback_images', 'SELECT')
+    ),
+    (
+      'legacy feedback image arrays are readable but not writable',
+      has_column_privilege('authenticated', 'public.feedbacks', 'images', 'SELECT')
+        and not has_column_privilege(
+          'authenticated',
+          'public.feedbacks',
+          'images',
+          'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated',
+          'public.feedback_replies',
+          'images',
+          'UPDATE'
+        )
+    ),
+    (
+      'feedback upload bucket is private and size/mime restricted',
+      exists (
+        select 1
+        from storage.buckets as b
+        where b.id = 'feedback-uploads'
+          and not b.public
+          and b.file_size_limit = 5242880
+          and b.allowed_mime_types = array[
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/gif'
+          ]::text[]
+      )
+    ),
+    (
+      'feedback upload storage policies are present',
+      (
+        select count(*)
+        from pg_catalog.pg_policies as p
+        where p.schemaname = 'storage'
+          and p.tablename = 'objects'
+          and p.policyname in (
+            'Feedback uploads owner select',
+            'Feedback uploads owner insert',
+            'Feedback uploads owner update',
+            'Feedback uploads owner delete'
+          )
+      ) = 4
+    ),
+    (
+      'push notification events stay private to RPCs',
+      to_regclass('private.push_notification_events') is not null
+        and not has_table_privilege('anon', 'private.push_notification_events', 'SELECT')
+        and not has_table_privilege(
+          'authenticated',
+          'private.push_notification_events',
+          'SELECT'
+        )
+        and not has_table_privilege(
+          'service_role',
+          'private.push_notification_events',
+          'SELECT'
+        )
     ),
     (
       'all application SECURITY DEFINER functions have empty search_path',

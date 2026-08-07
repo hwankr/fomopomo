@@ -1,7 +1,7 @@
 begin;
 
 set local search_path = extensions, public, pg_catalog;
-select plan(67);
+select plan(126);
 
 create schema tests;
 grant usage on schema tests to anon, authenticated, service_role;
@@ -119,6 +119,32 @@ values
     'admin',
     'Admin'
   );
+
+insert into public.feedbacks (
+  id,
+  content,
+  category,
+  user_id
+)
+values (
+  '20000000-0000-0000-0000-000000000001',
+  'Need better timers',
+  'feature',
+  '00000000-0000-0000-0000-000000000001'
+);
+
+insert into public.feedback_replies (
+  id,
+  feedback_id,
+  user_id,
+  content
+)
+values (
+  '30000000-0000-0000-0000-000000000001',
+  '20000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000001',
+  'Attaching a screenshot'
+);
 
 select is(
   has_table_privilege('anon', 'public.debug_logs', 'SELECT'),
@@ -447,10 +473,19 @@ select is(
         'send_friend_request',
         'accept_friend_request',
         'delete_friend',
+        'create_group',
+        'join_group_by_code',
+        'get_group_invite_code',
+        'transfer_group_leadership',
         'get_friends_study_time',
         'get_group_study_time_v3',
         'get_admin_dashboard_stats',
-        'get_admin_user_study_summary'
+        'get_admin_user_study_summary',
+        'is_group_leader',
+        'feedback_image_path_matches_user',
+        'is_safe_push_endpoint',
+        'claim_push_notification_event',
+        'complete_push_notification_event'
       )
   ),
   0::bigint,
@@ -469,27 +504,52 @@ select is(
         'send_friend_request',
         'accept_friend_request',
         'delete_friend',
+        'create_group',
+        'join_group_by_code',
+        'get_group_invite_code',
+        'transfer_group_leadership',
         'get_friends_study_time',
         'get_group_study_time_v3',
         'get_admin_dashboard_stats',
-        'get_admin_user_study_summary'
+        'get_admin_user_study_summary',
+        'is_group_leader',
+        'feedback_image_path_matches_user',
+        'is_safe_push_endpoint',
+        'claim_push_notification_event',
+        'complete_push_notification_event'
       )
   ),
   0::bigint,
   'anon has no effective execute access to sensitive RPCs'
 );
 
-select is(
-  (
-    select count(*)
-    from pg_proc as p
-    join pg_namespace as n on n.oid = p.pronamespace
-    where n.nspname in ('public', 'private')
-      and p.prokind = 'f'
-      and has_function_privilege('service_role', p.oid, 'EXECUTE')
-  ),
-  0::bigint,
-  'service_role has no unnecessary application RPC execution privileges'
+with expected_service_role_functions(signature) as (
+  values
+    ('public.claim_push_notification_event(uuid,uuid,text,integer)'),
+    ('public.complete_push_notification_event(uuid,text)'),
+    ('public.feedback_image_path_matches_user(uuid,text)'),
+    ('public.is_safe_push_endpoint(text)')
+)
+select ok(
+  not exists (
+    select 1
+    from expected_service_role_functions as expected
+    where to_regprocedure(expected.signature) is null
+      or not has_function_privilege(
+        'service_role',
+        to_regprocedure(expected.signature),
+        'EXECUTE'
+      )
+  )
+    and (
+      select count(*)
+      from pg_proc as p
+      join pg_namespace as n on n.oid = p.pronamespace
+      where n.nspname in ('public', 'private')
+        and p.prokind = 'f'
+        and has_function_privilege('service_role', p.oid, 'EXECUTE')
+    ) = (select count(*) from expected_service_role_functions),
+  'service_role execute access is limited to the push event RPCs'
 );
 
 select ok(
@@ -500,6 +560,42 @@ select ok(
 select ok(
   has_function_privilege('authenticated', 'public.accept_friend_request(uuid)', 'EXECUTE'),
   'authenticated can execute the supported friend-accept RPC'
+);
+
+select ok(
+  has_function_privilege('authenticated', 'public.create_group(text)', 'EXECUTE')
+    and has_function_privilege('authenticated', 'public.join_group_by_code(text)', 'EXECUTE')
+    and has_function_privilege('authenticated', 'public.get_group_invite_code(uuid)', 'EXECUTE')
+    and has_function_privilege(
+      'authenticated',
+      'public.transfer_group_leadership(uuid,uuid)',
+      'EXECUTE'
+    ),
+  'authenticated can execute the hardened group RPCs'
+);
+
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.feedback_image_path_matches_user(uuid,text)',
+    'EXECUTE'
+  )
+    and has_function_privilege(
+      'authenticated',
+      'public.is_safe_push_endpoint(text)',
+      'EXECUTE'
+    )
+    and has_function_privilege(
+      'service_role',
+      'public.feedback_image_path_matches_user(uuid,text)',
+      'EXECUTE'
+    )
+    and has_function_privilege(
+      'service_role',
+      'public.is_safe_push_endpoint(text)',
+      'EXECUTE'
+    ),
+  'authenticated can execute the validator helpers used by client RLS paths'
 );
 
 select is(
@@ -814,7 +910,7 @@ select is(
     $$insert into public.push_subscriptions (user_id, endpoint, keys)
       values (
         '00000000-0000-0000-0000-000000000001',
-        'test-endpoint-a',
+        'https://fcm.googleapis.com/fcm/send/test-endpoint-a',
         '{"p256dh":"first","auth":"first"}'::jsonb
       )
       on conflict (endpoint) do update
@@ -831,7 +927,7 @@ select is(
     $$insert into public.push_subscriptions (user_id, endpoint, keys)
       values (
         '00000000-0000-0000-0000-000000000001',
-        'test-endpoint-a',
+        'https://fcm.googleapis.com/fcm/send/test-endpoint-a',
         '{"p256dh":"second","auth":"second"}'::jsonb
       )
       on conflict (endpoint) do update
@@ -847,10 +943,23 @@ select is(
   tests.capture_sqlstate(
     $$update public.push_subscriptions
       set created_at = now() - interval '1 day'
-      where endpoint = 'test-endpoint-a'$$
+      where endpoint = 'https://fcm.googleapis.com/fcm/send/test-endpoint-a'$$
   ),
   '42501',
   'a client cannot rewrite protected push subscription metadata'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.push_subscriptions (user_id, endpoint, keys)
+      values (
+        '00000000-0000-0000-0000-000000000001',
+        'https://localhost/push',
+        '{"p256dh":"bad","auth":"bad"}'::jsonb
+      )$$
+  ),
+  '42501',
+  'a localhost push endpoint is rejected for authenticated inserts'
 );
 
 reset role;
@@ -871,7 +980,7 @@ select is(
     $$insert into public.push_subscriptions (user_id, endpoint, keys)
       values (
         '00000000-0000-0000-0000-000000000002',
-        'test-endpoint-a',
+        'https://fcm.googleapis.com/fcm/send/test-endpoint-a',
         '{"p256dh":"other","auth":"other"}'::jsonb
       )
       on conflict (endpoint) do update
@@ -889,7 +998,7 @@ select is(
   (
     select user_id
     from public.push_subscriptions
-    where endpoint = 'test-endpoint-a'
+    where endpoint = 'https://fcm.googleapis.com/fcm/send/test-endpoint-a'
   ),
   '00000000-0000-0000-0000-000000000001'::uuid,
   'the subscription remains owned by the original user'
@@ -899,10 +1008,850 @@ select is(
   (
     select keys ->> 'p256dh'
     from public.push_subscriptions
-    where endpoint = 'test-endpoint-a'
+    where endpoint = 'https://fcm.googleapis.com/fcm/send/test-endpoint-a'
   ),
   'second',
   'the owned subscription upsert persisted the latest keys once'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.groups', 'code', 'SELECT'),
+  false,
+  'authenticated cannot read groups.code directly'
+);
+
+select ok(
+  has_column_privilege('authenticated', 'public.groups', 'name', 'SELECT')
+    and has_column_privilege('authenticated', 'public.groups', 'created_at', 'SELECT'),
+  'authenticated keeps direct access to the non-sensitive group columns'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  (
+    select count(*)
+    from public.groups
+    where id = '10000000-0000-0000-0000-000000000001'
+  ),
+  1::bigint,
+  'an existing group member can still read their group row'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select code from public.groups
+      where id = '10000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'direct groups.code reads are denied even to members'
+);
+
+select set_config(
+  'tests.rpc_group_id',
+  (
+    select id::text
+    from public.create_group('RPC Group Alpha')
+  ),
+  true
+);
+
+reset role;
+
+select ok(
+  current_setting('tests.rpc_group_id', true) is not null,
+  'create_group returned a persisted group id'
+);
+
+select is(
+  (
+    select count(*)
+    from public.group_members
+    where group_id = current_setting('tests.rpc_group_id')::uuid
+      and user_id = '00000000-0000-0000-0000-000000000001'
+  ),
+  1::bigint,
+  'create_group atomically adds the creator as a member'
+);
+
+select ok(
+  (
+    select code ~ '^[A-Z0-9]{6}$'
+    from public.groups
+    where id = current_setting('tests.rpc_group_id')::uuid
+  ),
+  'create_group generated a canonical six-character invite code'
+);
+
+select set_config(
+  'tests.rpc_group_code',
+  public.get_group_invite_code(current_setting('tests.rpc_group_id')::uuid),
+  true
+);
+
+select ok(
+  current_setting('tests.rpc_group_code') ~ '^[A-Z0-9]{6}$',
+  'the current leader can fetch the invite code through the leader-only RPC'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000003","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000003',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  (
+    select count(*)
+    from public.groups
+    where id = '10000000-0000-0000-0000-000000000001'
+  ),
+  0::bigint,
+  'a nonmember cannot read group rows'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.group_members (group_id, user_id)
+      values (
+        '10000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000003'
+      )$$
+  ),
+  '42501',
+  'direct group membership inserts are denied'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.join_group_by_code('BAD!')$$
+  ),
+  '22023',
+  'an invalid join code format is rejected'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.join_group_by_code('ZZZZZZ')$$
+  ),
+  '22023',
+  'a well-formed but nonexistent join code returns the same generic error'
+);
+
+reset role;
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.join_group_by_code(
+      current_setting('tests.rpc_group_code')
+    )$$
+  ),
+  null::text,
+  'a valid join_group_by_code call succeeds'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.join_group_by_code(
+      current_setting('tests.rpc_group_code')
+    )$$
+  ),
+  null::text,
+  'replaying join_group_by_code is idempotent for an existing member'
+);
+
+select is(
+  (
+    select count(*)
+    from public.group_members
+    where group_id = current_setting('tests.rpc_group_id')::uuid
+      and user_id = '00000000-0000-0000-0000-000000000002'
+  ),
+  1::bigint,
+  'the joined member still has exactly one membership row after replay'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_catalog.pg_constraint as c
+    where c.conrelid = 'public.group_members'::regclass
+      and c.contype = 'u'
+      and c.conkey = array[
+        (
+          select a.attnum
+          from pg_catalog.pg_attribute as a
+          where a.attrelid = 'public.group_members'::regclass
+            and a.attname = 'group_id'
+        ),
+        (
+          select a.attnum
+          from pg_catalog.pg_attribute as a
+          where a.attrelid = 'public.group_members'::regclass
+            and a.attname = 'user_id'
+        )
+      ]::smallint[]
+  ),
+  'group membership uniqueness is enforced by UNIQUE(group_id, user_id)'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.get_group_invite_code(
+      current_setting('tests.rpc_group_id')::uuid
+    )$$
+  ),
+  '42501',
+  'a nonleader member cannot fetch the invite code'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.transfer_group_leadership(
+      current_setting('tests.rpc_group_id')::uuid,
+      '00000000-0000-0000-0000-000000000001'
+    )$$
+  ),
+  '42501',
+  'a nonleader cannot transfer group leadership'
+);
+
+reset role;
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$update public.group_members
+      set user_id = '00000000-0000-0000-0000-000000000003'
+      where group_id = current_setting('tests.rpc_group_id')::uuid
+        and user_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'group membership identity updates are denied'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.transfer_group_leadership(
+      current_setting('tests.rpc_group_id')::uuid,
+      '00000000-0000-0000-0000-000000000002'
+    )$$
+  ),
+  null::text,
+  'the current leader can transfer leadership to an existing member'
+);
+
+reset role;
+
+select is(
+  (
+    select leader_id
+    from public.groups
+    where id = current_setting('tests.rpc_group_id')::uuid
+  ),
+  '00000000-0000-0000-0000-000000000002'::uuid,
+  'leadership transfer persisted on the group row'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.get_group_invite_code(
+      current_setting('tests.rpc_group_id')::uuid
+    )$$
+  ),
+  '42501',
+  'the former leader loses invite-code access after transfer'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$delete from public.group_members
+      where group_id = current_setting('tests.rpc_group_id')::uuid
+        and user_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  null::text,
+  'the former leader can leave the group through the normal self-delete path'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.group_members
+    where group_id = current_setting('tests.rpc_group_id')::uuid
+      and user_id = '00000000-0000-0000-0000-000000000001'
+  ),
+  0::bigint,
+  'the former leader membership row is removed after leaving'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select ok(
+  public.get_group_invite_code(current_setting('tests.rpc_group_id')::uuid)
+    = current_setting('tests.rpc_group_code'),
+  'the new leader can fetch the same invite code after transfer'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$delete from public.groups
+      where id = current_setting('tests.rpc_group_id')::uuid$$
+  ),
+  null::text,
+  'the new leader can delete the group through the normal delete path'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.groups
+    where id = current_setting('tests.rpc_group_id')::uuid
+  ),
+  0::bigint,
+  'the group row is removed after leader deletion'
+);
+
+select is(
+  (
+    select count(*)
+    from public.group_members
+    where group_id = current_setting('tests.rpc_group_id')::uuid
+  ),
+  0::bigint,
+  'deleting the group cascades away the remaining membership rows'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select ok(
+  has_column_privilege('authenticated', 'public.feedbacks', 'images', 'SELECT')
+    and not has_column_privilege('authenticated', 'public.feedbacks', 'images', 'UPDATE')
+    and not has_column_privilege(
+      'authenticated',
+      'public.feedback_replies',
+      'images',
+      'UPDATE'
+    ),
+  'legacy feedback image arrays remain readable but not client-writable'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$update public.feedbacks
+      set images = array['https://example.invalid/unsafe.png']
+      where id = '20000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'direct feedback image URL array updates are denied'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.feedback_replies (
+        feedback_id,
+        user_id,
+        content,
+        images
+      )
+      values (
+        '20000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000002',
+        'unsafe reply',
+        array['https://example.invalid/unsafe.png']
+      )$$
+  ),
+  '42501',
+  'direct reply image URL injection is denied at insert time'
+);
+
+reset role;
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.feedback_images (
+        user_id,
+        bucket_id,
+        object_path,
+        feedback_id
+      )
+      values (
+        '00000000-0000-0000-0000-000000000001',
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000001/40000000-0000-0000-0000-000000000001.png',
+        '20000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  null::text,
+  'a feedback author can attach canonical image metadata to their own feedback'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.feedback_images (
+        user_id,
+        bucket_id,
+        object_path,
+        reply_id
+      )
+      values (
+        '00000000-0000-0000-0000-000000000001',
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000001/40000000-0000-0000-0000-000000000002.webp',
+        '30000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  null::text,
+  'a reply author can attach canonical image metadata to their own reply'
+);
+
+select ok(
+  tests.capture_sqlstate(
+    $$insert into public.feedback_images (
+        user_id,
+        bucket_id,
+        object_path,
+        feedback_id
+      )
+      values (
+        '00000000-0000-0000-0000-000000000001',
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000002/40000000-0000-0000-0000-000000000003.png',
+        '20000000-0000-0000-0000-000000000001'
+      )$$
+  ) in ('42501', '23514'),
+  'feedback image metadata must use the canonical owner namespace'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into storage.objects (bucket_id, name, owner_id)
+      values (
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000001/40000000-0000-0000-0000-000000000001.png',
+        '00000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  null::text,
+  'the object owner can upload a canonical feedback image object'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into storage.objects (bucket_id, name, owner_id)
+      values (
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000001/40000000-0000-0000-0000-000000000002.webp',
+        '00000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  null::text,
+  'the object owner can upload a canonical feedback reply image object'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into storage.objects (bucket_id, name, owner_id)
+      values (
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000002/40000000-0000-0000-0000-000000000004.png',
+        '00000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  '42501',
+  'storage uploads reject a namespace that does not match the owner'
+);
+
+reset role;
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.feedback_images (
+        user_id,
+        bucket_id,
+        object_path,
+        feedback_id
+      )
+      values (
+        '00000000-0000-0000-0000-000000000002',
+        'feedback-uploads',
+        '00000000-0000-0000-0000-000000000002/40000000-0000-0000-0000-000000000005.png',
+        '20000000-0000-0000-0000-000000000001'
+      )$$
+  ),
+  '42501',
+  'another user cannot attach image metadata to someone else''s feedback'
+);
+
+select is(
+  (
+    select count(*)
+    from public.feedback_images
+  ),
+  2::bigint,
+  'authenticated users can read attachment metadata for authenticated-visible feedback'
+);
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'feedback-uploads'
+  ),
+  2::bigint,
+  'authenticated users can read referenced private feedback upload objects'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$delete from storage.objects
+      where bucket_id = 'feedback-uploads'
+        and name = '00000000-0000-0000-0000-000000000001/40000000-0000-0000-0000-000000000001.png'$$
+  ),
+  '42501',
+  'a nonowner cannot delete another user''s feedback upload object'
+);
+
+reset role;
+
+select ok(
+  (
+    select not public
+      and file_size_limit = 5242880
+      and allowed_mime_types = array[
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif'
+      ]::text[]
+    from storage.buckets
+    where id = 'feedback-uploads'
+  ),
+  'the feedback upload bucket is private and restricted to the approved image MIME types'
+);
+
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.claim_push_notification_event(uuid,uuid,text,integer)',
+    'EXECUTE'
+  )
+    and has_function_privilege(
+      'service_role',
+      'public.complete_push_notification_event(uuid,text)',
+      'EXECUTE'
+    )
+    and not has_function_privilege(
+      'authenticated',
+      'public.claim_push_notification_event(uuid,uuid,text,integer)',
+      'EXECUTE'
+    )
+    and not has_function_privilege(
+      'authenticated',
+      'public.complete_push_notification_event(uuid,text)',
+      'EXECUTE'
+    ),
+  'only the service role can execute the push event state RPCs'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )$$
+  ),
+  '42501',
+  'authenticated callers cannot claim push notification events'
+);
+
+reset role;
+
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+select tests.set_auth_context(null, 'anon');
+set local role anon;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000010',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )$$
+  ),
+  '42501',
+  'anon callers cannot claim push notification events'
+);
+
+reset role;
+
+select set_config('request.jwt.claims', '{}'::text, true);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000011',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )$$
+  ),
+  '42501',
+  'owner-context calls without a service-role JWT are rejected'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.complete_push_notification_event(
+      '50000000-0000-0000-0000-000000000001',
+      'delivered'
+    )$$
+  ),
+  '42501',
+  'owner-context calls without a service-role JWT cannot complete push events'
+);
+
+reset role;
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000004","role":"service_role"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000004',
+  'service_role'
+);
+set local role service_role;
+
+select is(
+  (
+    select status
+    from public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )
+  ),
+  'claimed',
+  'the first unseen push event is claimed'
+);
+
+select is(
+  (
+    select status
+    from public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )
+  ),
+  'duplicate',
+  'replaying the same push event id is treated as a duplicate'
+);
+
+select is(
+  (
+    select status
+    from public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )
+  ),
+  'cooldown',
+  'a second unseen event inside the cooldown window is suppressed'
+);
+
+reset role;
+
+select ok(
+  (
+    select completed_at is not null
+      and outcome = 'suppressed_cooldown'
+    from private.push_notification_events
+    where event_id = '50000000-0000-0000-0000-000000000002'
+  ),
+  'cooldown-suppressed events are recorded immediately with a completion outcome'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-0000-0000-000000000004","role":"service_role"}',
+  true
+);
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000004',
+  'service_role'
+);
+set local role service_role;
+
+select is(
+  (
+    select status
+    from public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000001',
+      'profile_status_studying',
+      60
+    )
+  ),
+  'duplicate',
+  'replaying a suppressed event id stays duplicate forever'
+);
+
+select is(
+  (
+    select status
+    from public.claim_push_notification_event(
+      '50000000-0000-0000-0000-000000000003',
+      '00000000-0000-0000-0000-000000000001',
+      'different_event_kind',
+      60
+    )
+  ),
+  'claimed',
+  'the cooldown lock is scoped per user and event kind'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.complete_push_notification_event(
+      '50000000-0000-0000-0000-000000000001',
+      'delivered'
+    )$$
+  ),
+  null::text,
+  'the service role can mark a claimed push event as delivered'
+);
+
+reset role;
+
+select ok(
+  (
+    select completed_at is not null
+      and outcome = 'delivered'
+    from private.push_notification_events
+    where event_id = '50000000-0000-0000-0000-000000000001'
+  ),
+  'completing a push event persists the outcome and completion timestamp'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.complete_push_notification_event(
+      '50000000-0000-0000-0000-000000000003',
+      'unsupported_outcome'
+    )$$
+  ),
+  '22023',
+  'push event completion rejects unsupported outcomes'
 );
 
 select * from finish();

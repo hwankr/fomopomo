@@ -126,6 +126,34 @@ describe('pushSubscriptionSync', () => {
     expect(persistSubscription).toHaveBeenCalledWith(existingSubscription);
   });
 
+  it('does not rotate a matching existing subscription when persistence fails', async () => {
+    const vapidKey = createVapidKey(7);
+    const existingSubscription = createSubscription({
+      endpoint: 'https://push.example/existing-endpoint',
+      key: vapidKey,
+    });
+    const { registration, subscribe } = createRegistration(existingSubscription);
+    const persistSubscription = vi.fn(async () => {
+      throw new Error('persist failed');
+    });
+    const removeStoredSubscription = vi.fn(async () => undefined);
+
+    const result = await syncPushSubscription({
+      getCurrentUserId: async () => 'user-persist-failure',
+      log: vi.fn(),
+      persistSubscription,
+      registration,
+      removeStoredSubscription,
+      vapidPublicKey: bytesToUrlSafeBase64(vapidKey),
+    });
+
+    expect(result.status).toBe('persist_failed');
+    expect(removeStoredSubscription).not.toHaveBeenCalled();
+    expect(existingSubscription.unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(persistSubscription).toHaveBeenCalledTimes(1);
+  });
+
   it('cleans up, unsubscribes, resubscribes, and persists exactly once when the VAPID key changes', async () => {
     const oldKey = createVapidKey(9);
     const newKey = createVapidKey(42);

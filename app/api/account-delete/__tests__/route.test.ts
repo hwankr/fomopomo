@@ -3,15 +3,21 @@ import { NextRequest } from 'next/server';
 
 type OwnedGroup = { id: string; name: string };
 type MemberRow = { group_id: string; user_id: string };
-type ImageRow = { images?: string[] | null };
+type StorageObject = {
+  metadata?: Record<string, unknown> | null;
+  name: string;
+  owner?: string | null;
+  owner_id?: string | null;
+};
 
 type MockClientOverrides = {
   ownedGroups?: OwnedGroup[];
   memberRows?: MemberRow[];
-  feedbackRows?: ImageRow[];
-  replyRows?: ImageRow[];
   profileDeleteError?: unknown;
   authGetUserError?: unknown;
+  storageListErrorAtCall?: number;
+  storagePages?: StorageObject[][];
+  storageRemoveErrorAtCall?: number;
 };
 
 function toBase64Url(value: string) {
@@ -33,12 +39,34 @@ function makeOpaqueServiceRoleKey() {
 }
 
 function createMockClient(overrides: MockClientOverrides = {}) {
+  let storageListCallCount = 0;
+  let storageRemoveCallCount = 0;
   const state = {
     deleteEqCalls: [] as Array<{ table: string; column: string; value: unknown }>,
     deleteInCalls: [] as Array<{ table: string; column: string; values: unknown[] }>,
     profileDeleteCalls: [] as Array<{ table: string; column: string; value: unknown }>,
     deleteUserMock: vi.fn(async () => ({ error: null })),
-    storageRemoveMock: vi.fn(async () => ({ error: null })),
+    storageListCalls: [] as Array<{ path?: string; options?: Record<string, unknown> }>,
+    storageListMock: vi.fn(async (path?: string, options?: Record<string, unknown>) => {
+      storageListCallCount += 1;
+      state.storageListCalls.push({ path, options });
+      if (overrides.storageListErrorAtCall === storageListCallCount) {
+        return { data: null, error: { message: 'list failed' } };
+      }
+
+      return {
+        data: overrides.storagePages?.[storageListCallCount - 1] ?? [],
+        error: null,
+      };
+    }),
+    storageRemoveMock: vi.fn(async (paths: string[]) => {
+      storageRemoveCallCount += 1;
+      if (overrides.storageRemoveErrorAtCall === storageRemoveCallCount) {
+        return { data: null, error: { message: 'remove failed' } };
+      }
+
+      return { data: paths, error: null };
+    }),
   };
 
   const client = {
@@ -67,12 +95,6 @@ function createMockClient(overrides: MockClientOverrides = {}) {
           if (mode === 'select') {
             if (table === 'groups') {
               return { data: overrides.ownedGroups ?? [], error: null };
-            }
-            if (table === 'feedbacks') {
-              return { data: overrides.feedbackRows ?? [], error: null };
-            }
-            if (table === 'feedback_replies') {
-              return { data: overrides.replyRows ?? [], error: null };
             }
             throw new Error(`Unexpected select().eq() for table ${table}`);
           }
@@ -103,6 +125,7 @@ function createMockClient(overrides: MockClientOverrides = {}) {
     }),
     storage: {
       from: vi.fn(() => ({
+        list: state.storageListMock,
         remove: state.storageRemoveMock,
       })),
     },
@@ -282,8 +305,16 @@ describe('account-delete route', () => {
     expect(createClientMock).not.toHaveBeenCalled();
   });
 
-  it('returns 200 and deletes the profile before deleting the auth user', async () => {
-    const { client, state } = createMockClient();
+  it('returns 200, skips unverified objects, and deletes pinned tasks before deleting the auth user', async () => {
+    const { client, state } = createMockClient({
+      storagePages: [[
+        { name: '123e4567-e89b-42d3-a456-426614174000.png', owner: 'user-1' },
+        { name: 'legacy-upload.png', owner_id: 'user-1' },
+        { name: 'legacy-upload.png', owner: 'user-1' },
+        { name: 'other-user.png', owner: 'user-2' },
+        { name: '..%2Fescape.png', owner: 'user-1' },
+      ]],
+    });
     const { POST } = await loadPostHandler(client);
 
     const response = await POST(
@@ -302,16 +333,40 @@ describe('account-delete route', () => {
       { table: 'profiles', column: 'id', value: 'user-1' },
     ]);
     expect(state.deleteUserMock).toHaveBeenCalledWith('user-1');
+    expect(state.storageListCalls).toEqual([
+      {
+        path: 'user-1',
+        options: {
+          limit: 100,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' },
+        },
+      },
+    ]);
+    expect(state.storageRemoveMock).toHaveBeenCalledWith([
+      'user-1/123e4567-e89b-42d3-a456-426614174000.png',
+      'user-1/legacy-upload.png',
+    ]);
     expect(
       state.deleteEqCalls.some(
         (call) => call.table === 'study_sessions' && call.column === 'user_id'
       )
     ).toBe(true);
+    expect(
+      state.deleteEqCalls.some(
+        (call) => call.table === 'pinned_tasks' && call.column === 'user_id'
+      )
+    ).toBe(true);
+    expect(
+      state.deleteEqCalls.some(
+        (call) => call.table === 'feedback_images' && call.column === 'user_id'
+      )
+    ).toBe(true);
   });
 
-  it('returns 500 when cleanup fails during the profile delete step', async () => {
-    const { client } = createMockClient({
-      profileDeleteError: { message: 'profile delete failed' },
+  it('returns 500 and stops before database cleanup when storage listing fails', async () => {
+    const { client, state } = createMockClient({
+      storageListErrorAtCall: 1,
     });
     const { POST } = await loadPostHandler(client);
 
@@ -326,7 +381,24 @@ describe('account-delete route', () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: 'Account delete failed',
+      error: 'Feedback storage cleanup failed',
+      retryable: true,
+      storageCleanup: {
+        counts: {
+          eligible: 0,
+          listed: 0,
+          pages: 0,
+          removeRequests: 0,
+          removed: 0,
+          skipped: 0,
+        },
+        ok: false,
+        retryable: true,
+        status: 'storage_list_failed',
+      },
     });
+    expect(state.deleteEqCalls).toEqual([]);
+    expect(state.profileDeleteCalls).toEqual([]);
+    expect(state.deleteUserMock).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,15 @@
 import {
   extractWebhookSecret,
+  isAllowedPushHost,
   isAuthorizedWebhook,
+  isJsonContentType,
+  isSafePushEndpoint,
+  isStudyStartTransition,
+  isValidProfileStatus,
+  isValidUuid,
+  MAX_WEBHOOK_BODY_BYTES,
+  parseContentLength,
+  parsePushWebhookPayload,
   resolveServiceApiKey,
   sanitizeError,
   sanitizeWebPushError,
@@ -139,4 +148,103 @@ Deno.test("shouldDeleteSubscription only matches stale status codes", () => {
   assert(shouldDeleteSubscription({ statusCode: 404 }));
   assert(shouldDeleteSubscription({ statusCode: 410 }));
   assertFalse(shouldDeleteSubscription({ statusCode: 500 }));
+});
+
+Deno.test("isJsonContentType accepts JSON with charset only", () => {
+  assert(isJsonContentType("application/json"));
+  assert(isJsonContentType("application/json; charset=utf-8"));
+  assertFalse(isJsonContentType("text/plain"));
+  assertFalse(isJsonContentType(null));
+});
+
+Deno.test("parseContentLength validates integers within header format", () => {
+  assertEquals(parseContentLength("0"), 0);
+  assertEquals(
+    parseContentLength(`${MAX_WEBHOOK_BODY_BYTES}`),
+    MAX_WEBHOOK_BODY_BYTES,
+  );
+  assertEquals(parseContentLength(null), null);
+  assertEquals(parseContentLength(""), null);
+  assertEquals(parseContentLength("12.5"), null);
+  assertEquals(parseContentLength("-1"), null);
+});
+
+Deno.test("parsePushWebhookPayload requires the exact database trigger shape", () => {
+  const validPayload = parsePushWebhookPayload({
+    event_id: "11111111-1111-4111-8111-111111111111",
+    record: {
+      id: "22222222-2222-4222-8222-222222222222",
+      status: "studying",
+    },
+    old_record: {
+      status: "online",
+    },
+  });
+
+  assert(validPayload);
+  assert(isStudyStartTransition(validPayload));
+  assertEquals(validPayload.record.status, "studying");
+  assertEquals(
+    parsePushWebhookPayload({
+      event_id: "11111111-1111-4111-8111-111111111111",
+      record: {
+        id: "22222222-2222-4222-8222-222222222222",
+        status: "studying",
+        nickname: "attacker",
+      },
+      old_record: {
+        status: "online",
+      },
+    }),
+    null,
+  );
+  assertEquals(
+    parsePushWebhookPayload({
+      event_id: "not-a-uuid",
+      record: {
+        id: "22222222-2222-4222-8222-222222222222",
+        status: "studying",
+      },
+      old_record: {
+        status: "online",
+      },
+    }),
+    null,
+  );
+});
+
+Deno.test("status and uuid validators accept only supported values", () => {
+  assert(isValidUuid("11111111-1111-4111-8111-111111111111"));
+  assertFalse(isValidUuid("11111111"));
+  assert(isValidProfileStatus("online"));
+  assert(isValidProfileStatus("offline"));
+  assert(isValidProfileStatus("studying"));
+  assert(isValidProfileStatus("paused"));
+  assertFalse(isValidProfileStatus("busy"));
+});
+
+Deno.test("isSafePushEndpoint only allows standard browser push providers", () => {
+  assert(isAllowedPushHost("fcm.googleapis.com"));
+  assert(isAllowedPushHost("updates.push.services.mozilla.com"));
+  assert(isAllowedPushHost("web.push.apple.com"));
+  assert(isAllowedPushHost("db5p.notify.windows.com"));
+
+  assert(isSafePushEndpoint("https://fcm.googleapis.com/fcm/send/token"));
+  assert(
+    isSafePushEndpoint(
+      "https://updates.push.services.mozilla.com/wpush/v2/token",
+    ),
+  );
+  assert(isSafePushEndpoint("https://web.push.apple.com/3/device/token"));
+  assert(isSafePushEndpoint("https://db5p.notify.windows.com/?token=abc"));
+
+  assertFalse(isSafePushEndpoint("http://fcm.googleapis.com/fcm/send/token"));
+  assertFalse(
+    isSafePushEndpoint("https://user:pass@fcm.googleapis.com/fcm/send/token"),
+  );
+  assertFalse(isSafePushEndpoint("https://localhost/push"));
+  assertFalse(isSafePushEndpoint("https://127.0.0.1/push"));
+  assertFalse(isSafePushEndpoint("https://[::1]/push"));
+  assertFalse(isSafePushEndpoint("https://192.168.0.15/push"));
+  assertFalse(isSafePushEndpoint("https://evil.example.com/push"));
 });

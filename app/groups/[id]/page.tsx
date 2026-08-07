@@ -30,7 +30,6 @@ interface Member {
 interface GroupDetail {
     id: string;
     name: string;
-    code: string;
     leader_id: string;
 }
 
@@ -47,12 +46,23 @@ type StudySessionChangeRow = {
     user_id: string | null;
 };
 
+const getInviteCode = (data: unknown) => {
+    if (typeof data === 'string') return data;
+    if (Array.isArray(data)) return getInviteCode(data[0]);
+    if (data && typeof data === 'object') {
+        const code = (data as Record<string, unknown>).code;
+        if (typeof code === 'string') return code;
+    }
+    return null;
+};
+
 export default function GroupDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
     const [group, setGroup] = useState<GroupDetail | null>(null);
     const [members, setMembers] = useState<Member[]>([]);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [inviteCode, setInviteCode] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [editingNickname, setEditingNickname] = useState(false);
     const [tempNickname, setTempNickname] = useState('');
@@ -83,12 +93,22 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             // 1. Fetch Group Details
             const { data: groupData, error: groupError } = await supabase
                 .from('groups')
-                .select('*')
+                .select('id, name, leader_id')
                 .eq('id', id)
                 .single();
 
             if (groupError) throw groupError;
             setGroup(groupData);
+
+            const inviteCodePromise = groupData.leader_id === user.id
+                ? supabase.rpc('get_group_invite_code', {
+                    p_group_id: id,
+                })
+                : null;
+
+            if (groupData.leader_id !== user.id) {
+                setInviteCode(null);
+            }
 
             // 2. Fetch Members
             const { data: membersData, error: membersError } = await supabase
@@ -147,6 +167,17 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     timeMap[item.user_id] = item.total_seconds;
                 });
                 setStudyTimes(timeMap);
+            }
+
+            if (inviteCodePromise) {
+                const { data: inviteCodeData, error: inviteCodeError } = await inviteCodePromise;
+
+                if (inviteCodeError) {
+                    console.error('Error fetching invite code:', inviteCodeError);
+                    setInviteCode(null);
+                } else {
+                    setInviteCode(getInviteCode(inviteCodeData));
+                }
             }
 
         } catch (error) {
@@ -277,8 +308,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     }, [id]);
 
     const copyCode = () => {
-        if (group?.code) {
-            navigator.clipboard.writeText(group.code);
+        if (inviteCode) {
+            navigator.clipboard.writeText(inviteCode);
             toast.success('코드가 클립보드에 복사되었습니다!');
         }
     };
@@ -464,10 +495,11 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                 {isLeader && (
                                     <div className="flex items-center gap-3 bg-gray-100 dark:bg-slate-700 px-4 py-2 rounded-xl">
                                         <span className="text-sm font-medium text-gray-500 dark:text-gray-300">코드:</span>
-                                        <code className="text-lg font-bold text-rose-500 font-mono tracking-wider">{group.code}</code>
+                                        <code className="text-lg font-bold text-rose-500 font-mono tracking-wider">{inviteCode ?? '코드 불러오기 실패'}</code>
                                         <button
                                             onClick={copyCode}
-                                            className="p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400"
+                                            disabled={!inviteCode}
+                                            className="p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                                             title="코드 복사"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">

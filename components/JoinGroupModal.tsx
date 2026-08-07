@@ -28,38 +28,20 @@ export default function JoinGroupModal({ isOpen, onClose, onJoined }: JoinGroupM
                 return;
             }
 
-            // 1. Find Group
-            const { data: group, error: findError } = await supabase
-                .from('groups')
-                .select('id, name')
-                .eq('code', code.trim().toUpperCase())
-                .single();
+            const { error: joinError } = await supabase
+                .rpc('join_group_by_code', {
+                    p_code: code.trim().toUpperCase(),
+                });
 
-            if (findError || !group) {
+            if (joinError) {
                 toast.error('그룹을 찾을 수 없습니다. 코드를 확인해주세요.');
                 return;
             }
 
-            // 2. Join Group
-            const { error: joinError } = await supabase
-                .from('group_members')
-                .insert({
-                    group_id: group.id,
-                    user_id: user.id,
-                });
-
-            if (joinError) {
-                if (joinError.code === '23505') { // Unique violation
-                    toast.error('이미 이 그룹의 멤버입니다.');
-                } else {
-                    throw joinError;
-                }
-            } else {
-                toast.success(`${group.name} 그룹에 참여했습니다!`);
-                setCode('');
-                onJoined();
-                onClose();
-            }
+            toast.success('그룹에 참여했습니다!');
+            setCode('');
+            onJoined();
+            onClose();
         } catch (error) {
             console.error('Error joining group:', error);
             toast.error('그룹 참여에 실패했습니다');

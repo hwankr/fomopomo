@@ -3,15 +3,21 @@ import { NextRequest } from 'next/server';
 
 type OwnedGroup = { id: string; name: string };
 type MemberRow = { group_id: string; user_id: string };
-type ImageRow = { images?: string[] | null };
+type StorageObject = {
+  metadata?: Record<string, unknown> | null;
+  name: string;
+  owner?: string | null;
+  owner_id?: string | null;
+};
 
 type MockClientOverrides = {
   ownedGroups?: OwnedGroup[];
   memberRows?: MemberRow[];
-  feedbackRows?: ImageRow[];
-  replyRows?: ImageRow[];
   profileUpdateError?: unknown;
   authGetUserError?: unknown;
+  storageListErrorAtCall?: number;
+  storagePages?: StorageObject[][];
+  storageRemoveErrorAtCall?: number;
 };
 
 function toBase64Url(value: string) {
@@ -33,6 +39,8 @@ function makeOpaqueServiceRoleKey() {
 }
 
 function createMockClient(overrides: MockClientOverrides = {}) {
+  let storageListCallCount = 0;
+  let storageRemoveCallCount = 0;
   const state = {
     deleteEqCalls: [] as Array<{ table: string; column: string; value: unknown }>,
     deleteInCalls: [] as Array<{ table: string; column: string; values: unknown[] }>,
@@ -43,7 +51,27 @@ function createMockClient(overrides: MockClientOverrides = {}) {
       payload: Record<string, unknown>;
     }>,
     deleteUserMock: vi.fn(async () => ({ error: null })),
-    storageRemoveMock: vi.fn(async () => ({ error: null })),
+    storageListCalls: [] as Array<{ path?: string; options?: Record<string, unknown> }>,
+    storageListMock: vi.fn(async (path?: string, options?: Record<string, unknown>) => {
+      storageListCallCount += 1;
+      state.storageListCalls.push({ path, options });
+      if (overrides.storageListErrorAtCall === storageListCallCount) {
+        return { data: null, error: { message: 'list failed' } };
+      }
+
+      return {
+        data: overrides.storagePages?.[storageListCallCount - 1] ?? [],
+        error: null,
+      };
+    }),
+    storageRemoveMock: vi.fn(async (paths: string[]) => {
+      storageRemoveCallCount += 1;
+      if (overrides.storageRemoveErrorAtCall === storageRemoveCallCount) {
+        return { data: null, error: { message: 'remove failed' } };
+      }
+
+      return { data: paths, error: null };
+    }),
   };
 
   const client = {
@@ -79,12 +107,6 @@ function createMockClient(overrides: MockClientOverrides = {}) {
             if (table === 'groups') {
               return { data: overrides.ownedGroups ?? [], error: null };
             }
-            if (table === 'feedbacks') {
-              return { data: overrides.feedbackRows ?? [], error: null };
-            }
-            if (table === 'feedback_replies') {
-              return { data: overrides.replyRows ?? [], error: null };
-            }
             throw new Error(`Unexpected select().eq() for table ${table}`);
           }
 
@@ -119,6 +141,7 @@ function createMockClient(overrides: MockClientOverrides = {}) {
     }),
     storage: {
       from: vi.fn(() => ({
+        list: state.storageListMock,
         remove: state.storageRemoveMock,
       })),
     },
@@ -297,8 +320,15 @@ describe('account-reset route', () => {
     expect(createClientMock).not.toHaveBeenCalled();
   });
 
-  it('returns 200 and resets the profile instead of deleting the auth user', async () => {
-    const { client, state } = createMockClient();
+  it('returns 200, skips unverified objects, and resets the profile instead of deleting the auth user', async () => {
+    const { client, state } = createMockClient({
+      storagePages: [[
+        { name: '123e4567-e89b-42d3-a456-426614174000.webp', owner: 'user-1' },
+        { name: 'legacy-photo.gif', owner_id: 'user-1' },
+        { name: 'other-user.png', owner: 'user-2' },
+        { name: 'nested\\\\path.png', owner: 'user-1' },
+      ]],
+    });
     const { POST } = await loadPostHandler(client);
 
     const response = await POST(
@@ -330,16 +360,43 @@ describe('account-reset route', () => {
       }),
     });
     expect(state.deleteUserMock).not.toHaveBeenCalled();
+    expect(state.storageListCalls).toEqual([
+      {
+        path: 'user-1',
+        options: {
+          limit: 100,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' },
+        },
+      },
+    ]);
+    expect(state.storageRemoveMock).toHaveBeenCalledWith([
+      'user-1/123e4567-e89b-42d3-a456-426614174000.webp',
+      'user-1/legacy-photo.gif',
+    ]);
     expect(
       state.deleteEqCalls.some(
         (call) => call.table === 'study_sessions' && call.column === 'user_id'
       )
     ).toBe(true);
+    expect(
+      state.deleteEqCalls.some(
+        (call) => call.table === 'pinned_tasks' && call.column === 'user_id'
+      )
+    ).toBe(true);
+    expect(
+      state.deleteEqCalls.some(
+        (call) => call.table === 'feedback_images' && call.column === 'user_id'
+      )
+    ).toBe(true);
   });
 
-  it('returns 500 when cleanup fails during the profile reset step', async () => {
-    const { client } = createMockClient({
-      profileUpdateError: { message: 'profile reset failed' },
+  it('returns 500 and stops before database cleanup when storage removal fails', async () => {
+    const { client, state } = createMockClient({
+      storagePages: [[
+        { name: '123e4567-e89b-42d3-a456-426614174000.webp', owner: 'user-1' },
+      ]],
+      storageRemoveErrorAtCall: 1,
     });
     const { POST } = await loadPostHandler(client);
 
@@ -354,7 +411,24 @@ describe('account-reset route', () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: 'Account reset failed',
+      error: 'Feedback storage cleanup failed',
+      retryable: true,
+      storageCleanup: {
+        counts: {
+          eligible: 1,
+          listed: 1,
+          pages: 1,
+          removeRequests: 1,
+          removed: 0,
+          skipped: 0,
+        },
+        ok: false,
+        retryable: true,
+        status: 'storage_remove_failed',
+      },
     });
+    expect(state.deleteEqCalls).toEqual([]);
+    expect(state.profileUpdateCalls).toEqual([]);
+    expect(state.deleteUserMock).not.toHaveBeenCalled();
   });
 });

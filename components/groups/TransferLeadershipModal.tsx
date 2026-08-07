@@ -74,9 +74,10 @@ export default function TransferLeadershipModal({
 
         try {
             const { error } = await supabase
-                .from('groups')
-                .update({ leader_id: selectedMemberId })
-                .eq('id', groupId);
+                .rpc('transfer_group_leadership', {
+                    p_group_id: groupId,
+                    p_new_leader_id: selectedMemberId,
+                });
 
             if (error) throw error;
 

@@ -1,14 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-
-type ImageRow = {
-  images?: string[] | null;
-};
+import { cleanupUserFeedbackStorage } from '@/lib/server/feedbackStorageCleanup';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const storageBucket = 'feedback-uploads';
-const publicMarker = `/storage/v1/object/public/${storageBucket}/`;
 
 const base64UrlToUtf8 = (value: string) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -84,20 +79,6 @@ const getAccessToken = (request: NextRequest) => {
   const authHeader = request.headers.get('authorization') || '';
   if (!authHeader.startsWith('Bearer ')) return null;
   return authHeader.slice('Bearer '.length).trim();
-};
-
-const extractStoragePaths = (rows: ImageRow[]) => {
-  const paths = rows
-    .flatMap((row) => (Array.isArray(row.images) ? row.images : []))
-    .filter((url): url is string => typeof url === 'string' && url.length > 0)
-    .map((url) => {
-      const index = url.indexOf(publicMarker);
-      if (index === -1) return null;
-      return url.slice(index + publicMarker.length);
-    })
-    .filter((path): path is string => !!path);
-
-  return Array.from(new Set(paths));
 };
 
 export async function POST(request: NextRequest) {
@@ -258,52 +239,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { data: feedbackRows, error: feedbackImagesError } = await supabaseAdmin
-    .from('feedbacks')
-    .select('images')
-    .eq('user_id', user.id);
+  const storageCleanup = await cleanupUserFeedbackStorage({
+    storage: supabaseAdmin.storage,
+    userId: user.id,
+  });
 
-  if (feedbackImagesError) {
-    console.error('Failed to fetch feedback images:', feedbackImagesError);
+  if (!storageCleanup.ok) {
+    console.error('Feedback storage cleanup failed', {
+      retryable: storageCleanup.retryable,
+      status: storageCleanup.status,
+    });
     return NextResponse.json(
-      { error: 'Failed to fetch feedback images' },
+      {
+        error: 'Feedback storage cleanup failed',
+        retryable: storageCleanup.retryable,
+        storageCleanup,
+      },
       { status: 500 }
     );
-  }
-
-  const { data: replyRows, error: replyImagesError } = await supabaseAdmin
-    .from('feedback_replies')
-    .select('images')
-    .eq('user_id', user.id);
-
-  if (replyImagesError) {
-    console.error('Failed to fetch reply images:', replyImagesError);
-    return NextResponse.json(
-      { error: 'Failed to fetch reply images' },
-      { status: 500 }
-    );
-  }
-
-  const imagePaths = extractStoragePaths([
-    ...(feedbackRows ?? []),
-    ...(replyRows ?? []),
-  ]);
-
-  if (imagePaths.length > 0) {
-    const chunkSize = 100;
-    for (let i = 0; i < imagePaths.length; i += chunkSize) {
-      const chunk = imagePaths.slice(i, i + chunkSize);
-      const { error: removeError } = await supabaseAdmin.storage
-        .from(storageBucket)
-        .remove(chunk);
-      if (removeError) {
-        console.error('Failed to delete feedback images:', removeError);
-        return NextResponse.json(
-          { error: 'Failed to delete feedback images' },
-          { status: 500 }
-        );
-      }
-    }
   }
 
   try {
@@ -316,6 +269,7 @@ export async function POST(request: NextRequest) {
     };
 
     await deleteByUserId('feedback_likes');
+    await deleteByUserId('feedback_images');
     await deleteByUserId('feedback_replies');
     await deleteByUserId('feedbacks');
 
@@ -328,6 +282,7 @@ export async function POST(request: NextRequest) {
     await deleteByUserId('study_sessions');
 
     await deleteByUserId('tasks');
+    await deleteByUserId('pinned_tasks');
     await deleteByUserId('weekly_plans');
     await deleteByUserId('monthly_plans');
 

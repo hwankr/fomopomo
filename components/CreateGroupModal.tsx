@@ -16,10 +16,6 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
 
     if (!isOpen) return null;
 
-    const generateCode = () => {
-        return Math.random().toString(36).substring(2, 8).toUpperCase();
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim()) return;
@@ -32,34 +28,12 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
                 return;
             }
 
-            const code = generateCode();
-
-            // 1. Create Group
-            const { data: groupData, error: groupError } = await supabase
-                .from('groups')
-                .insert({
-                    name: name.trim(),
-                    code: code,
-                    leader_id: user.id,
-                })
-                .select()
-                .single();
-
-            if (groupError) throw groupError;
-
-            // 2. Add Leader as Member
-            const { error: memberError } = await supabase
-                .from('group_members')
-                .insert({
-                    group_id: groupData.id,
-                    user_id: user.id,
+            const { error: groupError } = await supabase
+                .rpc('create_group', {
+                    p_name: name.trim(),
                 });
 
-            if (memberError) {
-                // Rollback (delete group) if member addition fails
-                await supabase.from('groups').delete().eq('id', groupData.id);
-                throw memberError;
-            }
+            if (groupError) throw groupError;
 
             toast.success('그룹이 생성되었습니다!');
             setName('');
