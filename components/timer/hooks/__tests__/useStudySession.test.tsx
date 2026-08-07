@@ -182,4 +182,91 @@ describe('useStudySession saveRecord', () => {
     expect(insertMock).not.toHaveBeenCalled();
     expect(result.current.intervals).toEqual([{ start: end - 5_000, end }]);
   });
+
+  describe('outbox recovery on mount', () => {
+    const selectLimitMock = vi.fn();
+
+    const mockStudySessionsWithSelect = () => {
+      supabaseMock.from.mockImplementation((table: string) => {
+        if (table === 'study_sessions') {
+          return {
+            insert: insertMock,
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({ limit: selectLimitMock })),
+            })),
+          };
+        }
+        return {
+          update: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })),
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: null }) })),
+          })),
+        };
+      });
+    };
+
+    const seedDraft = (sessionId: string, userId: string, duration = 120) => {
+      window.localStorage.setItem(
+        PENDING_SESSIONS_KEY,
+        JSON.stringify({
+          [sessionId]: {
+            sessionId,
+            rows: [
+              {
+                mode: 'stopwatch',
+                duration,
+                user_id: userId,
+                task: null,
+                task_id: null,
+                created_at: new Date().toISOString(),
+                group_id: sessionId,
+              },
+            ],
+            failedAt: Date.now() - 60_000,
+          },
+        })
+      );
+    };
+
+    it('re-inserts an orphaned draft for the current user and clears it', async () => {
+      mockStudySessionsWithSelect();
+      selectLimitMock.mockResolvedValue({ data: [], error: null });
+      seedDraft('draft-recover-1', 'user-1');
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(insertMock).toHaveBeenCalledTimes(1);
+      const insertedRows = insertMock.mock.calls[0][0] as OutboxRow[];
+      expect(insertedRows[0].group_id).toBe('draft-recover-1');
+      expect(readOutbox()).toEqual({});
+      expect(onRecordSaved).toHaveBeenCalledTimes(1);
+      expect(toastMock.success).toHaveBeenCalledWith('보관 중이던 2분 기록을 저장했습니다!');
+    });
+
+    it('drops a draft without re-inserting when its rows already exist on the server', async () => {
+      mockStudySessionsWithSelect();
+      selectLimitMock.mockResolvedValue({ data: [{ id: 1 }], error: null });
+      seedDraft('draft-already-saved', 'user-1');
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(insertMock).not.toHaveBeenCalled();
+      expect(readOutbox()).toEqual({});
+      expect(onRecordSaved).not.toHaveBeenCalled();
+    });
+
+    it('leaves another account\'s draft untouched', async () => {
+      mockStudySessionsWithSelect();
+      selectLimitMock.mockResolvedValue({ data: [], error: null });
+      seedDraft('draft-foreign', 'user-2');
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(insertMock).not.toHaveBeenCalled();
+      expect(Object.keys(readOutbox())).toEqual(['draft-foreign']);
+    });
+  });
 });

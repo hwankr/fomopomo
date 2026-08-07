@@ -108,6 +108,32 @@ const removePendingSession = (sessionId: string) => {
   writePendingSessions(drafts);
 };
 
+// Drops every draft that belongs to `userId`. Called after an account reset or
+// deletion so mount-time recovery cannot re-insert data the server just erased.
+export const clearPendingSessionsForUser = (userId: string) => {
+  const drafts = readPendingSessions();
+  let changed = false;
+  for (const [sessionId, draft] of Object.entries(drafts)) {
+    if (draft?.rows?.some((row) => row.user_id === userId)) {
+      delete drafts[sessionId];
+      changed = true;
+    }
+  }
+  if (changed) writePendingSessions(drafts);
+};
+
+// Session ids currently being recovered, shared across hook instances so a
+// StrictMode double-mount cannot insert the same draft twice.
+const recoveringSessionIds = new Set<string>();
+
+const formatKoreanDuration = (totalSeconds: number) => {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}초`;
+  if (seconds === 0) return `${minutes}분`;
+  return `${minutes}분 ${seconds}초`;
+};
+
 interface UseStudySessionProps {
   isLoggedIn: boolean;
   onRecordSaved: () => void;
@@ -182,14 +208,6 @@ export const useStudySession = ({
 
       // Set ref immediately (synchronous) to block rapid duplicate calls
       isSavingRef.current = true;
-
-      const formatDurationForToast = (totalSeconds: number) => {
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-        if (minutes === 0) return `${seconds}초`;
-        if (seconds === 0) return `${minutes}분`;
-        return `${minutes}분 ${seconds}초`;
-      };
 
       // Reuse the pending session id on retries so the outbox draft and the
       // rows' group_id stay stable until the save is confirmed.
@@ -271,7 +289,7 @@ export const useStudySession = ({
 
         // Calculate actual saved duration from rowsToInsert
         const actualSavedDuration = rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
-        toast.success(`${formatDurationForToast(actualSavedDuration)} 기록 저장 완료!`, { id: toastId });
+        toast.success(`${formatKoreanDuration(actualSavedDuration)} 기록 저장 완료!`, { id: toastId });
         onRecordSaved();
         return 'saved';
       } catch (error) {
@@ -287,6 +305,73 @@ export const useStudySession = ({
     },
     [onRecordSaved, intervals, selectedTaskId, isLoggedIn]
   );
+
+  // Recover drafts orphaned by a reload: a save that failed and never got its
+  // in-page retry would otherwise sit in the outbox forever. group_id doubles
+  // as the draft id, so a row already on the server proves the original insert
+  // landed and the draft is simply dropped instead of duplicated.
+  const onRecordSavedRef = useRef(onRecordSaved);
+  onRecordSavedRef.current = onRecordSaved;
+
+  useEffect(() => {
+    if (!isLoggedIn || typeof window === 'undefined') return;
+    let cancelled = false;
+
+    const recoverOrphanedDrafts = async () => {
+      const drafts = readPendingSessions();
+      if (Object.keys(drafts).length === 0) return;
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      let recoveredSeconds = 0;
+      for (const [sessionId, draft] of Object.entries(drafts)) {
+        // Skip drafts owned by an in-progress retry or another recovery pass.
+        if (sessionId === pendingSessionIdRef.current || recoveringSessionIds.has(sessionId)) {
+          continue;
+        }
+        const rows = draft?.rows ?? [];
+        if (rows.length === 0) {
+          removePendingSession(sessionId);
+          continue;
+        }
+        // Drafts from another account stay put until that account signs in.
+        if (rows.some((row) => row.user_id !== user.id)) continue;
+
+        recoveringSessionIds.add(sessionId);
+        try {
+          const { data: existing, error: checkError } = await supabase
+            .from('study_sessions')
+            .select('id')
+            .eq('group_id', sessionId)
+            .limit(1);
+          if (checkError) throw checkError;
+
+          if (!existing || existing.length === 0) {
+            const { error } = await supabase.from('study_sessions').insert(rows);
+            if (error) throw error;
+            recoveredSeconds += rows.reduce((sum, row) => sum + row.duration, 0);
+          }
+          removePendingSession(sessionId);
+        } catch (e) {
+          // Keep the draft for the next mount; recovery must never lose it.
+          console.error('Failed to recover pending session draft', e);
+        } finally {
+          recoveringSessionIds.delete(sessionId);
+        }
+      }
+
+      if (!cancelled && recoveredSeconds > 0) {
+        toast.success(`보관 중이던 ${formatKoreanDuration(recoveredSeconds)} 기록을 저장했습니다!`);
+        onRecordSavedRef.current();
+      }
+    };
+
+    recoverOrphanedDrafts();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn]);
 
   // Set online on mount / offline on unmount
   useEffect(() => {
