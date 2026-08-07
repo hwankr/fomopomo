@@ -198,6 +198,95 @@ describe('useTimerLogic', () => {
     expect(result.current.timeLeft).toBe(5 * 60 - 1);
   });
 
+  describe('startTimer (atomic start used by auto-start)', () => {
+    it('does not instantly complete when started after a completed cycle left an expired deadline', () => {
+      const { result } = renderHook(() =>
+        useTimerLogic({
+          settings: { ...defaultSettings, pomoTime: 0.1 }, // 6 seconds
+          onTimerCompleteRef: { current: mockOnTimerComplete },
+          playClickSound: mockPlayClickSound,
+          updateStatus: mockUpdateStatus,
+        })
+      );
+
+      // Run the focus session to completion → endTimeRef now points at the past
+      act(() => {
+        result.current.toggleTimer();
+      });
+      act(() => {
+        vi.advanceTimersByTime(6500);
+      });
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1);
+      expect(result.current.isRunning).toBe(false);
+
+      // TimerApp schedules the auto-start 1s after completion
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      // Atomic auto-start: explicit mode + remaining recompute the deadline
+      act(() => {
+        result.current.startTimer({ mode: 'shortBreak', remainingSeconds: 5 * 60 });
+      });
+
+      expect(result.current.isRunning).toBe(true);
+      expect(result.current.timerMode).toBe('shortBreak');
+      expect(result.current.timeLeft).toBe(5 * 60);
+
+      // Regression: the old code kept the expired deadline, so the first
+      // 200ms tick completed the timer again immediately.
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1); // still only the focus completion
+      expect(result.current.isRunning).toBe(true);
+      expect(result.current.timeLeft).toBeCloseTo(5 * 60 - 2, 0);
+
+      // Break start reports 'online' status like a manual break start
+      expect(mockUpdateStatus).toHaveBeenLastCalledWith(
+        'online',
+        undefined,
+        expect.any(String),
+        undefined,
+        'timer',
+        'shortBreak',
+        5 * 60
+      );
+
+      // The break completes exactly once, at its real duration
+      act(() => {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+      });
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(2);
+      expect(result.current.isRunning).toBe(false);
+    });
+
+    it('starts from current state when called without overrides', () => {
+      const { result } = renderHook(() =>
+        useTimerLogic({
+          settings: defaultSettings,
+          onTimerCompleteRef: { current: mockOnTimerComplete },
+          playClickSound: mockPlayClickSound,
+          updateStatus: mockUpdateStatus,
+        })
+      );
+
+      act(() => {
+        result.current.startTimer();
+      });
+
+      expect(result.current.isRunning).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 1, 0);
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+    });
+  });
+
   it('should reset timer manually', () => {
     const { result } = renderHook(() =>
       useTimerLogic({

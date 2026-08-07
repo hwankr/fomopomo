@@ -158,6 +158,7 @@ export default function TimerApp({
     setIsRunning,
     setCycleCount,
     setFocusLoggedSeconds,
+    startTimer,
     toggleTimer,
     resetTimerManual,
     changeTimerMode,
@@ -248,6 +249,28 @@ export default function TimerApp({
     }
   }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
 
+  // Auto-start must go through the same atomic start transition as a manual
+  // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
+  // the first interval tick would complete the timer again instantly and
+  // paired auto-start settings would loop alarms/saves forever.
+  // Invoked through a ref (same pattern as onTimerCompleteCallback) so the
+  // delayed call reads post-completion state: fresh isRunning guard, updated
+  // cycleCount/intervals for persistence.
+  const autoStartTimer = useCallback((mode: TimerMode, seconds: number) => {
+    // The user may have started something else during the delay; never
+    // stomp an already-active session.
+    if (isRunning || isStopwatchRunning || stopwatchTime > 0) return;
+
+    startTimer({ mode, remainingSeconds: seconds });
+    currentIntervalStartRef.current = Date.now();
+    saveState(tab, mode, true, seconds, endTimeRef.current, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, intervals, currentIntervalStartRef.current);
+  }, [isRunning, isStopwatchRunning, stopwatchTime, startTimer, saveState, tab, cycleCount, focusLoggedSeconds, intervals, currentIntervalStartRef, endTimeRef]);
+
+  const autoStartTimerRef = useRef(autoStartTimer);
+  useEffect(() => {
+    autoStartTimerRef.current = autoStartTimer;
+  }, [autoStartTimer]);
+
   const handleTimerComplete = useCallback(() => {
     // Play alarm (handled in useEffect/hook but let's make sure)
     playAlarm();
@@ -271,21 +294,14 @@ export default function TimerApp({
         setTimeLeft(settings.longBreak * 60);
         toast('🎉 긴 휴식 시간입니다!', { icon: '☕' });
         if (settings.autoStartBreaks) setTimeout(() => {
-          setIsRunning(true);
-          // Need to sync intervals/state here too?
-          // Simple start is handled by `setIsRunning` but persistence logic needs to trigger.
-          // This is where hook separation gets tricky. 
-          // The hook toggleTimer handles `isRunning` state, but we need to wrap it for persistence.
-          // We'll assume manual toggle for now or simple auto-start without persistence until next tick?
-          // No, we need persistence.
-          // Let's call the wrapper `handleToggleTimer()` but we can't from here easily without refs.
+          autoStartTimerRef.current('longBreak', settings.longBreak * 60);
         }, 1000);
       } else {
         setTimerMode('shortBreak');
         setTimeLeft(settings.shortBreak * 60);
         toast('잠시 휴식하세요.', { icon: '☕' });
         if (settings.autoStartBreaks) setTimeout(() => {
-          setIsRunning(true);
+          autoStartTimerRef.current('shortBreak', settings.shortBreak * 60);
         }, 1000);
       }
     } else {
@@ -298,7 +314,7 @@ export default function TimerApp({
       setFocusLoggedSeconds(0);
       toast('다시 집중할 시간입니다!', { icon: '🔥' });
       if (settings.autoStartPomos) setTimeout(() => {
-        setIsRunning(true);
+        autoStartTimerRef.current('focus', settings.pomoTime * 60);
       }, 1000);
     }
 
@@ -325,7 +341,7 @@ export default function TimerApp({
 
     setIntervals([]);
     // currentIntervalStartRef.current = null; // Managed by hook, but we need to reset it? Hook exposes `currentIntervalStartRef`.
-  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIsRunning, setIntervals, endTimeRef]);
+  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIntervals, endTimeRef]);
 
   // Update the ref handler whenever `handleTimerComplete` changes
   useEffect(() => {
