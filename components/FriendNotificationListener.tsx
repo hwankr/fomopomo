@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'react-hot-toast';
+import { useAuthSession } from '@/hooks/useAuthSession';
 
 type FriendProfile = {
     id: string;
@@ -26,36 +27,44 @@ type FriendshipRow = {
 };
 
 export default function FriendNotificationListener() {
-    const [userId, setUserId] = useState<string | null>(null);
+    const { session } = useAuthSession();
+    const userId = session?.user?.id ?? null;
     const friendsRef = useRef<Map<string, Friendship>>(new Map());
     const profilesRef = useRef<Map<string, FriendProfile>>(new Map());
 
     useEffect(() => {
-        const init = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-            setUserId(user.id);
+        // 계정 전환/로그아웃 시 이전 계정의 친구 캐시를 비워 잘못된 알림을 막는다.
+        friendsRef.current = new Map();
+        profilesRef.current = new Map();
 
-            // Fetch initial friends list with notification settings
+        if (!userId) return;
+
+        // effect 정리 후(사용자 전환 포함) 도착한 응답과 이벤트는 폐기한다.
+        let cancelled = false;
+
+        const loadFriends = async () => {
+            // Fetch friends list with notification settings
             const { data: friendships } = await supabase
                 .from('friendships')
                 .select('friend_id, nickname, friend_email, is_notification_enabled')
-                .eq('user_id', user.id);
+                .eq('user_id', userId);
+
+            if (cancelled) return;
 
             const friendshipRows = (friendships ?? []) as FriendshipRow[];
 
-            if (friendshipRows.length > 0) {
-                friendshipRows.forEach((friendship) => {
-                    friendsRef.current.set(friendship.friend_id, {
-                        friend_id: friendship.friend_id,
-                        nickname: friendship.nickname,
-                        friend_email: friendship.friend_email,
-                        is_notification_enabled: friendship.is_notification_enabled ?? true,
-                    });
+            const nextFriends = new Map<string, Friendship>();
+            friendshipRows.forEach((friendship) => {
+                nextFriends.set(friendship.friend_id, {
+                    friend_id: friendship.friend_id,
+                    nickname: friendship.nickname,
+                    friend_email: friendship.friend_email,
+                    is_notification_enabled: friendship.is_notification_enabled ?? true,
                 });
-            }
+            });
+            friendsRef.current = nextFriends;
 
-            // Fetch initial profiles of friends to know their names
+            // Fetch profiles of friends to know their names
             if (friendshipRows.length > 0) {
                 const friendIds = friendshipRows.map((friendship) => friendship.friend_id);
                 const { data: profiles } = await supabase
@@ -63,28 +72,33 @@ export default function FriendNotificationListener() {
                     .select('id, username, status')
                     .in('id', friendIds);
 
+                if (cancelled) return;
+
                 if (profiles) {
+                    const nextProfiles = new Map<string, FriendProfile>();
                     (profiles as FriendProfile[]).forEach((profile) => {
-                        profilesRef.current.set(profile.id, profile);
+                        nextProfiles.set(profile.id, profile);
                     });
+                    profilesRef.current = nextProfiles;
                 }
             }
         };
 
-        init();
+        loadFriends();
 
         // Subscribe to friendship changes (to update notification settings or add/remove friends)
         const friendshipChannel = supabase
-            .channel('friend-notification-settings')
+            .channel(`friend-notification-settings-${userId}`)
             .on(
                 'postgres_changes',
                 {
                     event: '*',
                     schema: 'public',
                     table: 'friendships',
-                    filter: userId ? `user_id=eq.${userId}` : undefined,
+                    filter: `user_id=eq.${userId}`,
                 },
                 (payload) => {
+                    if (cancelled) return;
                     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
                         const newFriend = payload.new as FriendshipRow;
                         friendsRef.current.set(newFriend.friend_id, {
@@ -95,7 +109,7 @@ export default function FriendNotificationListener() {
                         });
                     } else if (payload.eventType === 'DELETE') {
                         // Just re-fetch friends on any change to be safe and simple.
-                        init();
+                        void loadFriends();
                     }
                 }
             )
@@ -103,7 +117,7 @@ export default function FriendNotificationListener() {
 
         // Subscribe to profile changes (status updates)
         const profileChannel = supabase
-            .channel('friend-status-notifications')
+            .channel(`friend-status-notifications-${userId}`)
             .on(
                 'postgres_changes',
                 {
@@ -112,6 +126,7 @@ export default function FriendNotificationListener() {
                     table: 'profiles',
                 },
                 (payload) => {
+                    if (cancelled) return;
                     const newProfile = payload.new as FriendProfile;
 
                     // Check if this user is a friend
@@ -145,8 +160,11 @@ export default function FriendNotificationListener() {
             .subscribe();
 
         return () => {
+            cancelled = true;
             supabase.removeChannel(friendshipChannel);
             supabase.removeChannel(profileChannel);
+            friendsRef.current = new Map();
+            profilesRef.current = new Map();
         };
     }, [userId]);
 
