@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
   startOfWeek,
@@ -29,7 +29,7 @@ export type HeatmapData = {
   count: number; // seconds (or intensity level)
 };
 
-export function useStudyStats() {
+export function useStudyStats(sessionUserId?: string | null) {
   const [loading, setLoading] = useState(true);
   const [totalFocusTime, setTotalFocusTime] = useState(0);
   const [todayFocusTime, setTodayFocusTime] = useState(0);
@@ -37,16 +37,46 @@ export function useStudyStats() {
   const [chartData, setChartData] = useState<ChartData[]>([]);
   const [heatmapData, setHeatmapData] = useState<HeatmapData[]>([]);
 
+  // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 요청의 응답은 폐기된다.
+  const requestGenerationRef = useRef(0);
+
+  // 계정 전환/로그아웃 시 이전 계정의 통계가 잠시라도 남지 않도록 렌더 중 동기적으로 초기화한다.
+  const [lastSessionUserId, setLastSessionUserId] = useState(sessionUserId);
+  if (sessionUserId !== lastSessionUserId) {
+    setLastSessionUserId(sessionUserId);
+    setLoading(Boolean(sessionUserId));
+    setTotalFocusTime(0);
+    setTodayFocusTime(0);
+    setEarliestYear(null);
+    setChartData([]);
+    setHeatmapData([]);
+  }
+
+  useEffect(() => {
+    // 사용자가 바뀌면 이전 사용자의 in-flight 응답을 무효화한다.
+    requestGenerationRef.current += 1;
+  }, [sessionUserId]);
+
   const fetchStats = useCallback(
     async (
       viewMode: ViewMode,
       activeDate: Date, // Generic active date (could be week start, or month date, or year date)
       userId?: string
     ) => {
+      const generation = ++requestGenerationRef.current;
+      const isStale = () => generation !== requestGenerationRef.current;
+
       setLoading(true);
 
-      const targetUserId = userId || (await supabase.auth.getUser()).data.user?.id;
+      const targetUserId =
+        userId ?? sessionUserId ?? (await supabase.auth.getUser()).data.user?.id;
+      if (isStale()) return;
       if (!targetUserId) {
+        setTotalFocusTime(0);
+        setTodayFocusTime(0);
+        setEarliestYear(null);
+        setChartData([]);
+        setHeatmapData([]);
         setLoading(false);
         return;
       }
@@ -74,6 +104,7 @@ export function useStudyStats() {
         .eq('user_id', targetUserId)
         .gte('created_at', start.toISOString())
         .lte('created_at', end.toISOString());
+      if (isStale()) return;
 
       // 3. Fetch All Sessions (for Total Time & Earliest Year)
       // optimization: we might not need this EVERY time if we cache it or split it out.
@@ -82,6 +113,7 @@ export function useStudyStats() {
         .from('study_sessions')
         .select('duration, created_at')
         .eq('user_id', targetUserId);
+      if (isStale()) return;
 
       const totalSeconds =
         allSessions?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
@@ -109,6 +141,7 @@ export function useStudyStats() {
         .eq('user_id', targetUserId)
         .gte('created_at', getDayStart().toISOString())
         .lte('created_at', getDayEnd().toISOString());
+      if (isStale()) return;
 
       const todaySeconds =
         todaySessions.data?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
@@ -226,7 +259,7 @@ export function useStudyStats() {
 
       setLoading(false);
     },
-    []
+    [sessionUserId]
   );
 
   return {

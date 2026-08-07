@@ -12,6 +12,8 @@ import {
   type FomopomoSettings,
   type Preset,
 } from './timer/hooks/settingsStore';
+import { clearPendingSessionsForUser } from './timer/hooks/useStudySession';
+import { getScopedStorageKey } from '@/lib/userScopedStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -111,7 +113,7 @@ export default function SettingsModal({
     onClose();
   };
 
-  const clearAccountLocalStorage = () => {
+  const clearAccountLocalStorage = (userId?: string | null) => {
     [
       'fomopomo_settings',
       'fomopomo_pomoTime',
@@ -123,7 +125,18 @@ export default function SettingsModal({
       'fomopomo_task_state',
       'fomopomo_notification_dismissed',
       'fomopomo_changelog_last_viewed',
-    ].forEach((key) => localStorage.removeItem(key));
+    ].forEach((key) => {
+      localStorage.removeItem(key);
+      // Authenticated state lives under user-scoped keys (`<base>::<uid>`).
+      if (userId) {
+        localStorage.removeItem(getScopedStorageKey(key, userId));
+      }
+    });
+    // Drop the account's pending session drafts too, or outbox recovery would
+    // re-insert study time the server-side reset/delete just erased.
+    if (userId) {
+      clearPendingSessionsForUser(userId);
+    }
   };
 
   const getConflictMessage = (
@@ -193,7 +206,7 @@ export default function SettingsModal({
         return;
       }
 
-      clearAccountLocalStorage();
+      clearAccountLocalStorage(session.user.id);
 
       toast.success('계정 초기화 완료', { id: toastId });
       window.location.reload();
@@ -243,7 +256,7 @@ export default function SettingsModal({
         return;
       }
 
-      clearAccountLocalStorage();
+      clearAccountLocalStorage(session.user.id);
 
       toast.success('계정이 삭제되었습니다. 이용해 주셔서 감사합니다.', { id: toastId, duration: 3000 });
 

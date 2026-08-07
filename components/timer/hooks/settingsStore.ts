@@ -1,4 +1,9 @@
 import { supabase } from '@/lib/supabase';
+import {
+  GUEST_OWNER,
+  getScopedStorageKey,
+  getStorageOwner,
+} from '@/lib/userScopedStorage';
 
 export type Preset = {
   id: string;
@@ -27,6 +32,15 @@ type UserSettingsRecord = {
 } | null;
 
 export const SETTINGS_KEY = 'fomopomo_settings';
+
+// Settings are stored per account: the legacy base key for guests, and
+// `fomopomo_settings::<userId>` for authenticated users, so one account's
+// local settings can never leak into another account on the same device.
+export function getSettingsStorageKey(
+  owner: string = getStorageOwner()
+): string {
+  return getScopedStorageKey(SETTINGS_KEY, owner);
+}
 export const SETTINGS_CHANGED_EVENT = 'settingsChanged';
 export const DEFAULT_TASK_OPTIONS = ['국어', '수학', '영어'];
 export const DEFAULT_FOMOPOMO_SETTINGS: FomopomoSettings = {
@@ -48,6 +62,7 @@ export const DEFAULT_FOMOPOMO_SETTINGS: FomopomoSettings = {
   ],
 };
 
+let cachedOwner: string | null = null;
 let cachedRawSettings: string | null = null;
 let cachedSettingsSnapshot: FomopomoSettings = DEFAULT_FOMOPOMO_SETTINGS;
 
@@ -102,27 +117,39 @@ export function normalizeSettings(
   };
 }
 
+type StoredSettingsPayload = PartialFomopomoSettings & {
+  ownerUserId?: unknown;
+};
+
+type ParsedStoredSettings = {
+  settings: PartialFomopomoSettings;
+  ownerStamp: unknown;
+};
+
 function parseStoredSettings(
   serializedSettings: string | null
-): PartialFomopomoSettings | null {
+): ParsedStoredSettings | null {
   if (!serializedSettings) {
     return null;
   }
 
   try {
-    return JSON.parse(serializedSettings) as PartialFomopomoSettings;
+    const { ownerUserId, ...settings } = JSON.parse(
+      serializedSettings
+    ) as StoredSettingsPayload;
+    return { settings, ownerStamp: ownerUserId };
   } catch (error) {
     console.error('Failed to parse settings', error);
     return null;
   }
 }
 
-function readStoredSettingsRaw() {
+function readStoredSettingsRaw(owner: string) {
   if (typeof window === 'undefined') {
     return null;
   }
 
-  return window.localStorage.getItem(SETTINGS_KEY);
+  return window.localStorage.getItem(getSettingsStorageKey(owner));
 }
 
 export function readSettingsSnapshot(): FomopomoSettings {
@@ -130,10 +157,13 @@ export function readSettingsSnapshot(): FomopomoSettings {
     return DEFAULT_FOMOPOMO_SETTINGS;
   }
 
-  const savedSettings = readStoredSettingsRaw();
-  if (savedSettings === cachedRawSettings) {
+  const owner = getStorageOwner();
+  const savedSettings = readStoredSettingsRaw(owner);
+  if (owner === cachedOwner && savedSettings === cachedRawSettings) {
     return cachedSettingsSnapshot;
   }
+
+  cachedOwner = owner;
 
   const parsedSettings = parseStoredSettings(savedSettings);
   if (!parsedSettings) {
@@ -142,8 +172,21 @@ export function readSettingsSnapshot(): FomopomoSettings {
     return cachedSettingsSnapshot;
   }
 
+  // Validate the ownerUserId stamp: settings stamped for another owner are
+  // dropped, and unstamped data is only trusted in the legacy guest namespace.
+  const { settings, ownerStamp } = parsedSettings;
+  if (
+    (ownerStamp !== undefined && ownerStamp !== owner) ||
+    (ownerStamp === undefined && owner !== GUEST_OWNER)
+  ) {
+    window.localStorage.removeItem(getSettingsStorageKey(owner));
+    cachedRawSettings = null;
+    cachedSettingsSnapshot = DEFAULT_FOMOPOMO_SETTINGS;
+    return cachedSettingsSnapshot;
+  }
+
   cachedRawSettings = savedSettings;
-  cachedSettingsSnapshot = normalizeSettings(parsedSettings);
+  cachedSettingsSnapshot = normalizeSettings(settings);
   return cachedSettingsSnapshot;
 }
 
@@ -152,12 +195,18 @@ export function writeSettingsSnapshot(settings: FomopomoSettings) {
     return;
   }
 
+  const owner = getStorageOwner();
   const normalizedSettings = normalizeSettings(settings);
-  const serializedSettings = JSON.stringify(normalizedSettings);
+  const payload: StoredSettingsPayload =
+    owner === GUEST_OWNER
+      ? normalizedSettings
+      : { ...normalizedSettings, ownerUserId: owner };
+  const serializedSettings = JSON.stringify(payload);
 
+  cachedOwner = owner;
   cachedRawSettings = serializedSettings;
   cachedSettingsSnapshot = normalizedSettings;
-  window.localStorage.setItem(SETTINGS_KEY, serializedSettings);
+  window.localStorage.setItem(getSettingsStorageKey(owner), serializedSettings);
   window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
 }
 
@@ -167,7 +216,7 @@ export function subscribeSettings(onStoreChange: () => void) {
   }
 
   const handleStorageChange = (event: StorageEvent) => {
-    if (event.key === SETTINGS_KEY) {
+    if (event.key === getSettingsStorageKey()) {
       onStoreChange();
     }
   };

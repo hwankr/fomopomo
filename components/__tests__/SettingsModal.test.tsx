@@ -362,6 +362,24 @@ describe('SettingsModal', () => {
         key === 'fomopomo_settings' ? JSON.stringify(DEFAULT_SETTINGS) : 'stale'
       )
     );
+    // User-scoped variants and the pending-session outbox must be cleared for
+    // the resetting account only.
+    window.localStorage.setItem('fomopomo_full_state::user-reset', 'stale-owned');
+    window.localStorage.setItem(
+      'fomopomo_pending_sessions',
+      JSON.stringify({
+        'draft-mine': {
+          sessionId: 'draft-mine',
+          rows: [{ duration: 60, user_id: 'user-reset', group_id: 'draft-mine' }],
+          failedAt: 1,
+        },
+        'draft-other': {
+          sessionId: 'draft-other',
+          rows: [{ duration: 60, user_id: 'user-other', group_id: 'draft-other' }],
+          failedAt: 1,
+        },
+      })
+    );
 
     renderModal();
 
@@ -383,6 +401,11 @@ describe('SettingsModal', () => {
 
     expect(window.localStorage.getItem('fomopomo_settings')).toBeNull();
     expect(window.localStorage.getItem('fomopomo_full_state')).toBeNull();
+    expect(window.localStorage.getItem('fomopomo_full_state::user-reset')).toBeNull();
+    const remainingOutbox = JSON.parse(
+      window.localStorage.getItem('fomopomo_pending_sessions') ?? '{}'
+    );
+    expect(Object.keys(remainingOutbox)).toEqual(['draft-other']);
     expect(toastMock.success).toHaveBeenCalledWith('계정 초기화 완료', {
       id: 'toast-id',
     });

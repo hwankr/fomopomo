@@ -26,8 +26,11 @@ import {
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useStudyStats, ChartData, ViewMode } from '@/hooks/useStudyStats';
+import { useAuthSession } from '@/hooks/useAuthSession';
 
 export default function StudyReport() {
+  const { session } = useAuthSession();
+  const userId = session?.user?.id ?? null;
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [activeMonth, setActiveMonth] = useState(new Date());
@@ -43,7 +46,7 @@ export default function StudyReport() {
     earliestYear,
     chartData,
     fetchStats
-  } = useStudyStats();
+  } = useStudyStats(userId);
 
   // Auto-scroll to end when chart data or view mode changes
   useEffect(() => {
@@ -99,9 +102,11 @@ export default function StudyReport() {
     return `${hours}h`;
   };
 
-  // Fetch data when view mode or active date changes
+  // Fetch data when view mode or active date changes (로그인한 사용자에 한함)
   useEffect(() => {
-    setTimeout(() => {
+    if (!userId) return;
+
+    const timeoutId = setTimeout(() => {
         let activeDate: Date;
         if (viewMode === 'week') {
             activeDate = activeWeekStart;
@@ -110,10 +115,12 @@ export default function StudyReport() {
         } else {
             activeDate = new Date(activeYear, 0, 1);
         }
-        
-        fetchStats(viewMode, activeDate);
+
+        fetchStats(viewMode, activeDate, userId);
     }, 0);
-  }, [viewMode, activeYear, activeMonth, activeWeekStart, fetchStats]);
+
+    return () => clearTimeout(timeoutId);
+  }, [viewMode, activeYear, activeMonth, activeWeekStart, fetchStats, userId]);
 
   const selectedBucket = useMemo(() => {
     const manuallySelectedBucket = selectedBucketKey

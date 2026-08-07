@@ -39,6 +39,13 @@ export const useTimerLogic = ({
           const now = Date.now();
           const diff = Math.ceil((endTimeRef.current - now) / 1000);
           if (diff <= 0) {
+            // Stop the interval synchronously: waiting for the isRunning
+            // effect cleanup would let queued ticks (e.g. after background
+            // tab throttling) re-fire completion multiple times.
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
             setTimeLeft(0);
             setIsRunning(false);
             onTimerCompleteRef.current();
@@ -54,45 +61,67 @@ export const useTimerLogic = ({
       }
     }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        // Reset so a re-run of this effect can start a new interval instead
+        // of mistaking the cleared id for a live one.
+        timerRef.current = null;
+      }
     };
   }, [isRunning, onTimerCompleteRef]);
+
+  // Atomic start transition shared by manual toggles and auto-starts.
+  // The fresh deadline MUST be computed before isRunning flips to true:
+  // starting with a stale endTimeRef from a completed cycle would make the
+  // first interval tick see diff <= 0 and complete the timer instantly.
+  // Callers firing from stale closures (e.g. delayed auto-start) pass the
+  // intended mode/remaining explicitly instead of relying on current state.
+  const startTimer = useCallback((options?: { mode?: TimerMode; remainingSeconds?: number }) => {
+    const mode = options?.mode ?? timerMode;
+    const duration = mode === 'focus'
+      ? settings.pomoTime * 60
+      : mode === 'shortBreak'
+        ? settings.shortBreak * 60
+        : settings.longBreak * 60;
+    const remaining = options?.remainingSeconds ?? timeLeft;
+
+    endTimeRef.current = Date.now() + (remaining * 1000);
+    if (options?.mode !== undefined) setTimerMode(options.mode);
+    if (options?.remainingSeconds !== undefined) setTimeLeft(options.remainingSeconds);
+    setIsRunning(true);
+
+    // We don't store "start time" for countdown timer in the same way as stopwatch (Date.now() - elapsed),
+    // but we can pass the "logical start time" if we wanted to calculate drift,
+    // OR just rely on "duration - elapsed" sync.
+    // For sync, we need: startTime = Date.now() - (duration - timeLeft)?
+    // If we want the client to calc elapsed: Date.now() - startTime.
+    // So logical startTime = Date.now() - (elapsed).
+    // elapsed = duration - timeLeft.
+    const elapsed = duration - remaining;
+    const logicalStart = Date.now() - (elapsed * 1000);
+
+    // Only set status to 'studying' for focus mode (triggers friend notification)
+    // Break modes should use 'online' to avoid sending "study started" notification
+    const statusForMode = mode === 'focus' ? 'studying' : 'online';
+    updateStatus(statusForMode, undefined, new Date(logicalStart).toISOString(), undefined, 'timer', mode, duration);
+  }, [timerMode, timeLeft, settings, updateStatus]);
 
   const toggleTimer = useCallback((forceStart = false) => {
     playClickSound();
 
-    // Calculate duration for the current mode
-    const duration = timerMode === 'focus'
-      ? settings.pomoTime * 60
-      : timerMode === 'shortBreak'
-        ? settings.shortBreak * 60
-        : settings.longBreak * 60;
-
     if (!forceStart && isRunning) {
       // Pause
+      const duration = timerMode === 'focus'
+        ? settings.pomoTime * 60
+        : timerMode === 'shortBreak'
+          ? settings.shortBreak * 60
+          : settings.longBreak * 60;
       setIsRunning(false);
       updateStatus('paused', undefined, undefined, duration - timeLeft, 'timer', timerMode, duration);
     } else {
-      // Start
-      const target = Date.now() + (timeLeft * 1000);
-      endTimeRef.current = target;
-      setIsRunning(true);
-      // We don't store "start time" for countdown timer in the same way as stopwatch (Date.now() - elapsed),
-      // but we can pass the "logical start time" if we wanted to calculate drift, 
-      // OR just rely on "duration - elapsed" sync. 
-      // For sync, we need: startTime = Date.now() - (duration - timeLeft)? 
-      // If we want the client to calc elapsed: Date.now() - startTime.
-      // So logical startTime = Date.now() - (elapsed).
-      // elapsed = duration - timeLeft.
-      const elapsed = duration - timeLeft;
-      const logicalStart = Date.now() - (elapsed * 1000);
-      
-      // Only set status to 'studying' for focus mode (triggers friend notification)
-      // Break modes should use 'online' to avoid sending "study started" notification
-      const statusForMode = timerMode === 'focus' ? 'studying' : 'online';
-      updateStatus(statusForMode, undefined, new Date(logicalStart).toISOString(), undefined, 'timer', timerMode, duration);
+      startTimer();
     }
-  }, [isRunning, timeLeft, timerMode, settings, playClickSound, updateStatus]);
+  }, [isRunning, timeLeft, timerMode, settings, playClickSound, updateStatus, startTimer]);
 
   const resetTimerManual = useCallback(() => {
     setIsRunning(false);
@@ -129,6 +158,7 @@ export const useTimerLogic = ({
     setIsRunning,
     setCycleCount,
     setFocusLoggedSeconds,
+    startTimer,
     toggleTimer,
     resetTimerManual,
     changeTimerMode,
