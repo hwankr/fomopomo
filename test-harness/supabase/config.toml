@@ -1,0 +1,61 @@
+project_id = "fomopomo-security-test"
+
+[api]
+enabled = false
+port = 55321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 55322
+shadow_port = 55320
+major_version = 17
+health_timeout = "2m"
+
+# The historical application migrations intentionally remain untouched. They
+# predate the current baseline and cannot be replayed together. This isolated
+# harness seeds a minimal pre-remediation schema, then executes the canonical
+# forward-only security migration directly from supabase/migrations.
+[db.migrations]
+enabled = false
+schema_paths = []
+
+[db.seed]
+enabled = true
+sql_paths = [
+  "../../supabase/tests/fixtures/security_base.sql",
+  "../../supabase/migrations/20260807001129_harden_authorization_and_push_webhook.sql",
+]
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+port = 55323
+
+[auth]
+enabled = false
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = []
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = false
+enable_anonymous_sign_ins = false
+minimum_password_length = 6
+
+[storage]
+enabled = false
+file_size_limit = "50MiB"
+
+[edge_runtime]
+enabled = false
+policy = "per_worker"
+inspector_port = 55883
+deno_version = 2
+
+[analytics]
+enabled = false
+port = 55327
+backend = "postgres"

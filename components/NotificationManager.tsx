@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import toast from 'react-hot-toast';
+import { syncPushSubscription } from '@/lib/pushSubscriptionSync';
 import { supabase } from '@/lib/supabase';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
@@ -19,22 +20,6 @@ function useHydrated() {
     () => true,
     () => false
   );
-}
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let index = 0; index < rawData.length; index += 1) {
-    outputArray[index] = rawData.charCodeAt(index);
-  }
-
-  return outputArray;
 }
 
 export default function NotificationManager({
@@ -61,20 +46,26 @@ export default function NotificationManager({
     console.log(message);
   }, []);
 
-  const upsertSubscription = useCallback(
-    async (subscription: PushSubscription) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const getCurrentUserId = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      if (!user) {
+    return user?.id ?? null;
+  }, []);
+
+  const persistSubscription = useCallback(
+    async (subscription: PushSubscription) => {
+      const userId = await getCurrentUserId();
+
+      if (!userId) {
         addLog('No user found');
-        return;
+        throw new Error('A signed-in user is required to save notifications.');
       }
 
       const { error } = await supabase.from('push_subscriptions').upsert(
         {
-          user_id: user.id,
+          user_id: userId,
           endpoint: subscription.endpoint,
           keys: subscription.toJSON().keys,
         },
@@ -82,75 +73,112 @@ export default function NotificationManager({
       );
 
       if (error) {
-        addLog(`DB Error: ${JSON.stringify(error)}`);
+        addLog('Push subscription persistence failed');
+        throw error;
+      }
+    },
+    [addLog, getCurrentUserId]
+  );
+
+  const removeStoredSubscription = useCallback(
+    async ({ endpoint, userId }: { endpoint: string; userId: string }) => {
+      const { error } = await supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('user_id', userId)
+        .eq('endpoint', endpoint);
+
+      if (error) {
+        addLog('Push subscription cleanup failed');
         throw error;
       }
     },
     [addLog]
   );
 
-  const checkSubscription = useCallback(async () => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
-      return;
-    }
-
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
-
-      if (subscription) {
-        await upsertSubscription(subscription);
-      }
-
-      addLog(subscription ? 'Subscription active' : 'No subscription found');
-    } catch (error) {
-      addLog(`Error checking subscription: ${error}`);
-    }
-  }, [addLog, upsertSubscription]);
-
   const subscribeUser = useCallback(
     async (showToast = true) => {
       if (!('serviceWorker' in navigator)) return;
 
-      if (!VAPID_PUBLIC_KEY) {
-        addLog('Missing VAPID public key');
-        if (showToast) {
-          toast.error('VAPID 공개키가 설정되지 않았습니다.');
-        }
-        return;
-      }
-
       try {
-        addLog('Starting subscription...');
         const registration = await navigator.serviceWorker.ready;
-        const existingSubscription =
-          await registration.pushManager.getSubscription();
-
-        if (existingSubscription) {
-          addLog('Unsubscribing existing...');
-          await existingSubscription.unsubscribe();
-        }
-
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        const result = await syncPushSubscription({
+          getCurrentUserId,
+          log: addLog,
+          persistSubscription,
+          registration,
+          removeStoredSubscription,
+          vapidPublicKey: VAPID_PUBLIC_KEY,
         });
 
-        addLog('Got push subscription');
-        await upsertSubscription(subscription);
-        setPermission('granted');
+        if (
+          result.status === 'persisted_existing' ||
+          result.status === 'rotated' ||
+          result.status === 'subscribed_new'
+        ) {
+          setPermission('granted');
 
-        if (showToast) {
-          toast.success('알림이 설정되었습니다.');
+          if (showToast && result.status !== 'persisted_existing') {
+            toast.success('알림이 설정되었습니다.');
+          }
+
+          return;
         }
 
-        addLog('Subscription saved to DB');
-      } catch (error) {
-        addLog(`Subscribe failed: ${error}`);
+        if (result.status === 'persist_failed') {
+          if (showToast) {
+            toast.error(
+              'Notification permission is enabled, but saving the subscription failed. It will retry automatically.'
+            );
+          }
+          return;
+        }
+
+        if (!showToast) {
+          return;
+        }
+
+        if (result.status === 'cleanup_failed') {
+          toast.error(
+            'Could not rotate notifications because the old subscription could not be cleaned up.'
+          );
+          return;
+        }
+
+        if (result.status === 'missing_vapid_key') {
+          toast.error('VAPID public key is not configured.');
+          return;
+        }
+
+        if (result.status === 'invalid_vapid_key') {
+          toast.error('VAPID public key is invalid.');
+          return;
+        }
+
+        if (result.status === 'missing_user') {
+          toast.error('You need to sign in before enabling notifications.');
+          return;
+        }
+
+        if (result.status === 'unsubscribe_failed') {
+          toast.error('Could not replace the existing notification subscription.');
+          return;
+        }
+
         toast.error('알림 설정에 실패했습니다.');
+      } catch {
+        addLog('Push subscription sync failed');
+        if (showToast) {
+          toast.error('알림 설정에 실패했습니다.');
+        }
       }
     },
-    [addLog, upsertSubscription]
+    [
+      addLog,
+      getCurrentUserId,
+      persistSubscription,
+      removeStoredSubscription,
+    ]
   );
 
   useEffect(() => {
@@ -181,8 +209,8 @@ export default function NotificationManager({
         try {
           await navigator.serviceWorker.register('/sw.js');
           addLog('Service Worker registered');
-        } catch (error) {
-          addLog(`SW registration failed: ${error}`);
+        } catch {
+          addLog('Service Worker registration failed');
         }
       }
 
@@ -190,7 +218,6 @@ export default function NotificationManager({
         const currentPermission = Notification.permission;
         setPermission(currentPermission);
         addLog(`Current permission: ${currentPermission}`);
-        await checkSubscription();
 
         if (currentPermission === 'granted') {
           await subscribeUser(false);
@@ -199,7 +226,7 @@ export default function NotificationManager({
     };
 
     void registerServiceWorker();
-  }, [addLog, checkSubscription, subscribeUser]);
+  }, [addLog, subscribeUser]);
 
   const requestPermission = async () => {
     if (!('Notification' in window)) {
@@ -236,8 +263,8 @@ export default function NotificationManager({
         icon: '/icon-192x192.png',
       });
       addLog('Test notification sent');
-    } catch (error) {
-      addLog(`Test notification failed: ${error}`);
+    } catch {
+      addLog('Test notification failed');
     }
   };
 
