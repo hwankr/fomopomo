@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
@@ -188,6 +188,76 @@ describe('settingsStore', () => {
 
     window.localStorage.removeItem(SETTINGS_KEY);
     await expect(loadTaskOptions()).resolves.toEqual(DEFAULT_TASK_OPTIONS);
+  });
+
+  describe('account-scoped storage', () => {
+    const TOKEN_KEY = 'sb-testproj-auth-token';
+
+    const signInLocally = (userId: string) => {
+      window.localStorage.setItem(
+        TOKEN_KEY,
+        JSON.stringify({ access_token: 'token', user: { id: userId } })
+      );
+    };
+
+    beforeEach(() => {
+      vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://testproj.supabase.co');
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('writes authenticated settings under a user-scoped key with an owner stamp', () => {
+      signInLocally('user-a');
+
+      writeSettingsSnapshot({
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 30,
+      });
+
+      expect(window.localStorage.getItem(SETTINGS_KEY)).toBeNull();
+      expect(
+        JSON.parse(
+          window.localStorage.getItem(`${SETTINGS_KEY}::user-a`) ?? '{}'
+        )
+      ).toEqual({
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 30,
+        ownerUserId: 'user-a',
+      });
+    });
+
+    it('does not leak guest settings into a newly authenticated account', async () => {
+      window.localStorage.setItem(
+        SETTINGS_KEY,
+        JSON.stringify({ ...DEFAULT_FOMOPOMO_SETTINGS, pomoTime: 99 })
+      );
+
+      signInLocally('user-b');
+
+      expect(readSettingsSnapshot()).toEqual(DEFAULT_FOMOPOMO_SETTINGS);
+      await expect(loadPersistedSettings()).resolves.toEqual(
+        DEFAULT_FOMOPOMO_SETTINGS
+      );
+    });
+
+    it('keeps settings isolated between accounts and the guest namespace', () => {
+      signInLocally('user-a');
+      writeSettingsSnapshot({ ...DEFAULT_FOMOPOMO_SETTINGS, pomoTime: 30 });
+      expect(readSettingsSnapshot().pomoTime).toBe(30);
+
+      signInLocally('user-b');
+      expect(readSettingsSnapshot()).toEqual(DEFAULT_FOMOPOMO_SETTINGS);
+      writeSettingsSnapshot({ ...DEFAULT_FOMOPOMO_SETTINGS, pomoTime: 45 });
+      expect(readSettingsSnapshot().pomoTime).toBe(45);
+
+      signInLocally('user-a');
+      expect(readSettingsSnapshot().pomoTime).toBe(30);
+
+      window.localStorage.removeItem(TOKEN_KEY);
+      expect(readSettingsSnapshot()).toEqual(DEFAULT_FOMOPOMO_SETTINGS);
+    });
   });
 
   it('writes locally before remote upsert during async persistence', async () => {

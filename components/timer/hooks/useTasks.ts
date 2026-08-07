@@ -1,10 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
+import {
+  GUEST_OWNER,
+  getScopedStorageKey,
+  getStorageOwner,
+  readOwnedJson,
+} from '@/lib/userScopedStorage';
 
 export type TaskItem = {
   id: string;
   title: string;
+};
+
+const TASK_STATE_KEY = 'fomopomo_task_state';
+
+type SavedTaskState = {
+  taskId?: string | null;
+  taskTitle?: string;
 };
 
 export const useTasks = (isLoggedIn: boolean) => {
@@ -14,6 +27,20 @@ export const useTasks = (isLoggedIn: boolean) => {
   const [selectedTask, setSelectedTask] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isTasksLoaded, setIsTasksLoaded] = useState(false);
+
+  // Auth changed (login/logout/account switch): drop the previous account's
+  // task lists and selection synchronously so they can neither render for nor
+  // be persisted into the next account's namespace.
+  const [prevLoggedIn, setPrevLoggedIn] = useState(isLoggedIn);
+  if (prevLoggedIn !== isLoggedIn) {
+    setPrevLoggedIn(isLoggedIn);
+    setDbTasks([]);
+    setWeeklyPlans([]);
+    setMonthlyPlans([]);
+    setSelectedTask('');
+    setSelectedTaskId(null);
+    setIsTasksLoaded(false);
+  }
 
   const applyRestoredTaskState = useCallback(
     (taskId: string | null, taskTitle: string) => {
@@ -80,9 +107,17 @@ export const useTasks = (isLoggedIn: boolean) => {
     if (!isTasksLoaded) return;
 
     try {
-      const savedTaskState = localStorage.getItem('fomopomo_task_state');
+      // Tasks only load while authenticated, so hydrate strictly from the
+      // current owner's namespaced key (never another account's or a guest's).
+      const owner = getStorageOwner();
+      if (owner === GUEST_OWNER) return;
+
+      const savedTaskState = readOwnedJson<SavedTaskState>(
+        TASK_STATE_KEY,
+        owner
+      );
       if (savedTaskState) {
-        const { taskId, taskTitle } = JSON.parse(savedTaskState);
+        const { taskId, taskTitle } = savedTaskState;
         if (taskId) {
           // Validate that the saved task exists in current data
           const taskExists =
@@ -96,7 +131,7 @@ export const useTasks = (isLoggedIn: boolean) => {
             });
           } else {
             // Clear invalid task from localStorage
-            localStorage.removeItem('fomopomo_task_state');
+            localStorage.removeItem(getScopedStorageKey(TASK_STATE_KEY, owner));
             queueMicrotask(() => {
               applyRestoredTaskState(null, '');
             });

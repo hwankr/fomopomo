@@ -11,6 +11,13 @@ import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
 import { useStudySession } from './timer/hooks/useStudySession';
+import {
+  GUEST_OWNER,
+  clearForeignLegacyState,
+  getStorageOwner,
+  readOwnedJson,
+  writeOwnedJson,
+} from '@/lib/userScopedStorage';
 
 // UI Components
 import { TaskModal } from './timer/ui/TaskModal';
@@ -62,6 +69,7 @@ type SavedAppState = {
   intervals?: SavedInterval[];
   currentIntervalStart?: number | null;
   lastUpdated: number;
+  ownerUserId?: string;
 };
 
 const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
@@ -71,22 +79,8 @@ const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
   return 'focus';
 };
 
-const getStoredValue = (key: string) => {
-  try {
-    return window.localStorage.getItem(key);
-  } catch (error) {
-    console.error(`Failed to read ${key} from localStorage`, error);
-    return null;
-  }
-};
-
-const setStoredValue = (key: string, value: string) => {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch (error) {
-    console.error(`Failed to write ${key} to localStorage`, error);
-  }
-};
+const FULL_STATE_KEY = 'fomopomo_full_state';
+const TASK_STATE_KEY = 'fomopomo_task_state';
 
 export default function TimerApp({
   settingsUpdated,
@@ -183,6 +177,33 @@ export default function TimerApp({
     updateStatus: (status, task, startTime, elapsed) => updateStatus(status, task, startTime, elapsed),
   });
 
+  // --- Account-scoped persistence namespace ---
+  // Storage owner for every persisted key: the authenticated user id, or the
+  // guest namespace when logged out. Ref to track if server sync has been done
+  // (once per mount per account).
+  const storageOwner = isLoggedIn ? getStorageOwner() : GUEST_OWNER;
+  const hasSyncedRef = useRef(false);
+
+  // Auth changed (login/logout/account switch): reset all in-memory timer
+  // state during this render — before any effect can persist the previous
+  // account's state into the new namespace. The restore effect below then
+  // rehydrates from the new owner's own keys.
+  const [prevStorageOwner, setPrevStorageOwner] = useState(storageOwner);
+  if (prevStorageOwner !== storageOwner) {
+    setPrevStorageOwner(storageOwner);
+    setTab('timer');
+    setTimerMode('focus');
+    setIsRunning(false);
+    setTimeLeft(settings.pomoTime * 60);
+    setCycleCount(0);
+    setFocusLoggedSeconds(0);
+    setIsStopwatchRunning(false);
+    setStopwatchTime(0);
+    setIntervals([]);
+    setSelectedTask('');
+    setSelectedTaskId(null);
+  }
+
   // --- Persistence Logic ---
   const saveState = useCallback((
     currentTab: "timer" | "stopwatch",
@@ -217,8 +238,8 @@ export default function TimerApp({
       currentIntervalStart: currentStart, // SAVE IT
       lastUpdated: Date.now(),
     };
-    setStoredValue("fomopomo_full_state", JSON.stringify(state));
-  }, []);
+    writeOwnedJson(FULL_STATE_KEY, storageOwner, state);
+  }, [storageOwner]);
 
   // --- Handlers ---
 
@@ -497,13 +518,32 @@ export default function TimerApp({
   };
 
 
+  // Reset every hydration/sync ref (including hasSyncedRef) whenever the
+  // storage owner changes. Effects run in declaration order, so this is
+  // guaranteed to run before the restore and server-sync effects below and
+  // they can never reuse the previous account's refs.
+  useEffect(() => {
+    hasSyncedRef.current = false;
+    endTimeRef.current = 0;
+    stopwatchStartTimeRef.current = 0;
+    currentIntervalStartRef.current = null;
+  }, [storageOwner, endTimeRef, stopwatchStartTimeRef, currentIntervalStartRef]);
+
   // --- Restore ---
   useEffect(() => {
     const restoreState = () => {
-      const savedStateJson = getStoredValue("fomopomo_full_state");
-      if (savedStateJson) {
+      if (storageOwner !== GUEST_OWNER) {
+        // Explicit migration for authenticated accounts: legacy global-key
+        // state of unknown or foreign ownership is discarded, never
+        // inherited, so a newly authenticated account starts from defaults
+        // (or its own saved state) instead of silently adopting guest state.
+        clearForeignLegacyState(FULL_STATE_KEY);
+        clearForeignLegacyState(TASK_STATE_KEY);
+      }
+
+      const state = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
+      if (state) {
         try {
-          const state = JSON.parse(savedStateJson) as SavedAppState;
           const now = Date.now();
           if (now - state.lastUpdated < 24 * 60 * 60 * 1000) {
             setTab(state.activeTab);
@@ -575,41 +615,40 @@ export default function TimerApp({
       }
     };
     restoreState();
-  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef]);
+  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef, storageOwner]);
 
-  // Server Sync Effect - Separate from local restore to handle async nature cleanly
-  // Ref to track if sync has been done (only sync once per mount)
-  const hasSyncedRef = useRef(false);
-  
   useEffect(() => {
     if (!isLoggedIn) return;
-    
-    // 이미 동기화 완료된 경우 스킵 (컴포넌트 마운트 시 1회만 실행)
+
+    // 이미 동기화 완료된 경우 스킵 (계정별로 마운트 시 1회만 실행)
     if (hasSyncedRef.current) return;
     hasSyncedRef.current = true;
+
+    // Dropped when the storage owner changes mid-flight so a late server
+    // response can never hydrate another account's session.
+    let cancelled = false;
 
     const syncServerState = async () => {
       try {
         // 로컬에서 이미 실행 중으로 복원된 경우 확인 (로컬 스토리지에서)
-        const savedState = getStoredValue("fomopomo_full_state");
+        const parsed = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
         let localIsRunning = false;
         let localIsStopwatchRunning = false;
         let localElapsed = 0;
         let localTimerElapsed = 0;
-        
-        if (savedState) {
+
+        if (parsed) {
           try {
-            const parsed = JSON.parse(savedState);
             localIsRunning = parsed.timer?.isRunning || false;
             localIsStopwatchRunning = parsed.stopwatch?.isRunning || false;
             localElapsed = parsed.stopwatch?.elapsed || 0;
-            
+
             // 로컬에서 실행 중이었다면 startTime 기반으로 실제 경과 시간 계산
             if (localIsStopwatchRunning && parsed.stopwatch?.startTime) {
               const now = Date.now();
               localElapsed = Math.floor((now - parsed.stopwatch.startTime) / 1000);
             }
-            
+
             // For timer, calculate elapsed from timeLeft and duration
             if (parsed.timer?.mode && parsed.timer?.timeLeft !== undefined) {
               const localMode = parsed.timer.mode;
@@ -620,7 +659,7 @@ export default function TimerApp({
                   ? settings.shortBreak * 60
                   : settings.longBreak * 60;
               localTimerElapsed = localDuration - localTimeLeft;
-              
+
               // 타이머가 실행 중이었다면 targetTime 기반으로 실제 남은 시간 계산
               if (localIsRunning && parsed.timer?.targetTime) {
                 const now = Date.now();
@@ -632,7 +671,7 @@ export default function TimerApp({
             console.error('Error parsing local state for sync', e);
           }
         }
-        
+
         // 로컬에서 이미 실행 중으로 복원된 경우, 서버 동기화 스킵
         if (localIsRunning || localIsStopwatchRunning) {
           console.log('[Sync] 로컬에서 실행 중인 세션이 복원됨. 서버 동기화 스킵.');
@@ -640,6 +679,7 @@ export default function TimerApp({
         }
 
         const data = await checkActiveSession();
+        if (cancelled) return;
         if (data?.status === 'studying' && data.study_start_time) {
           const startTime = new Date(data.study_start_time).getTime();
           const now = Date.now();
@@ -720,18 +760,22 @@ export default function TimerApp({
     };
 
     syncServerState();
-  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, settings, endTimeRef, setFocusLoggedSeconds, setIsRunning, setTimeLeft, setTimerMode]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, settings, endTimeRef, setFocusLoggedSeconds, setIsRunning, setTimeLeft, setTimerMode, storageOwner]);
 
 
 
 
   // Persist Task
   useEffect(() => {
-    setStoredValue(
-      "fomopomo_task_state",
-      JSON.stringify({ taskId: selectedTaskId, taskTitle: selectedTask })
-    );
-  }, [selectedTaskId, selectedTask]);
+    writeOwnedJson(TASK_STATE_KEY, storageOwner, {
+      taskId: selectedTaskId,
+      taskTitle: selectedTask,
+    });
+  }, [selectedTaskId, selectedTask, storageOwner]);
 
   const handleSpaceToggle = useEffectEvent((event: KeyboardEvent) => {
     if (event.code !== 'Space' && event.key !== ' ') return;
