@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import { Session } from '@supabase/supabase-js';
@@ -31,6 +31,22 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
   const [taskOptions, setTaskOptions] = useState<string[]>([]);
 
+  const userId = session?.user?.id ?? null;
+
+  // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 조회의 응답은 폐기된다.
+  const fetchGenerationRef = useRef(0);
+
+  // 계정 전환/로그아웃 시 이전 계정의 기록이 잠시라도 남지 않도록 렌더 중 동기적으로 비운다.
+  const [lastUserId, setLastUserId] = useState(userId);
+  if (userId !== lastUserId) {
+    setLastUserId(userId);
+    setHistory([]);
+    setEditingId(null);
+    setTaskDraft('');
+    setUpdatingTaskId(null);
+    setLoading(userId !== null);
+  }
+
   const loadTaskOptions = async () => {
     try {
       const tasks = await loadPersistedTaskOptions();
@@ -43,14 +59,17 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
   };
 
   const fetchHistory = async () => {
+    const generation = ++fetchGenerationRef.current;
     try {
       setLoading(true);
       const {
         data: { user },
       } = await supabase.auth.getUser();
+      if (generation !== fetchGenerationRef.current) return;
 
       if (!user) {
-        setLoading(false);
+        // 로그아웃 상태라면 이전 계정의 기록을 남기지 않는다.
+        setHistory([]);
         return;
       }
 
@@ -60,6 +79,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
         .eq('user_id', user.id)
         .order('created_at', { ascending: false, nullsFirst: false })
         .limit(20); // ✨ Increase limit to handle split sessions
+      if (generation !== fetchGenerationRef.current) return;
 
       if (error) throw error;
 
@@ -97,7 +117,9 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
       toast.error(message);
       console.error(error);
     } finally {
-      setLoading(false);
+      if (generation === fetchGenerationRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -193,13 +215,13 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
     }
   };
 
-  // updateTrigger가 변경될 때마다 다시 로드
+  // updateTrigger 또는 로그인 사용자가 변경될 때마다 다시 로드
   useEffect(() => {
     const load = async () => {
       await Promise.all([loadTaskOptions(), fetchHistory()]);
     };
     void load();
-  }, [updateTrigger]);
+  }, [updateTrigger, userId]);
 
   const formatDuration = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);

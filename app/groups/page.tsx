@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import Link from 'next/link';
@@ -31,16 +31,30 @@ export default function GroupsPage() {
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
     const user = session?.user;
+    const userId = user?.id ?? null;
+
+    // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 조회의 응답은 폐기된다.
+    const fetchGenerationRef = useRef(0);
+
+    // 계정 전환/로그아웃 시 이전 계정의 그룹 목록이 잠시라도 남지 않도록 렌더 중 동기적으로 비운다.
+    const [lastUserId, setLastUserId] = useState(userId);
+    if (userId !== lastUserId) {
+        setLastUserId(userId);
+        setGroups([]);
+        setGroupsLoading(userId !== null);
+    }
 
     const fetchGroups = useCallback(async () => {
-        if (!user) return;
+        if (!userId) return;
 
+        const generation = ++fetchGenerationRef.current;
         try {
             const { data, error } = await supabase
                 .from('group_members')
                 .select('groups (id, name, leader_id)')
-                .eq('user_id', user.id);
+                .eq('user_id', userId);
 
+            if (generation !== fetchGenerationRef.current) return;
             if (error) throw error;
 
             if (data) {
@@ -58,21 +72,29 @@ export default function GroupsPage() {
         } catch (error) {
             console.error('Error fetching groups:', error);
         } finally {
-            setGroupsLoading(false);
+            if (generation === fetchGenerationRef.current) {
+                setGroupsLoading(false);
+            }
         }
-    }, [user]);
+    }, [userId]);
 
     useEffect(() => {
-        if (!user) return;
+        if (!userId) {
+            // 로그아웃 시 이전 계정의 in-flight 응답을 무효화하고 목록을 비운다.
+            fetchGenerationRef.current += 1;
+            setGroups([]);
+            setGroupsLoading(false);
+            return;
+        }
 
         const load = async () => {
             await fetchGroups();
         };
         void load();
-    }, [fetchGroups, user]);
+    }, [fetchGroups, userId]);
 
-    // 세션 확인이 끝났고 로그인하지 않았다면 그룹 로딩을 기다릴 필요가 없다
-    const showLoading = groupsLoading && (sessionLoading || !!user);
+    // 세션 확인 중이거나, 로그인 상태에서 그룹을 불러오는 동안에만 로딩을 보여준다
+    const showLoading = sessionLoading || (groupsLoading && !!user);
 
     const handleActionClick = (action: () => void) => {
         if (!session) {

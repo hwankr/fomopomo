@@ -17,13 +17,14 @@ import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 
 export default function ProfilePage() {
   const { session, loading: sessionLoading } = useAuthSession();
+  const userId = session?.user?.id ?? null;
   const {
     fetchStats,
     heatmapData,
     totalFocusTime,
     earliestYear,
     loading: statsLoading,
-  } = useStudyStats();
+  } = useStudyStats(userId);
   const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const currentYear = new Date().getFullYear();
@@ -42,11 +43,11 @@ export default function ProfilePage() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   useEffect(() => {
-    if (session?.user) {
+    if (userId) {
         // Fetch stats to populate heatmap and total time
         fetchStats('year', new Date());
     }
-  }, [session, fetchStats]);
+  }, [userId, fetchStats]);
 
   const handleGoogleLogin = async () => {
     if (isInAppBrowser()) {
@@ -103,37 +104,54 @@ export default function ProfilePage() {
           <ProfileHeader user={session?.user || null} totalFocusTime={totalFocusTime} />
         </section>
 
-        {/* Contribution Graph Section */}
-        <section className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
-          <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-            <span>공부 기록</span>
-            <select
-              aria-label="연도"
-              value={selectedYear}
-              onChange={(event) => setSelectedYear(Number(event.target.value))}
-              className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-rose-400/50"
-            >
-              {availableYears.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </h2>
-          {statsLoading && heatmapData.length === 0 ? (
-               <div className="h-32 flex items-center justify-center text-gray-400 text-sm">잔디 심는 중...</div>
-          ) : (
-               <ContributionGraph data={heatmapData} year={selectedYear} />
-          )}
-        </section>
+        {/* 로그인한 사용자에게만 개인 데이터 섹션을 렌더링한다 (로그아웃 후 잔존 데이터 방지) */}
+        {session ? (
+          <>
+            {/* Contribution Graph Section */}
+            <section className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                <span>공부 기록</span>
+                <select
+                  aria-label="연도"
+                  value={selectedYear}
+                  onChange={(event) => setSelectedYear(Number(event.target.value))}
+                  className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-rose-400/50"
+                >
+                  {availableYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </h2>
+              {statsLoading && heatmapData.length === 0 ? (
+                   <div className="h-32 flex items-center justify-center text-gray-400 text-sm">잔디 심는 중...</div>
+              ) : (
+                   <ContributionGraph data={heatmapData} year={selectedYear} />
+              )}
+            </section>
 
-        {/* Detailed Report Section */}
-        <section>
-           <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4 px-2">상세 리포트</h2>
-           <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
-             <StudyReport />
-           </div>
-        </section>
+            {/* Detailed Report Section */}
+            <section>
+               <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4 px-2">상세 리포트</h2>
+               <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
+                 <StudyReport key={userId ?? 'guest'} />
+               </div>
+            </section>
+          </>
+        ) : (
+          <section className="bg-white dark:bg-slate-800 rounded-2xl p-10 text-center shadow-sm border border-gray-100 dark:border-slate-700">
+            <p className="text-gray-500 dark:text-gray-400 mb-4">
+              로그인하고 공부 기록과 상세 리포트를 확인해보세요!
+            </p>
+            <button
+              onClick={() => setIsLoginModalOpen(true)}
+              className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+            >
+              로그인하기
+            </button>
+          </section>
+        )}
 
       </div>
     </div>
