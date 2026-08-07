@@ -391,19 +391,10 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
     const handleDeleteGroup = async () => {
         if (!confirm('정말로 이 그룹을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
         try {
-            // 1. Delete all members first (manual cascade)
-            const { error: membersError } = await supabase
-                .from('group_members')
-                .delete()
-                .eq('group_id', id);
-
-            if (membersError) throw membersError;
-
-            // 2. Delete the group
-            const { error } = await supabase
-                .from('groups')
-                .delete()
-                .eq('id', id);
+            // delete_group RPC가 리더 검증과 멤버십 cascade 삭제를 단일 트랜잭션으로 처리한다
+            const { error } = await supabase.rpc('delete_group', {
+                p_group_id: id,
+            });
 
             if (error) throw error;
             toast.success('그룹이 삭제되었습니다');
