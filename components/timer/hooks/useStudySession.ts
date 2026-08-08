@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { splitIntervalAtStudyDayBoundary } from '@/lib/dateUtils';
 import toast from 'react-hot-toast';
 
 type ProfileStatusUpdate = {
@@ -25,34 +26,6 @@ const generateUUID = () => {
   });
 };
 
-// Helper to split an interval at midnight boundaries
-// Returns an array of intervals, each within a single day
-const splitIntervalAtMidnight = (interval: { start: number; end: number }): { start: number; end: number }[] => {
-  const result: { start: number; end: number }[] = [];
-  let currentStart = interval.start;
-  const finalEnd = interval.end;
-
-  while (currentStart < finalEnd) {
-    // Get the start of the next day (midnight)
-    const startDate = new Date(currentStart);
-    const nextMidnight = new Date(startDate);
-    nextMidnight.setDate(nextMidnight.getDate() + 1);
-    nextMidnight.setHours(0, 0, 0, 0);
-
-    // If the interval ends before next midnight, use the actual end
-    const currentEnd = nextMidnight.getTime() <= finalEnd ? nextMidnight.getTime() : finalEnd;
-
-    // Only add if there's meaningful duration (at least 1 second)
-    if (currentEnd - currentStart >= 1000) {
-      result.push({ start: currentStart, end: currentEnd });
-    }
-
-    currentStart = currentEnd;
-  }
-
-  return result;
-};
-
 export type SaveRecordResult = 'saved' | 'failed' | 'skipped';
 
 type StudySessionRow = {
@@ -62,12 +35,21 @@ type StudySessionRow = {
   task: string | null;
   task_id: string | null;
   created_at: string;
-  group_id: string;
+  // Save-batch id (one random UUID per save), also the outbox idempotency key.
+  // Not a social group id — that concept never attaches to sessions.
+  session_batch_id: string;
+};
+
+// Drafts written before the session_batch_id migration carried the batch id in
+// group_id instead, so recovery must accept rows in either shape.
+type PendingSessionRow = Omit<StudySessionRow, 'session_batch_id'> & {
+  session_batch_id?: string;
+  group_id?: string;
 };
 
 type PendingSessionDraft = {
   sessionId: string;
-  rows: StudySessionRow[];
+  rows: PendingSessionRow[];
   failedAt: number;
 };
 
@@ -153,8 +135,8 @@ export const useStudySession = ({
   const isSavingRef = useRef(false);
   const currentIntervalStartRef = useRef<number | null>(null);
   // Stable id for the session being saved: kept across failed attempts so a
-  // retry reuses the same outbox key and group_id (no duplicate rows), and
-  // only reset once an insert has been confirmed.
+  // retry reuses the same outbox key and session_batch_id (no duplicate rows),
+  // and only reset once an insert has been confirmed.
   const pendingSessionIdRef = useRef<string | null>(null);
 
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
@@ -210,10 +192,9 @@ export const useStudySession = ({
       isSavingRef.current = true;
 
       // Reuse the pending session id on retries so the outbox draft and the
-      // rows' group_id stay stable until the save is confirmed.
+      // rows' session_batch_id stay stable until the save is confirmed.
       const sessionId = pendingSessionIdRef.current ?? generateUUID();
       pendingSessionIdRef.current = sessionId;
-      const groupId = sessionId;
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -250,8 +231,9 @@ export const useStudySession = ({
       }
 
       const rowsToInsert: StudySessionRow[] = currentSessionIntervals
-        // First, split each interval at midnight boundaries
-        .flatMap(interval => splitIntervalAtMidnight(interval))
+        // First, split each interval at study-day (05:00) boundaries so each
+        // row's created_at (= interval end) lands in the study day it belongs to
+        .flatMap(interval => splitIntervalAtStudyDayBoundary(interval))
         // Then, convert each split interval to a row
         .map(interval => ({
           mode: recordMode,
@@ -260,7 +242,7 @@ export const useStudySession = ({
           task: taskText.trim() || null,
           task_id: selectedTaskId,
           created_at: new Date(interval.end).toISOString(),
-          group_id: groupId,
+          session_batch_id: sessionId,
         }))
         .filter(row => row.duration >= 10 && row.duration < 24 * 60 * 60);
 
@@ -272,7 +254,7 @@ export const useStudySession = ({
           task: taskText.trim() || null,
           task_id: selectedTaskId,
           created_at: new Date(endTimeToUse).toISOString(),
-          group_id: groupId,
+          session_batch_id: sessionId,
         });
       }
 
@@ -307,9 +289,11 @@ export const useStudySession = ({
   );
 
   // Recover drafts orphaned by a reload: a save that failed and never got its
-  // in-page retry would otherwise sit in the outbox forever. group_id doubles
-  // as the draft id, so a row already on the server proves the original insert
-  // landed and the draft is simply dropped instead of duplicated.
+  // in-page retry would otherwise sit in the outbox forever. The batch id
+  // doubles as the draft id (session_batch_id today, group_id in drafts saved
+  // before the migration), so a row already on the server under either column
+  // proves the original insert landed and the draft is simply dropped instead
+  // of duplicated.
   const onRecordSavedRef = useRef(onRecordSaved);
   onRecordSavedRef.current = onRecordSaved;
 
@@ -340,17 +324,31 @@ export const useStudySession = ({
 
         recoveringSessionIds.add(sessionId);
         try {
+          // The batch id may sit in session_batch_id (new rows) or group_id
+          // (rows inserted before the migration), so check both columns.
           const { data: existing, error: checkError } = await supabase
             .from('study_sessions')
             .select('id')
-            .eq('group_id', sessionId)
+            .or(`session_batch_id.eq.${sessionId},group_id.eq.${sessionId}`)
             .limit(1);
           if (checkError) throw checkError;
 
           if (!existing || existing.length === 0) {
-            const { error } = await supabase.from('study_sessions').insert(rows);
+            // Legacy drafts only carry group_id; move the batch id into
+            // session_batch_id so recovered rows land in the new schema and
+            // group_id is no longer written.
+            const rowsToInsert: StudySessionRow[] = rows.map((row) => ({
+              mode: row.mode,
+              duration: row.duration,
+              user_id: row.user_id,
+              task: row.task,
+              task_id: row.task_id,
+              created_at: row.created_at,
+              session_batch_id: row.session_batch_id ?? sessionId,
+            }));
+            const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
             if (error) throw error;
-            recoveredSeconds += rows.reduce((sum, row) => sum + row.duration, 0);
+            recoveredSeconds += rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
           }
           removePendingSession(sessionId);
         } catch (e) {

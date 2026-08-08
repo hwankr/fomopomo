@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getStudyDayRange } from '@/lib/dateUtils';
 import { Session } from '@supabase/supabase-js';
 import { Pencil, Trash2, Check, X, AlertTriangle, Bell, BellOff } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -57,10 +58,12 @@ export default function FriendList({ session, refreshTrigger }: FriendListProps)
 
   const fetchStudyTimes = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      // 공부일(로컬 05:00 경계) 절대 범위를 서버에 전달한다 — lib/dateUtils.ts 정책 참고
+      const { start, end } = getStudyDayRange();
       const { data, error } = await supabase.rpc('get_friends_study_time', {
         p_user_id: session.user.id,
-        p_date: today
+        p_start_time: start.toISOString(),
+        p_end_time: end.toISOString(),
       });
 
       if (error) {

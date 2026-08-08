@@ -12,8 +12,14 @@ type StudySession = {
   duration: number;
   created_at: string;
   task?: string | null;
-  group_id?: string | null; // ✨ [New]
+  // 저장 배치 ID: 새 행은 session_batch_id, 마이그레이션 이전 행은 group_id에 있다.
+  session_batch_id?: string | null;
+  group_id?: string | null;
 };
+
+// 한 번의 저장에서 분할된 행들을 묶는 배치 키 (구형 행은 group_id 폴백)
+const getBatchId = (item: StudySession) =>
+  item.session_batch_id ?? item.group_id ?? null;
 
 // ✨ [추가] updateTrigger를 선택적 prop으로 정의
 interface HistoryListProps {
@@ -75,7 +81,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
 
       const { data, error } = await supabase
         .from('study_sessions')
-        .select('id, mode, duration, created_at, task, group_id') // ✨ Select group_id
+        .select('id, mode, duration, created_at, task, session_batch_id, group_id')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false, nullsFirst: false })
         .limit(20); // ✨ Increase limit to handle split sessions
@@ -85,14 +91,15 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
 
       // ✨ [New] Grouping Logic
       const groupedHistory: StudySession[] = [];
-      const processedGroupIds = new Set<string>();
+      const processedBatchIds = new Set<string>();
 
       (data || []).forEach((session) => {
-        if (session.group_id) {
-          if (processedGroupIds.has(session.group_id)) return;
+        const batchId = getBatchId(session);
+        if (batchId) {
+          if (processedBatchIds.has(batchId)) return;
 
-          // Find all segments with this group_id
-          const segments = (data || []).filter(s => s.group_id === session.group_id);
+          // Find all segments with this batch id
+          const segments = (data || []).filter(s => getBatchId(s) === batchId);
           const totalDuration = segments.reduce((sum, s) => sum + s.duration, 0);
 
           // Use the most recent segment's created_at and other info
@@ -101,9 +108,9 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
             ...session,
             duration: totalDuration,
           });
-          processedGroupIds.add(session.group_id);
+          processedBatchIds.add(batchId);
         } else {
-          // Legacy or single sessions without group_id
+          // Legacy or single sessions without a batch id
           groupedHistory.push(session);
         }
       });
@@ -127,15 +134,17 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
     if (!confirm('이 기록을 삭제하시겠습니까?')) return;
 
     try {
-      // ✨ [New] Delete by group_id if exists
+      // 분할 저장된 세션은 배치 단위로 전 조각을 삭제한다. 배치 키가 어느
+      // 컬럼에 있든(신형 session_batch_id / 구형 group_id) 매치되도록 or 필터 사용.
       const targetItem = history.find(h => h.id === id);
+      const batchId = targetItem ? getBatchId(targetItem) : null;
 
       let error;
-      if (targetItem?.group_id) {
+      if (batchId) {
         const { error: delError } = await supabase
           .from('study_sessions')
           .delete()
-          .eq('group_id', targetItem.group_id);
+          .or(`session_batch_id.eq.${batchId},group_id.eq.${batchId}`);
         error = delError;
       } else {
         const { error: delError } = await supabase
@@ -177,14 +186,15 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
     setUpdatingTaskId(id);
     try {
       const targetItem = history.find(h => h.id === id);
+      const batchId = targetItem ? getBatchId(targetItem) : null;
 
-      // ✨ [New] Update by group_id if exists
+      // 분할 저장된 세션은 배치 단위로 전 조각의 task를 갱신한다 (컬럼 폴백은 삭제와 동일).
       let error;
-      if (targetItem?.group_id) {
+      if (batchId) {
         const { error: upError } = await supabase
           .from('study_sessions')
           .update({ task: taskDraft.trim() || null })
-          .eq('group_id', targetItem.group_id);
+          .or(`session_batch_id.eq.${batchId},group_id.eq.${batchId}`);
         error = upError;
       } else {
         const { error: upError } = await supabase

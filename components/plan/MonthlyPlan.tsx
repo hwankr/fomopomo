@@ -102,9 +102,12 @@ export default function MonthlyPlan({ userId }: MonthlyPlanProps) {
 
     let sessionRows: SessionDurationRow[] = [];
     if (planIds.length > 0) {
+      // RLS로 보이는 타인 세션(그룹/친구 조회 허용분)이 합산되지 않도록
+      // 본인 세션으로 한정한다.
       const { data: sessions, error: sessionsError } = await supabase
         .from('study_sessions')
         .select('task_id, duration')
+        .eq('user_id', userId)
         .in('task_id', planIds);
 
       if (sessionsError) {

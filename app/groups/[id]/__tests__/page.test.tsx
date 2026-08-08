@@ -134,6 +134,30 @@ describe('GroupDetailPage 그룹 삭제', () => {
         expect(routerMock.push).toHaveBeenCalledWith('/groups');
     });
 
+    it('멤버 공부시간을 공부일(로컬 05:00) 절대 범위로 조회한다', async () => {
+        render(<GroupDetailPage params={makeParams('group-1')} />);
+
+        await waitFor(() => {
+            expect(supabaseMock.rpc).toHaveBeenCalledWith(
+                'get_group_study_time_v3',
+                expect.anything()
+            );
+        });
+
+        const call = supabaseMock.rpc.mock.calls.find(
+            (args: unknown[]) => args[0] === 'get_group_study_time_v3'
+        ) as [string, { p_group_id: string; p_start_time: string; p_end_time: string }];
+        const params = call[1];
+        expect(params.p_group_id).toBe('group-1');
+
+        const start = new Date(params.p_start_time);
+        const end = new Date(params.p_end_time);
+        // 로컬 05:00 경계에서 시작하는 24시간(-1ms) 공부일 범위다.
+        expect(start.getHours()).toBe(5);
+        expect(start.getMinutes()).toBe(0);
+        expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000 - 1);
+    });
+
     it('delete_group RPC가 실패하면 이동하지 않고 에러를 알린다', async () => {
         supabaseMock.rpc.mockImplementation((fn: string) => {
             if (fn === 'get_group_invite_code') {

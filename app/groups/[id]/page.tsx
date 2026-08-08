@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from 'react';
 import type { RealtimePostgresChangesPayload, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { getDayStart, getDayEnd } from '@/lib/dateUtils';
+import { getStudyDayRange } from '@/lib/dateUtils';
 import { useRouter } from 'next/navigation';
 import { toast, Toaster } from 'react-hot-toast';
 import MemberReportModal from '@/components/MemberReportModal';
@@ -148,8 +148,9 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
             // 3. Fetch Study Times
             // Get today's start and end time (based on 5 AM reset)
-            const start = getDayStart().toISOString();
-            const end = getDayEnd().toISOString();
+            const { start: dayStart, end: dayEnd } = getStudyDayRange();
+            const start = dayStart.toISOString();
+            const end = dayEnd.toISOString();
 
             const { data: studyTimeData, error: studyTimeError } = await supabase
                 .rpc('get_group_study_time_v3', {
@@ -270,11 +271,13 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                     setMembers((currentMembers) => {
                         if (currentMembers.some(m => m.user_id === userId)) {
                             console.log('[Group Realtime] User is a group member, refreshing study times');
-                            // 비동기로 studyTimes만 갱신
+                            // 비동기로 studyTimes만 갱신 — 초기 조회와 같은
+                            // 공부일(05:00 경계) 기준을 써야 실시간 이벤트가
+                            // 와도 집계 기준이 바뀌지 않는다
                             (async () => {
-                                const now = new Date();
-                                const start = new Date(now.setHours(0, 0, 0, 0)).toISOString();
-                                const end = new Date(now.setHours(23, 59, 59, 999)).toISOString();
+                                const { start: dayStart, end: dayEnd } = getStudyDayRange();
+                                const start = dayStart.toISOString();
+                                const end = dayEnd.toISOString();
 
                                 const { data: studyTimeData } = await supabase
                                     .rpc('get_group_study_time_v3', {

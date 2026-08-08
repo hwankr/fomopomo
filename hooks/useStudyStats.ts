@@ -1,16 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { endOfMonth, addDays, format } from 'date-fns';
 import {
-  startOfWeek,
-  startOfMonth,
-  endOfMonth,
-  startOfYear,
-  endOfYear,
-  endOfDay,
-  addDays,
-  format,
-} from 'date-fns';
-import { getDayStart, getDayEnd } from '@/lib/dateUtils';
+  getDayStart,
+  getStudyDayRange,
+  getStudyWeekRange,
+  getStudyMonthRange,
+  getStudyYearRange,
+  type TimeRange,
+} from '@/lib/dateUtils';
 
 export type ViewMode = 'week' | 'month' | 'year';
 
@@ -82,28 +80,26 @@ export function useStudyStats(sessionUserId?: string | null) {
       }
 
       // 1. Calculate Date Range based on ViewMode
-      let start: Date;
-      let end: Date;
+      // 공부일(05:00 경계) 기준 조회 범위. 버킷 앵커는 range.start(기간 첫
+      // 달력일 05:00)에서 파생시켜 범위와 버킷이 항상 같은 기준을 공유한다.
+      let range: TimeRange;
 
       if (viewMode === 'week') {
-        start = startOfWeek(activeDate, { weekStartsOn: 1 });
-        end = endOfDay(addDays(start, 6));
+        range = getStudyWeekRange(activeDate);
       } else if (viewMode === 'month') {
-        start = startOfMonth(activeDate);
-        end = endOfMonth(activeDate);
+        range = getStudyMonthRange(activeDate);
       } else {
-        const targetYearDate = new Date(activeDate.getFullYear(), 0, 1);
-        start = startOfYear(targetYearDate);
-        end = endOfYear(targetYearDate);
+        range = getStudyYearRange(activeDate);
       }
+      const start = range.start;
 
       // 2. Fetch Period Sessions (for Chart)
       const { data: periodSessions } = await supabase
         .from('study_sessions')
         .select('duration, created_at, task')
         .eq('user_id', targetUserId)
-        .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString());
+        .gte('created_at', range.start.toISOString())
+        .lte('created_at', range.end.toISOString());
       if (isStale()) return;
 
       // 3. Fetch All Sessions (for Total Time & Earliest Year)
@@ -135,12 +131,13 @@ export function useStudyStats(sessionUserId?: string | null) {
       }
 
       // 4. Fetch Today's Sessions
+      const todayRange = getStudyDayRange();
       const todaySessions = await supabase
         .from('study_sessions')
         .select('duration')
         .eq('user_id', targetUserId)
-        .gte('created_at', getDayStart().toISOString())
-        .lte('created_at', getDayEnd().toISOString());
+        .gte('created_at', todayRange.start.toISOString())
+        .lte('created_at', todayRange.end.toISOString());
       if (isStale()) return;
 
       const todaySeconds =
@@ -169,9 +166,9 @@ export function useStudyStats(sessionUserId?: string | null) {
           '토요일',
           '일요일',
         ];
-        // Ensure start is the beginning of the week for iteration
-        const weekStart = startOfWeek(activeDate, { weekStartsOn: 1 });
-        
+        // range.start = 주의 첫 달력일(월요일) 05:00 — 버킷 앵커로 그대로 사용
+        const weekStart = start;
+
         for (let i = 0; i < 7; i++) {
           const day = addDays(weekStart, i);
           const key = format(day, 'yyyy-MM-dd');
@@ -183,7 +180,9 @@ export function useStudyStats(sessionUserId?: string | null) {
           };
         }
       } else if (viewMode === 'month') {
-        const daysInMonth = end.getDate();
+        // range.end는 다음달 1일 04:59:59.999라 getDate()가 1이 된다 —
+        // 일수는 달력 월에서 직접 구한다.
+        const daysInMonth = endOfMonth(start).getDate();
         for (let d = 1; d <= daysInMonth; d++) {
           const day = new Date(start.getFullYear(), start.getMonth(), d);
           const key = format(day, 'yyyy-MM-dd');

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
+import { getSeoulStudyDayRange } from '@/lib/dateUtils';
 import { getAdminStatus } from '@/lib/admin';
 import { Profile } from '@/lib/types';
 import AdminGuard from '@/components/admin/AdminGuard';
@@ -23,8 +24,9 @@ export default function AdminPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // 관리자 지표는 청중이 한국이므로 관리자 브라우저의 타임존과 무관하게
+      // Asia/Seoul 기준 05:00 공부일 시작을 서버에 전달한다.
+      const { start: dayStart } = getSeoulStudyDayRange();
 
       const [profilesResult, statsResult] = await Promise.all([
         supabase
@@ -33,7 +35,7 @@ export default function AdminPage() {
           .order('created_at', { ascending: false }),
         supabase
           .rpc('get_admin_dashboard_stats', {
-            p_day_start: today.toISOString(),
+            p_day_start: dayStart.toISOString(),
           })
           .single(),
       ]);
