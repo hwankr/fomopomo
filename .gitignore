@@ -45,3 +45,6 @@ keys.json
 # Local Supabase test harness runtime state
 /test-harness/supabase/.temp/
 /test-harness/supabase/.branches/
+
+# Local agent tooling state
+/.omc/
