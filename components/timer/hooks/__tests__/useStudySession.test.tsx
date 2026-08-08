@@ -34,7 +34,8 @@ const PENDING_SESSIONS_KEY = 'fomopomo_pending_sessions';
 type OutboxRow = {
   duration: number;
   user_id: string;
-  group_id: string;
+  session_batch_id?: string;
+  group_id?: string;
 };
 
 type Outbox = Record<string, { sessionId: string; rows: OutboxRow[]; failedAt: number }>;
@@ -110,7 +111,9 @@ describe('useStudySession saveRecord', () => {
     expect(Object.keys(outbox)[0]).toBe(draft.sessionId);
     expect(draft.rows.reduce((sum, row) => sum + row.duration, 0)).toBe(60);
     expect(draft.rows[0].user_id).toBe('user-1');
-    expect(draft.rows[0].group_id).toBe(draft.sessionId);
+    // The batch id column carries the draft id; group_id is no longer written.
+    expect(draft.rows[0].session_batch_id).toBe(draft.sessionId);
+    expect(draft.rows[0].group_id).toBeUndefined();
   });
 
   it('clears intervals and the outbox only after a confirmed successful insert', async () => {
@@ -157,10 +160,10 @@ describe('useStudySession saveRecord', () => {
 
     expect(retryResult).toBe('saved');
     const secondAttemptRows = insertMock.mock.calls[1][0] as OutboxRow[];
-    // The stable session id keeps group_id identical across retries, so a
-    // retry can never create a second copy under a new group.
-    expect(secondAttemptRows[0].group_id).toBe(firstAttemptRows[0].group_id);
-    expect(secondAttemptRows[0].group_id).toBe(draftIds[0]);
+    // The stable session id keeps session_batch_id identical across retries,
+    // so a retry can never create a second copy under a new batch.
+    expect(secondAttemptRows[0].session_batch_id).toBe(firstAttemptRows[0].session_batch_id);
+    expect(secondAttemptRows[0].session_batch_id).toBe(draftIds[0]);
     expect(readOutbox()).toEqual({});
     expect(result.current.intervals).toEqual([]);
   });
@@ -185,15 +188,14 @@ describe('useStudySession saveRecord', () => {
 
   describe('outbox recovery on mount', () => {
     const selectLimitMock = vi.fn();
+    const selectOrMock = vi.fn(() => ({ limit: selectLimitMock }));
 
     const mockStudySessionsWithSelect = () => {
       supabaseMock.from.mockImplementation((table: string) => {
         if (table === 'study_sessions') {
           return {
             insert: insertMock,
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({ limit: selectLimitMock })),
-            })),
+            select: vi.fn(() => ({ or: selectOrMock })),
           };
         }
         return {
@@ -205,7 +207,14 @@ describe('useStudySession saveRecord', () => {
       });
     };
 
-    const seedDraft = (sessionId: string, userId: string, duration = 120) => {
+    const seedDraft = (
+      sessionId: string,
+      userId: string,
+      duration = 120,
+      // 'legacy' drafts predate the session_batch_id migration and only carry
+      // the batch id in group_id.
+      shape: 'current' | 'legacy' = 'current'
+    ) => {
       window.localStorage.setItem(
         PENDING_SESSIONS_KEY,
         JSON.stringify({
@@ -219,7 +228,9 @@ describe('useStudySession saveRecord', () => {
                 task: null,
                 task_id: null,
                 created_at: new Date().toISOString(),
-                group_id: sessionId,
+                ...(shape === 'legacy'
+                  ? { group_id: sessionId }
+                  : { session_batch_id: sessionId }),
               },
             ],
             failedAt: Date.now() - 60_000,
@@ -238,10 +249,40 @@ describe('useStudySession saveRecord', () => {
 
       expect(insertMock).toHaveBeenCalledTimes(1);
       const insertedRows = insertMock.mock.calls[0][0] as OutboxRow[];
-      expect(insertedRows[0].group_id).toBe('draft-recover-1');
+      expect(insertedRows[0].session_batch_id).toBe('draft-recover-1');
       expect(readOutbox()).toEqual({});
       expect(onRecordSaved).toHaveBeenCalledTimes(1);
       expect(toastMock.success).toHaveBeenCalledWith('보관 중이던 2분 기록을 저장했습니다!');
+    });
+
+    it('upgrades a pre-migration draft: fills session_batch_id and drops group_id', async () => {
+      mockStudySessionsWithSelect();
+      selectLimitMock.mockResolvedValue({ data: [], error: null });
+      seedDraft('draft-legacy-1', 'user-1', 120, 'legacy');
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(insertMock).toHaveBeenCalledTimes(1);
+      const insertedRows = insertMock.mock.calls[0][0] as OutboxRow[];
+      expect(insertedRows[0].session_batch_id).toBe('draft-legacy-1');
+      expect(insertedRows[0].group_id).toBeUndefined();
+      expect(readOutbox()).toEqual({});
+    });
+
+    it('checks server existence under both batch id columns', async () => {
+      mockStudySessionsWithSelect();
+      selectLimitMock.mockResolvedValue({ data: [], error: null });
+      seedDraft('draft-idempotency', 'user-1');
+
+      renderStudySession();
+      await act(async () => {});
+
+      // Rows inserted before the migration hold the batch id in group_id, so
+      // the idempotency check must match either column.
+      expect(selectOrMock).toHaveBeenCalledWith(
+        'session_batch_id.eq.draft-idempotency,group_id.eq.draft-idempotency'
+      );
     });
 
     it('drops a draft without re-inserting when its rows already exist on the server', async () => {
