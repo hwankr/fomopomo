@@ -161,6 +161,49 @@ create policy "Users can see their own friendships."
 on public.friendships for select to authenticated
 using (auth.uid() = user_id or auth.uid() = friend_id);
 
+-- Pre-remediation production policies for study_sessions. These reproduce the
+-- attackable state that the study-session write lockdown migration must close:
+--   * INSERT allowed for any owned row with no duration/mode/created_at bounds.
+--   * UPDATE gated only on ownership with NO `with check`, covering every
+--     column (duration, created_at, mode, ...).
+create policy "Users can view their own study sessions"
+on public.study_sessions for select to authenticated
+using (auth.uid() = user_id);
+
+create policy "Friends can view study sessions"
+on public.study_sessions for select to authenticated
+using (
+  exists (
+    select 1 from public.friendships
+    where friendships.user_id = study_sessions.user_id
+      and friendships.friend_id = auth.uid()
+  )
+);
+
+create policy "Group members can view study sessions"
+on public.study_sessions for select to authenticated
+using (
+  exists (
+    select 1
+    from public.group_members as gm1
+    join public.group_members as gm2 on gm1.group_id = gm2.group_id
+    where gm1.user_id = auth.uid()
+      and gm2.user_id = study_sessions.user_id
+  )
+);
+
+create policy "Users can insert their own study sessions"
+on public.study_sessions for insert to authenticated
+with check (auth.uid() = user_id);
+
+create policy "Users can update their own study sessions"
+on public.study_sessions for update to authenticated
+using (auth.uid() = user_id);
+
+create policy "Users can delete their own study sessions"
+on public.study_sessions for delete to authenticated
+using (auth.uid() = user_id);
+
 create policy "Users can insert their own subscriptions"
 on public.push_subscriptions for insert to authenticated
 with check (auth.uid() = user_id);

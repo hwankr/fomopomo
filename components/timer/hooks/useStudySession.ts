@@ -26,34 +26,60 @@ const generateUUID = () => {
   });
 };
 
-export type SaveRecordResult = 'saved' | 'failed' | 'skipped';
+// 'rejected': the server refused the batch permanently (payload conflict or
+// validation failure). The draft is kept in the outbox in an explicit recovery
+// state, in-memory session state is cleared, and callers must not auto-retry.
+export type SaveRecordResult = 'saved' | 'failed' | 'skipped' | 'rejected';
 
-type StudySessionRow = {
+// One ordered slice of a save batch, as the recording RPC consumes it.
+// ended_at is the interval end (the row's created_at on the server); the
+// server derives the start as ended_at - duration.
+type SessionSegment = {
+  index: number;
+  duration: number;
+  ended_at: string;
+};
+
+// v1 outbox rows (pre-RPC clients) carried full study_sessions rows; drafts
+// written before the session_batch_id migration held the batch id in group_id.
+type LegacyPendingSessionRow = {
   mode: string;
   duration: number;
   user_id: string;
   task: string | null;
   task_id: string | null;
   created_at: string;
-  // Save-batch id (one random UUID per save), also the outbox idempotency key.
-  // Not a social group id — that concept never attaches to sessions.
-  session_batch_id: string;
-};
-
-// Drafts written before the session_batch_id migration carried the batch id in
-// group_id instead, so recovery must accept rows in either shape.
-type PendingSessionRow = Omit<StudySessionRow, 'session_batch_id'> & {
   session_batch_id?: string;
   group_id?: string;
 };
 
-type PendingSessionDraft = {
+type LegacyPendingSessionDraft = {
   sessionId: string;
-  rows: PendingSessionRow[];
+  rows: LegacyPendingSessionRow[];
   failedAt: number;
 };
 
-// Durable outbox for failed saves: drafts survive reloads so a failed insert
+// v2 outbox draft: exactly the RPC payload plus local-only bookkeeping.
+// ownerId only gates which signed-in account may flush the draft — it is
+// NEVER sent to the server (the RPC derives the owner from auth.uid()).
+type PendingSessionDraftV2 = {
+  version: 2;
+  sessionId: string;
+  ownerId: string;
+  mode: string;
+  task: string | null;
+  taskId: string | null;
+  segments: SessionSegment[];
+  failedAt: number;
+  // 'conflict': the server already holds this batch id with a different
+  // payload. 'invalid': the server rejected the payload permanently.
+  // Flagged drafts are kept for inspection but never auto-resent.
+  state?: 'conflict' | 'invalid';
+};
+
+type PendingSessionDraft = PendingSessionDraftV2 | LegacyPendingSessionDraft;
+
+// Durable outbox for failed saves: drafts survive reloads so a failed save
 // never silently discards study time. Keyed by the stable per-session id.
 const PENDING_SESSIONS_KEY = 'fomopomo_pending_sessions';
 
@@ -77,7 +103,7 @@ const writePendingSessions = (drafts: Record<string, PendingSessionDraft>) => {
   }
 };
 
-const upsertPendingSession = (draft: PendingSessionDraft) => {
+const upsertPendingSession = (draft: PendingSessionDraftV2) => {
   const drafts = readPendingSessions();
   drafts[draft.sessionId] = draft;
   writePendingSessions(drafts);
@@ -90,13 +116,71 @@ const removePendingSession = (sessionId: string) => {
   writePendingSessions(drafts);
 };
 
+const isV2Draft = (draft: PendingSessionDraft): draft is PendingSessionDraftV2 =>
+  (draft as PendingSessionDraftV2).version === 2;
+
+// Upgrades a draft to the v2 shape without losing information. Returns null
+// when the stored value is unrecognizable — callers must then KEEP the draft
+// untouched (a conversion failure must never silently discard study time).
+const toDraftV2 = (
+  sessionId: string,
+  draft: PendingSessionDraft
+): PendingSessionDraftV2 | null => {
+  if (isV2Draft(draft)) {
+    if (
+      typeof draft.ownerId !== 'string' ||
+      typeof draft.mode !== 'string' ||
+      !Array.isArray(draft.segments) ||
+      draft.segments.length === 0
+    ) {
+      return null;
+    }
+    return draft;
+  }
+
+  const rows = draft?.rows;
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const first = rows[0];
+  if (typeof first?.user_id !== 'string' || typeof first?.mode !== 'string') {
+    return null;
+  }
+  // A v1 draft was one save, so every row shares owner/mode/task metadata.
+  const uniform = rows.every(
+    (row) =>
+      row &&
+      row.user_id === first.user_id &&
+      row.mode === first.mode &&
+      typeof row.duration === 'number' &&
+      typeof row.created_at === 'string'
+  );
+  if (!uniform) return null;
+
+  return {
+    version: 2,
+    sessionId,
+    ownerId: first.user_id,
+    mode: first.mode,
+    task: first.task ?? null,
+    taskId: first.task_id ?? null,
+    segments: rows.map((row, index) => ({
+      index,
+      duration: row.duration,
+      ended_at: row.created_at,
+    })),
+    failedAt: draft.failedAt ?? Date.now(),
+  };
+};
+
 // Drops every draft that belongs to `userId`. Called after an account reset or
-// deletion so mount-time recovery cannot re-insert data the server just erased.
+// deletion so mount-time recovery cannot re-send data the server just erased.
 export const clearPendingSessionsForUser = (userId: string) => {
   const drafts = readPendingSessions();
   let changed = false;
   for (const [sessionId, draft] of Object.entries(drafts)) {
-    if (draft?.rows?.some((row) => row.user_id === userId)) {
+    const owned = isV2Draft(draft)
+      ? draft.ownerId === userId
+      : draft?.rows?.some((row) => row.user_id === userId);
+    if (owned) {
       delete drafts[sessionId];
       changed = true;
     }
@@ -104,9 +188,67 @@ export const clearPendingSessionsForUser = (userId: string) => {
   if (changed) writePendingSessions(drafts);
 };
 
-// Session ids currently being recovered, shared across hook instances so a
-// StrictMode double-mount cannot insert the same draft twice.
+// Session ids currently being sent, shared across hook instances so a
+// StrictMode double-mount cannot fire two RPC calls for the same draft.
+// (The server-side idempotency contract still covers cross-tab races.)
 const recoveringSessionIds = new Set<string>();
+
+const callRecordBatchRpc = (draft: {
+  sessionId: string;
+  mode: string;
+  task: string | null;
+  taskId: string | null;
+  segments: SessionSegment[];
+}) =>
+  supabase.rpc('record_study_session_batch', {
+    p_batch_id: draft.sessionId,
+    p_mode: draft.mode,
+    p_task: draft.task,
+    p_task_id: draft.taskId,
+    p_segments: draft.segments,
+  });
+
+// SQLSTATEs the recording RPC raises for inputs that can never succeed.
+// Anything else (missing code, PostgREST/network failures) is retryable.
+const PERMANENT_RPC_SQLSTATES = new Set([
+  '22007',
+  '22008',
+  '22023',
+  '22P02',
+  '23502',
+  '23514',
+  '42501',
+]);
+
+type RpcFailureKind = 'conflict' | 'permanent' | 'retryable';
+
+const classifyRpcError = (error: { code?: string; message?: string } | null): RpcFailureKind => {
+  const code = error?.code ?? '';
+  const message = error?.message ?? '';
+  if (code === '23505' || message.includes('study_session_batch_conflict')) {
+    return 'conflict';
+  }
+  if (PERMANENT_RPC_SQLSTATES.has(code)) return 'permanent';
+  return 'retryable';
+};
+
+const sumSegmentSeconds = (segments: SessionSegment[]) =>
+  segments.reduce((sum, segment) => sum + segment.duration, 0);
+
+// A retry may rebuild segments with slightly drifted end timestamps (the open
+// interval is re-closed at "now"). When the semantic content — mode, task and
+// the ordered duration list — matches the stored draft, resending the draft's
+// exact payload keeps the idempotency key AND payload stable so the server
+// answers already_processed instead of a payload conflict.
+const draftMatchesBuiltPayload = (
+  draft: PendingSessionDraftV2,
+  built: { mode: string; task: string | null; taskId: string | null; segments: SessionSegment[] }
+) =>
+  draft.mode === built.mode &&
+  draft.task === built.task &&
+  draft.taskId === built.taskId &&
+  draft.segments.length === built.segments.length &&
+  draft.segments.every((segment, i) => segment.duration === built.segments[i].duration);
 
 const formatKoreanDuration = (totalSeconds: number) => {
   const minutes = Math.floor(totalSeconds / 60);
@@ -135,8 +277,8 @@ export const useStudySession = ({
   const isSavingRef = useRef(false);
   const currentIntervalStartRef = useRef<number | null>(null);
   // Stable id for the session being saved: kept across failed attempts so a
-  // retry reuses the same outbox key and session_batch_id (no duplicate rows),
-  // and only reset once an insert has been confirmed.
+  // retry reuses the same outbox key and session_batch_id (the server-side
+  // idempotency key), and only reset once the RPC has confirmed the batch.
   const pendingSessionIdRef = useRef<string | null>(null);
 
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
@@ -192,7 +334,7 @@ export const useStudySession = ({
       isSavingRef.current = true;
 
       // Reuse the pending session id on retries so the outbox draft and the
-      // rows' session_batch_id stay stable until the save is confirmed.
+      // batch's session_batch_id stay stable until the save is confirmed.
       const sessionId = pendingSessionIdRef.current ?? generateUUID();
       pendingSessionIdRef.current = sessionId;
 
@@ -230,53 +372,113 @@ export const useStudySession = ({
         }
       }
 
-      const rowsToInsert: StudySessionRow[] = currentSessionIntervals
-        // First, split each interval at study-day (05:00) boundaries so each
-        // row's created_at (= interval end) lands in the study day it belongs to
+      // Split each interval at study-day (05:00) boundaries so each segment's
+      // ended_at (= the row's created_at) lands in the study day it belongs to.
+      const splitSegments: SessionSegment[] = currentSessionIntervals
         .flatMap(interval => splitIntervalAtStudyDayBoundary(interval))
-        // Then, convert each split interval to a row
         .map(interval => ({
-          mode: recordMode,
           duration: Math.round((interval.end - interval.start) / 1000),
-          user_id: user.id,
-          task: taskText.trim() || null,
-          task_id: selectedTaskId,
-          created_at: new Date(interval.end).toISOString(),
-          session_batch_id: sessionId,
+          ended_at: new Date(interval.end).toISOString(),
         }))
-        .filter(row => row.duration >= 10 && row.duration < 24 * 60 * 60);
+        .filter(segment => segment.duration >= 10 && segment.duration < 24 * 60 * 60)
+        .map((segment, index) => ({ index, ...segment }));
 
-      if (rowsToInsert.length === 0) {
-        rowsToInsert.push({
-          mode: recordMode,
-          duration,
-          user_id: user.id,
-          task: taskText.trim() || null,
-          task_id: selectedTaskId,
-          created_at: new Date(endTimeToUse).toISOString(),
-          session_batch_id: sessionId,
-        });
-      }
+      const builtPayload = {
+        mode: recordMode,
+        task: taskText.trim() || null,
+        taskId: selectedTaskId,
+        segments: splitSegments.length > 0
+          ? splitSegments
+          : [{ index: 0, duration, ended_at: new Date(endTimeToUse).toISOString() }],
+      };
+
+      // On a retry, prefer the stored draft payload when it carries the same
+      // content — this guarantees byte-identical segments and turns a
+      // "server committed but the response was lost" retry into a clean
+      // already_processed instead of a payload conflict.
+      const storedDraft = readPendingSessions()[sessionId];
+      const storedV2 = storedDraft ? toDraftV2(sessionId, storedDraft) : null;
+      const payload =
+        storedV2 &&
+        storedV2.ownerId === user.id &&
+        draftMatchesBuiltPayload(storedV2, builtPayload)
+          ? {
+              mode: storedV2.mode,
+              task: storedV2.task,
+              taskId: storedV2.taskId,
+              segments: storedV2.segments,
+            }
+          : builtPayload;
 
       try {
-        const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
-        if (error) throw error;
+        const { data, error } = await callRecordBatchRpc({ sessionId, ...payload });
 
-        // Cleanup only after the insert is confirmed; a failed save must keep
-        // the intervals (and its outbox draft) so the time can be retried.
-        removePendingSession(sessionId);
+        if (!error) {
+          // 'saved' and 'already_processed' are both durable success: the
+          // batch exists on the server exactly once. Cleanup only now; a
+          // failed save must keep the intervals and its outbox draft.
+          removePendingSession(sessionId);
+          pendingSessionIdRef.current = null;
+          setIntervals([]);
+          currentIntervalStartRef.current = null;
+
+          const savedSeconds =
+            typeof data?.total_seconds === 'number'
+              ? data.total_seconds
+              : sumSegmentSeconds(payload.segments);
+          toast.success(`${formatKoreanDuration(savedSeconds)} 기록 저장 완료!`, { id: toastId });
+          onRecordSaved();
+          return 'saved';
+        }
+
+        const kind = classifyRpcError(error);
+
+        if (kind === 'retryable') {
+          upsertPendingSession({
+            version: 2,
+            sessionId,
+            ownerId: user.id,
+            ...payload,
+            failedAt: Date.now(),
+          });
+          toast.error(
+            `저장 실패: ${error.message}\n기록은 임시 보관 중이니 다시 시도해주세요.`,
+            { id: toastId, duration: 5000 }
+          );
+          return 'failed';
+        }
+
+        // Terminal server verdicts. Keep the draft in an explicit recovery
+        // state (never auto-resent), clear the in-memory session so the next
+        // save cannot double-count time the server may already hold.
+        upsertPendingSession({
+          version: 2,
+          sessionId,
+          ownerId: user.id,
+          ...payload,
+          failedAt: Date.now(),
+          state: kind === 'conflict' ? 'conflict' : 'invalid',
+        });
         pendingSessionIdRef.current = null;
         setIntervals([]);
         currentIntervalStartRef.current = null;
-
-        // Calculate actual saved duration from rowsToInsert
-        const actualSavedDuration = rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
-        toast.success(`${formatKoreanDuration(actualSavedDuration)} 기록 저장 완료!`, { id: toastId });
-        onRecordSaved();
-        return 'saved';
+        toast.error(
+          kind === 'conflict'
+            ? '이 세션은 이미 다른 내용으로 저장되어 있어요. 최근 활동에서 저장된 기록을 확인해주세요.'
+            : `기록이 서버 검증에서 거부되었습니다: ${error.message}`,
+          { id: toastId, duration: 6000 }
+        );
+        return 'rejected';
       } catch (error) {
+        // Unexpected transport failure: same handling as a retryable error.
         console.error(error);
-        upsertPendingSession({ sessionId, rows: rowsToInsert, failedAt: Date.now() });
+        upsertPendingSession({
+          version: 2,
+          sessionId,
+          ownerId: user.id,
+          ...payload,
+          failedAt: Date.now(),
+        });
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         toast.error(`저장 실패: ${errorMessage}\n기록은 임시 보관 중이니 다시 시도해주세요.`, { id: toastId, duration: 5000 });
         return 'failed';
@@ -289,11 +491,11 @@ export const useStudySession = ({
   );
 
   // Recover drafts orphaned by a reload: a save that failed and never got its
-  // in-page retry would otherwise sit in the outbox forever. The batch id
-  // doubles as the draft id (session_batch_id today, group_id in drafts saved
-  // before the migration), so a row already on the server under either column
-  // proves the original insert landed and the draft is simply dropped instead
-  // of duplicated.
+  // in-page retry would otherwise sit in the outbox forever. Recovery sends
+  // the exact same RPC with the same batch id, so the server's idempotency
+  // contract — not a client-side existence check — decides whether anything
+  // is inserted. Concurrent tabs recovering the same draft therefore cannot
+  // duplicate it.
   const onRecordSavedRef = useRef(onRecordSaved);
   onRecordSavedRef.current = onRecordSaved;
 
@@ -309,50 +511,52 @@ export const useStudySession = ({
       if (!user || cancelled) return;
 
       let recoveredSeconds = 0;
-      for (const [sessionId, draft] of Object.entries(drafts)) {
+      for (const [sessionId, rawDraft] of Object.entries(drafts)) {
         // Skip drafts owned by an in-progress retry or another recovery pass.
         if (sessionId === pendingSessionIdRef.current || recoveringSessionIds.has(sessionId)) {
           continue;
         }
-        const rows = draft?.rows ?? [];
-        if (rows.length === 0) {
-          removePendingSession(sessionId);
+
+        const draft = rawDraft ? toDraftV2(sessionId, rawDraft) : null;
+        if (!draft) {
+          // Never silently discard a draft we cannot convert — keep it so the
+          // study time stays inspectable/recoverable.
+          console.error('Unrecognized pending session draft; leaving it untouched', sessionId);
           continue;
         }
         // Drafts from another account stay put until that account signs in.
-        if (rows.some((row) => row.user_id !== user.id)) continue;
+        if (draft.ownerId !== user.id) continue;
+        // Flagged drafts are terminal: the server already gave its verdict.
+        if (draft.state) continue;
 
         recoveringSessionIds.add(sessionId);
         try {
-          // The batch id may sit in session_batch_id (new rows) or group_id
-          // (rows inserted before the migration), so check both columns.
-          const { data: existing, error: checkError } = await supabase
-            .from('study_sessions')
-            .select('id')
-            .or(`session_batch_id.eq.${sessionId},group_id.eq.${sessionId}`)
-            .limit(1);
-          if (checkError) throw checkError;
-
-          if (!existing || existing.length === 0) {
-            // Legacy drafts only carry group_id; move the batch id into
-            // session_batch_id so recovered rows land in the new schema and
-            // group_id is no longer written.
-            const rowsToInsert: StudySessionRow[] = rows.map((row) => ({
-              mode: row.mode,
-              duration: row.duration,
-              user_id: row.user_id,
-              task: row.task,
-              task_id: row.task_id,
-              created_at: row.created_at,
-              session_batch_id: row.session_batch_id ?? sessionId,
-            }));
-            const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
-            if (error) throw error;
-            recoveredSeconds += rowsToInsert.reduce((sum, row) => sum + row.duration, 0);
+          const { data, error } = await callRecordBatchRpc(draft);
+          if (!error) {
+            // 'already_processed' proves the original attempt landed; only a
+            // fresh 'saved' contributes to the recovered-time toast.
+            removePendingSession(sessionId);
+            if (data?.status === 'saved') {
+              recoveredSeconds +=
+                typeof data?.total_seconds === 'number'
+                  ? data.total_seconds
+                  : sumSegmentSeconds(draft.segments);
+            }
+          } else {
+            const kind = classifyRpcError(error);
+            if (kind === 'retryable') {
+              // Keep the draft for the next mount (upgraded to v2 in place).
+              upsertPendingSession(draft);
+            } else {
+              upsertPendingSession({
+                ...draft,
+                state: kind === 'conflict' ? 'conflict' : 'invalid',
+              });
+              console.error('Pending session draft rejected by the server', sessionId, error);
+            }
           }
-          removePendingSession(sessionId);
         } catch (e) {
-          // Keep the draft for the next mount; recovery must never lose it.
+          // Transport failure: keep the draft for the next mount.
           console.error('Failed to recover pending session draft', e);
         } finally {
           recoveringSessionIds.delete(sessionId);

@@ -22,6 +22,7 @@ with expected_authenticated_functions(signature) as (
     ('public.is_group_leader(uuid)'),
     ('public.is_safe_push_endpoint(text)'),
     ('public.join_group_by_code(text)'),
+    ('public.record_study_session_batch(uuid,text,text,uuid,jsonb)'),
     ('public.send_friend_request(text)'),
     ('public.transfer_group_leadership(uuid,uuid)')
 ),
@@ -155,6 +156,103 @@ checks(check_name, passed) as (
           and p.tablename = 'friend_requests'
           and p.cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
       )
+    ),
+    (
+      'direct study session INSERT is revoked from browser roles',
+      not has_table_privilege('authenticated', 'public.study_sessions', 'INSERT')
+        and not has_table_privilege('anon', 'public.study_sessions', 'INSERT')
+    ),
+    (
+      'study session sensitive columns cannot be updated directly',
+      not has_table_privilege('authenticated', 'public.study_sessions', 'UPDATE')
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'duration', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'created_at', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'mode', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'user_id', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'session_batch_id', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'segment_index', 'UPDATE'
+        )
+        and not has_column_privilege(
+          'authenticated', 'public.study_sessions', 'recorded_at', 'UPDATE'
+        )
+    ),
+    (
+      'study session task-memo UPDATE and own-record DELETE remain available',
+      has_column_privilege('authenticated', 'public.study_sessions', 'task', 'UPDATE')
+        and has_table_privilege('authenticated', 'public.study_sessions', 'DELETE')
+    ),
+    (
+      'study_sessions exposes no INSERT/ALL RLS policy',
+      not exists (
+        select 1
+        from pg_catalog.pg_policies as p
+        where p.schemaname = 'public'
+          and p.tablename = 'study_sessions'
+          and p.cmd in ('INSERT', 'ALL')
+      )
+    ),
+    (
+      'study_sessions UPDATE policy has USING and WITH CHECK',
+      exists (
+        select 1
+        from pg_catalog.pg_policies as p
+        where p.schemaname = 'public'
+          and p.tablename = 'study_sessions'
+          and p.policyname = 'Users can update their own study sessions'
+          and p.cmd = 'UPDATE'
+          and 'authenticated' = any(p.roles)
+          and p.qual is not null
+          and p.with_check is not null
+      )
+    ),
+    (
+      'study session batch idempotency table stays private to RPCs',
+      to_regclass('private.study_session_batches') is not null
+        and not has_table_privilege('anon', 'private.study_session_batches', 'SELECT')
+        and not has_table_privilege(
+          'authenticated', 'private.study_session_batches', 'SELECT'
+        )
+        and not has_table_privilege(
+          'service_role', 'private.study_session_batches', 'SELECT'
+        )
+        and not has_table_privilege(
+          'service_role', 'private.study_session_batches', 'INSERT'
+        )
+    ),
+    (
+      'study session segment backstop index is unique',
+      exists (
+        select 1
+        from pg_catalog.pg_class as c
+        join pg_catalog.pg_index as i
+          on i.indexrelid = c.oid
+        where c.relname = 'study_sessions_user_batch_segment_key'
+          and i.indrelid = 'public.study_sessions'::regclass
+          and i.indisunique
+      )
+    ),
+    (
+      'study session integrity CHECK constraints are installed',
+      (
+        select count(*)
+        from pg_catalog.pg_constraint as c
+        where c.conrelid = 'public.study_sessions'::regclass
+          and c.conname in (
+            'study_sessions_rpc_row_shape_chk',
+            'study_sessions_task_length_chk'
+          )
+      ) = 2
     ),
     (
       'groups.code SELECT is revoked from authenticated',

@@ -266,9 +266,10 @@ export default function TimerApp({
       setTaskModalOpen(true);
     } else {
       const result = await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
-      if (result === 'saved') {
-        // Reset/close only after the insert is confirmed, so a failed save
-        // keeps the timer state and intervals for a retry.
+      if (result === 'saved' || result === 'rejected') {
+        // Reset/close only when the save reached a terminal verdict: confirmed
+        // ('saved') or permanently refused with the draft parked in the outbox
+        // ('rejected'). A retryable failure keeps the timer state for a retry.
         if (onAfterSave) onAfterSave();
       } else if (result === 'failed') {
         toast(
@@ -530,8 +531,9 @@ export default function TimerApp({
     toast.success('자동 팝업을 끄고 바로 저장합니다. 설정에서 다시 켤 수 있어요.');
     if (pendingRecord) {
       const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
-      // Keep the modal and pending record on failure so the user can retry.
-      if (result !== 'saved') return;
+      // Keep the modal and pending record only on retryable failure; 'rejected'
+      // is terminal (the draft is parked in the outbox) so clean up as well.
+      if (result !== 'saved' && result !== 'rejected') return;
       if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
       setPendingRecord(null);
       setSelectedTask('');
@@ -542,8 +544,9 @@ export default function TimerApp({
   const handleTaskSubmit = async () => {
     if (!pendingRecord) return;
     const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
-    // Keep the modal and pending record on failure so the user can retry.
-    if (result !== 'saved') return;
+    // Keep the modal and pending record only on retryable failure; 'rejected'
+    // is terminal (the draft is parked in the outbox) so clean up as well.
+    if (result !== 'saved' && result !== 'rejected') return;
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);
@@ -554,8 +557,9 @@ export default function TimerApp({
   const handleTaskSkip = async () => {
     if (!pendingRecord) return;
     const result = await saveRecord(pendingRecord.mode, pendingRecord.duration);
-    // Keep the modal and pending record on failure so the user can retry.
-    if (result !== 'saved') return;
+    // Keep the modal and pending record only on retryable failure; 'rejected'
+    // is terminal (the draft is parked in the outbox) so clean up as well.
+    if (result !== 'saved' && result !== 'rejected') return;
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);

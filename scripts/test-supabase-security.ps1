@@ -6,7 +6,11 @@ $fixturePath = Join-Path $projectRoot 'supabase\tests\fixtures\security_base.sql
 $baseMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260807001129_harden_authorization_and_push_webhook.sql'
 $migrationPath = Join-Path $projectRoot 'supabase\migrations\20260807052639_secure_groups_storage_push.sql'
 $friendRequestDmlMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808120000_lock_friend_request_dml.sql'
+$sessionBatchMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808100000_session_batch_id_and_membership_leaderboard.sql'
+$friendsRpcMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808101500_friends_rpc_study_day_range.sql'
+$studySessionLockMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808130000_lock_study_sessions_writes_and_batch_rpc.sql'
 $testPath = Join-Path $projectRoot 'supabase\tests\authorization_hardening.test.sql'
+$studySessionTestPath = Join-Path $projectRoot 'supabase\tests\study_session_batch.test.sql'
 $preflightPath = Join-Path $projectRoot 'supabase\verification\security_preflight.sql'
 $postflightPath = Join-Path $projectRoot 'supabase\verification\security_postflight.sql'
 $excludedServices = 'gotrue,realtime,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor'
@@ -73,9 +77,14 @@ try {
     Invoke-LocalSqlFile -Path $friendRequestDmlMigrationPath
     Write-Output 'Friend-request DML lockdown migration apply: PASS'
 
+    Invoke-LocalSqlFile -Path $sessionBatchMigrationPath
+    Invoke-LocalSqlFile -Path $friendsRpcMigrationPath
+    Invoke-LocalSqlFile -Path $studySessionLockMigrationPath
+    Write-Output 'Study-session write lockdown migration apply: PASS'
+
     Invoke-CheckedCommand -Arguments @(
         'supabase', '--workdir', $harnessRoot, 'test', 'db', '--local',
-        $testPath
+        $testPath, $studySessionTestPath
     )
 
     Invoke-CheckedCommand -SuppressOutput -Arguments @(
