@@ -9,6 +9,7 @@ $friendRequestDmlMigrationPath = Join-Path $projectRoot 'supabase\migrations\202
 $sessionBatchMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808100000_session_batch_id_and_membership_leaderboard.sql'
 $friendsRpcMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808101500_friends_rpc_study_day_range.sql'
 $studySessionLockMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808130000_lock_study_sessions_writes_and_batch_rpc.sql'
+$planTaskIdsMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808150000_batch_rpc_accept_plan_task_ids.sql'
 $testPath = Join-Path $projectRoot 'supabase\tests\authorization_hardening.test.sql'
 $studySessionTestPath = Join-Path $projectRoot 'supabase\tests\study_session_batch.test.sql'
 $preflightPath = Join-Path $projectRoot 'supabase\verification\security_preflight.sql'
@@ -81,6 +82,9 @@ try {
     Invoke-LocalSqlFile -Path $friendsRpcMigrationPath
     Invoke-LocalSqlFile -Path $studySessionLockMigrationPath
     Write-Output 'Study-session write lockdown migration apply: PASS'
+
+    Invoke-LocalSqlFile -Path $planTaskIdsMigrationPath
+    Write-Output 'Batch RPC plan task_id migration apply: PASS'
 
     Invoke-CheckedCommand -Arguments @(
         'supabase', '--workdir', $harnessRoot, 'test', 'db', '--local',

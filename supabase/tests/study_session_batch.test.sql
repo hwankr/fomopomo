@@ -1,6 +1,7 @@
 -- study_sessions 기록 경로 보안 테스트.
 --
 -- 검증 대상: 20260808130000_lock_study_sessions_writes_and_batch_rpc.sql
+--          + 20260808150000_batch_rpc_accept_plan_task_ids.sql
 --   * record_study_session_batch RPC의 멱등성 계약
 --     (같은 키+같은 payload = already_processed, 같은 키+다른 payload = 23505,
 --      일부 segment 무효 = 전체 롤백)
@@ -14,7 +15,7 @@
 begin;
 
 set local search_path = extensions, public, pg_catalog;
-select plan(82);
+select plan(88);
 
 create schema tests;
 grant usage on schema tests to anon, authenticated, service_role;
@@ -126,6 +127,38 @@ insert into public.tasks (id, user_id, title)
 values
   ('20000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a1', 'A의 작업'),
   ('20000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000b2', 'B의 작업');
+
+-- 타이머는 weekly_plans/monthly_plans의 행도 작업으로 선택할 수 있다
+-- (20260808150000이 이 두 테이블도 task_id 소유 검증에 포함한다).
+create table if not exists public.weekly_plans (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  title text not null,
+  status text not null default 'todo',
+  start_date date not null default current_date,
+  end_date date not null default current_date,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.monthly_plans (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  title text not null,
+  status text not null default 'todo',
+  month integer not null default extract(month from current_date),
+  year integer not null default extract(year from current_date),
+  created_at timestamptz default now()
+);
+
+insert into public.weekly_plans (id, user_id, title)
+values
+  ('21000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a1', 'A의 주간 계획'),
+  ('21000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000b2', 'B의 주간 계획');
+
+insert into public.monthly_plans (id, user_id, title)
+values
+  ('22000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a1', 'A의 월간 계획'),
+  ('22000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000b2', 'B의 월간 계획');
 
 -- ---------------------------------------------------------------------------
 -- 1. 정적 권한 표면: 직접 쓰기 봉쇄와 task/삭제 UX 유지. (22)
@@ -491,7 +524,7 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 3. 검증 규칙: duration/mode/task/segment 구조/시각 창/task_id 소유. (23)
+-- 3. 검증 규칙: duration/mode/task/segment 구조/시각 창/task_id 소유. (29)
 -- ---------------------------------------------------------------------------
 
 select tests.set_auth_context('00000000-0000-0000-0000-0000000000a1', 'authenticated');
@@ -687,6 +720,87 @@ select is(
   ),
   null::uuid,
   'a nonexistent task_id is unlinked instead of failing the recovery'
+);
+
+-- weekly_plans/monthly_plans의 행도 tasks와 동일한 3-분기 소유 검증을 받는다.
+select is(
+  (
+    select public.record_study_session_batch(
+      '35000000-0000-0000-0000-000000000001',
+      'pomo',
+      'A의 주간 계획',
+      '21000000-0000-0000-0000-0000000000a1',
+      jsonb_build_array(jsonb_build_object(
+        'index', 0, 'duration', 600,
+        'ended_at', tests.iso(now() - interval '3 minutes')
+      ))
+    ) ->> 'status'
+  ),
+  'saved',
+  'a batch linked to an owned weekly plan is saved'
+);
+
+select is(
+  (
+    select ss.task_id
+    from public.study_sessions as ss
+    where ss.session_batch_id = '35000000-0000-0000-0000-000000000001'
+  ),
+  '21000000-0000-0000-0000-0000000000a1'::uuid,
+  'an owned weekly-plan task_id is stored on the recorded rows'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.record_study_session_batch(
+      '35000000-0000-0000-0000-000000000002', 'pomo', null,
+      '21000000-0000-0000-0000-0000000000b2',
+      jsonb_build_array(jsonb_build_object(
+        'index', 0, 'duration', 600,
+        'ended_at', tests.iso(now() - interval '5 minutes'))))$$
+  ),
+  '42501',
+  'a weekly-plan task_id owned by another user is rejected'
+);
+
+select is(
+  (
+    select public.record_study_session_batch(
+      '35000000-0000-0000-0000-000000000003',
+      'stopwatch',
+      'A의 월간 계획',
+      '22000000-0000-0000-0000-0000000000a1',
+      jsonb_build_array(jsonb_build_object(
+        'index', 0, 'duration', 600,
+        'ended_at', tests.iso(now() - interval '2 minutes')
+      ))
+    ) ->> 'status'
+  ),
+  'saved',
+  'a batch linked to an owned monthly plan is saved'
+);
+
+select is(
+  (
+    select ss.task_id
+    from public.study_sessions as ss
+    where ss.session_batch_id = '35000000-0000-0000-0000-000000000003'
+  ),
+  '22000000-0000-0000-0000-0000000000a1'::uuid,
+  'an owned monthly-plan task_id is stored on the recorded rows'
+);
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.record_study_session_batch(
+      '35000000-0000-0000-0000-000000000004', 'pomo', null,
+      '22000000-0000-0000-0000-0000000000b2',
+      jsonb_build_array(jsonb_build_object(
+        'index', 0, 'duration', 600,
+        'ended_at', tests.iso(now() - interval '5 minutes'))))$$
+  ),
+  '42501',
+  'a monthly-plan task_id owned by another user is rejected'
 );
 
 select is(

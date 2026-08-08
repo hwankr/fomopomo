@@ -8,9 +8,32 @@ import {
   readOwnedJson,
 } from '@/lib/userScopedStorage';
 
+export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskKind = 'daily' | 'weekly' | 'monthly';
+
 export type TaskItem = {
   id: string;
   title: string;
+  status: TaskStatus;
+  durationSeconds: number;
+  kind: TaskKind;
+};
+
+type TaskRow = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+};
+
+type SessionDurationRow = {
+  task_id: string | null;
+  duration: number | null;
+};
+
+const TABLE_BY_KIND: Record<TaskKind, string> = {
+  daily: 'tasks',
+  weekly: 'weekly_plans',
+  monthly: 'monthly_plans',
 };
 
 const TASK_STATE_KEY = 'fomopomo_task_state';
@@ -63,37 +86,70 @@ export const useTasks = (isLoggedIn: boolean) => {
       const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday start
       const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
 
-      // Daily tasks
+      // Daily tasks (완료 항목도 표시하므로 status 필터 없음)
       const { data: tasksData } = await supabase
         .from('tasks')
-        .select('id, title')
+        .select('id, title, status')
         .eq('user_id', user.id)
-        .eq('due_date', today)
-        .neq('status', 'done');
-
-      if (tasksData) setDbTasks(tasksData);
+        .eq('due_date', today);
 
       // Weekly plans - filter by current week
       const { data: weeklyData } = await supabase
         .from('weekly_plans')
-        .select('id, title')
+        .select('id, title, status')
         .eq('user_id', user.id)
         .gte('start_date', format(weekStart, 'yyyy-MM-dd'))
-        .lte('end_date', format(weekEnd, 'yyyy-MM-dd'))
-        .neq('status', 'done');
-
-      if (weeklyData) setWeeklyPlans(weeklyData);
+        .lte('end_date', format(weekEnd, 'yyyy-MM-dd'));
 
       // Monthly plans - filter by current month and year
       const { data: monthlyData } = await supabase
         .from('monthly_plans')
-        .select('id, title')
+        .select('id, title, status')
         .eq('user_id', user.id)
         .eq('month', currentMonth)
-        .eq('year', currentYear)
-        .neq('status', 'done');
+        .eq('year', currentYear);
 
-      if (monthlyData) setMonthlyPlans(monthlyData);
+      const taskRows = (tasksData ?? []) as TaskRow[];
+      const weeklyRows = (weeklyData ?? []) as TaskRow[];
+      const monthlyRows = (monthlyData ?? []) as TaskRow[];
+
+      // 작업별 누적 공부 시간. RLS로 보이는 타인 세션(그룹/친구 조회 허용분)이
+      // 합산되지 않도록 본인 세션으로 한정한다. 실패해도 목록은 0으로 표시한다.
+      const allIds = [...taskRows, ...weeklyRows, ...monthlyRows].map(
+        (row) => row.id
+      );
+      const durationByTaskId = new Map<string, number>();
+      if (allIds.length > 0) {
+        const { data: sessions, error: sessionsError } = await supabase
+          .from('study_sessions')
+          .select('task_id, duration')
+          .eq('user_id', user.id)
+          .in('task_id', allIds);
+
+        if (sessionsError) {
+          console.error('Error fetching task durations:', sessionsError);
+        } else {
+          for (const row of (sessions ?? []) as SessionDurationRow[]) {
+            if (!row.task_id) continue;
+            durationByTaskId.set(
+              row.task_id,
+              (durationByTaskId.get(row.task_id) ?? 0) + (row.duration ?? 0)
+            );
+          }
+        }
+      }
+
+      const toItem = (kind: TaskKind) => (row: TaskRow): TaskItem => ({
+        id: row.id,
+        title: row.title,
+        status: row.status,
+        durationSeconds: durationByTaskId.get(row.id) ?? 0,
+        kind,
+      });
+
+      setDbTasks(taskRows.map(toItem('daily')));
+      setWeeklyPlans(weeklyRows.map(toItem('weekly')));
+      setMonthlyPlans(monthlyRows.map(toItem('monthly')));
 
       setIsTasksLoaded(true);
     } catch (error) {
@@ -162,6 +218,30 @@ export const useTasks = (isLoggedIn: boolean) => {
   // Restore validation: Ensure selected task still exists or keep it anyway?
   // Original logic didn't strictly validate existence on restore, simplified here.
 
+  const toggleTaskStatus = useCallback(
+    async (item: TaskItem) => {
+      const nextStatus: TaskStatus = item.status === 'done' ? 'todo' : 'done';
+      const applyStatus = (list: TaskItem[]) =>
+        list.map((task) =>
+          task.id === item.id ? { ...task, status: nextStatus } : task
+        );
+      if (item.kind === 'daily') setDbTasks(applyStatus);
+      else if (item.kind === 'weekly') setWeeklyPlans(applyStatus);
+      else setMonthlyPlans(applyStatus);
+
+      const { error } = await supabase
+        .from(TABLE_BY_KIND[item.kind])
+        .update({ status: nextStatus })
+        .eq('id', item.id);
+
+      if (error) {
+        console.error('Error updating task status:', error);
+        void fetchDbTasks();
+      }
+    },
+    [fetchDbTasks]
+  );
+
   const getSelectedTaskTitle = useCallback(() => {
     const task =
       dbTasks.find((t) => t.id === selectedTaskId) ||
@@ -180,5 +260,6 @@ export const useTasks = (isLoggedIn: boolean) => {
     setSelectedTaskId,
     getSelectedTaskTitle,
     fetchDbTasks,
+    toggleTaskStatus,
   };
 };

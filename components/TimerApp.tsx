@@ -117,7 +117,15 @@ export default function TimerApp({
     setSelectedTask,
     setSelectedTaskId,
     getSelectedTaskTitle,
+    fetchDbTasks,
+    toggleTaskStatus,
   } = useTasks(isLoggedIn);
+
+  // 사이드바를 열 때마다 목록과 작업별 누적 시간을 새로 가져온다.
+  const openTaskSidebar = useCallback(() => {
+    setIsTaskSidebarOpen(true);
+    void fetchDbTasks();
+  }, [fetchDbTasks]);
 
   // 4. Study Session Hook
   const {
@@ -907,12 +915,12 @@ export default function TimerApp({
               <button onClick={() => setTab('timer')} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'timer' ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm' : 'text-gray-400 dark:text-gray-500'}`}>타이머</button>
               <button onClick={() => setTab('stopwatch')} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'stopwatch' ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm' : 'text-gray-400 dark:text-gray-500'}`}>스톱워치</button>
             </div>
-            <button onClick={() => setIsTaskSidebarOpen(true)} className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${selectedTaskId ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50' : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'}`}>
+            <button onClick={openTaskSidebar} className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${selectedTaskId ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50' : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'}`}>
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 17.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
             </button>
           </div>
 
-          <TaskSidebar isOpen={isTaskSidebarOpen} onClose={() => setIsTaskSidebarOpen(false)} tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} selectedTaskId={selectedTaskId} onSelectTask={(task) => { if (task) { setSelectedTask(task.title); setSelectedTaskId(task.id); } else { setSelectedTask(''); setSelectedTaskId(null); } }} />
+          <TaskSidebar isOpen={isTaskSidebarOpen} onClose={() => setIsTaskSidebarOpen(false)} tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} selectedTaskId={selectedTaskId} onSelectTask={(task) => { if (task) { setSelectedTask(task.title); setSelectedTaskId(task.id); } else { setSelectedTask(''); setSelectedTaskId(null); } }} onToggleTask={(task) => { void toggleTaskStatus(task); }} />
 
           <div className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${tab === 'stopwatch' ? 'bg-indigo-50 dark:bg-indigo-950/30' : (timerMode === 'focus' ? 'bg-rose-50 dark:bg-rose-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30')}`}>
             {tab === 'timer' ? (
@@ -928,10 +936,10 @@ export default function TimerApp({
                   updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
                 }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
-                selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={() => setIsTaskSidebarOpen(true)} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }}
+                selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }}
               />
             ) : (
-              <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={() => setIsTaskSidebarOpen(true)} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }} />
+              <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }} />
             )}
           </div>
         </div>
