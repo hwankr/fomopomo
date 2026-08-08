@@ -10,7 +10,7 @@ import LoginModal from '@/components/LoginModal';
 import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
-import { ArrowLeft, Sparkles } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SupportPage() {
@@ -66,35 +66,21 @@ export default function SupportPage() {
       
       <div className="container max-w-lg mx-auto py-6 px-4 pb-24 mt-4 animate-fade-in">
         {/* 뒤로가기 */}
-        <Link 
+        <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 mb-6 transition-colors"
+          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 mb-10 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           홈으로
         </Link>
-        
+
         {/* 헤더 */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full text-xs font-medium mb-4">
-            <Sparkles className="w-3.5 h-3.5" />
-            후원하기
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
-            Fomopomo를 응원해주세요
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 max-w-sm mx-auto leading-relaxed">
-            여러분의 작은 후원이 서비스 유지와 새로운 기능 개발에 큰 힘이 됩니다.
-          </p>
-        </div>
-        
+        <h1 className="text-center text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-8">
+          Fomopomo 후원하기
+        </h1>
+
         {/* 후원 카드 */}
         <DonationSection variant="card" />
-        
-        {/* 감사 메시지 */}
-        <p className="text-center text-xs text-gray-500 dark:text-gray-500 mt-8">
-          Fomopomo를 사용해주셔서 감사합니다
-        </p>
       </div>
     </main>
   );
