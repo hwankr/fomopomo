@@ -7,6 +7,7 @@ with expected_authenticated_functions(signature) as (
     ('public.accept_friend_request(uuid)'),
     ('public.create_group(text)'),
     ('public.delete_friend(uuid)'),
+    ('public.delete_group(uuid)'),
     ('public.feedback_image_path_matches_user(uuid,text)'),
     ('public.get_group_invite_code(uuid)'),
     ('public.get_admin_dashboard_stats(timestamp with time zone)'),
