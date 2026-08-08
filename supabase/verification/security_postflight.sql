@@ -12,6 +12,7 @@ with expected_authenticated_functions(signature) as (
     ('public.get_admin_dashboard_stats(timestamp with time zone)'),
     ('public.get_admin_user_study_summary(uuid)'),
     ('public.get_friends_study_time(uuid,text)'),
+    ('public.get_friends_study_time(uuid,timestamp with time zone,timestamp with time zone)'),
     ('public.get_group_study_time_v3(uuid,timestamp with time zone,timestamp with time zone)'),
     ('public.is_admin()'),
     ('public.is_group_member(uuid)'),
