@@ -10,6 +10,7 @@ import {
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
+import { getCalendarStudyDayRange } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 
 interface TimelineProps {
@@ -59,15 +60,13 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 
     setLoading(true);
 
-    const dayStart = new Date(selectedDate);
-    dayStart.setHours(0, 0, 0, 0);
+    // 선택한 달력 날짜의 "공부일"(05:00 ~ 다음날 04:59:59.999) 범위를 보여준다.
+    const { start: dayStart, end: dayEnd } = getCalendarStudyDayRange(selectedDate);
 
-    const dayEnd = new Date(selectedDate);
-    dayEnd.setHours(23, 59, 59, 999);
-
-    const queryStart = new Date(selectedDate);
+    // 행의 created_at은 종료 시각이므로, 전날에 시작해 이 공부일로 이어지는
+    // 세션을 놓치지 않도록 하루 전 공부일 시작부터 조회한 뒤 아래에서 자른다.
+    const queryStart = new Date(dayStart);
     queryStart.setDate(queryStart.getDate() - 1);
-    queryStart.setHours(0, 0, 0, 0);
 
     const { data, error } = await supabase
       .from('study_sessions')
@@ -188,14 +187,21 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
             />
           ))}
 
-          {sessions.map((session) => {
-            const startTime = session._displayStart;
-            const durationSeconds = session._displayDuration;
-            const startMinutes =
-              getHours(startTime) * 60 + getMinutes(startTime);
-            const durationMinutes = durationSeconds / 60;
-            const leftPercent = (startMinutes / 1440) * 100;
-            const widthPercent = (durationMinutes / 1440) * 100;
+          {sessions.flatMap((session) => {
+            // 05:00 분할 도입 후 행이 자정을 가로지를 수 있어, 00:00~24:00
+            // 시계 축 막대는 자정에서 조각내 각각 제 위치에 그린다.
+            const segments: { start: Date; end: Date }[] = [];
+            let segmentStart = session._displayStart;
+            while (segmentStart < session._displayEnd) {
+              const nextMidnight = new Date(segmentStart);
+              nextMidnight.setDate(nextMidnight.getDate() + 1);
+              nextMidnight.setHours(0, 0, 0, 0);
+              const segmentEnd =
+                nextMidnight < session._displayEnd ? nextMidnight : session._displayEnd;
+              segments.push({ start: segmentStart, end: segmentEnd });
+              segmentStart = segmentEnd;
+            }
+
             const isFocus = session.mode === 'focus' || session.mode === 'pomo';
             const isBreak =
               session.mode === 'shortBreak' || session.mode === 'longBreak';
@@ -205,17 +211,26 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
                 ? 'bg-emerald-500'
                 : 'bg-sky-500';
 
-            return (
-              <div
-                key={session.id}
-                className={`absolute h-full cursor-help opacity-80 transition-opacity hover:opacity-100 ${colorClass}`}
-                style={{
-                  left: `${leftPercent}%`,
-                  width: `${Math.max(widthPercent, 0.5)}%`,
-                }}
-                title={`${format(startTime, 'HH:mm')} - ${session.task || (isFocus ? 'Focus' : 'Session')}`}
-              />
-            );
+            return segments.map((segment, segmentIndex) => {
+              const startMinutes =
+                getHours(segment.start) * 60 + getMinutes(segment.start);
+              const durationMinutes =
+                (segment.end.getTime() - segment.start.getTime()) / 60000;
+              const leftPercent = (startMinutes / 1440) * 100;
+              const widthPercent = (durationMinutes / 1440) * 100;
+
+              return (
+                <div
+                  key={`${session.id}-${segmentIndex}`}
+                  className={`absolute h-full cursor-help opacity-80 transition-opacity hover:opacity-100 ${colorClass}`}
+                  style={{
+                    left: `${leftPercent}%`,
+                    width: `${Math.max(widthPercent, 0.5)}%`,
+                  }}
+                  title={`${format(segment.start, 'HH:mm')} - ${session.task || (isFocus ? 'Focus' : 'Session')}`}
+                />
+              );
+            });
           })}
         </div>
         <div className="mt-1 flex justify-between px-1 text-xs text-gray-400">

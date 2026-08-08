@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { splitIntervalAtStudyDayBoundary } from '@/lib/dateUtils';
 import toast from 'react-hot-toast';
 
 type ProfileStatusUpdate = {
@@ -23,34 +24,6 @@ const generateUUID = () => {
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
-};
-
-// Helper to split an interval at midnight boundaries
-// Returns an array of intervals, each within a single day
-const splitIntervalAtMidnight = (interval: { start: number; end: number }): { start: number; end: number }[] => {
-  const result: { start: number; end: number }[] = [];
-  let currentStart = interval.start;
-  const finalEnd = interval.end;
-
-  while (currentStart < finalEnd) {
-    // Get the start of the next day (midnight)
-    const startDate = new Date(currentStart);
-    const nextMidnight = new Date(startDate);
-    nextMidnight.setDate(nextMidnight.getDate() + 1);
-    nextMidnight.setHours(0, 0, 0, 0);
-
-    // If the interval ends before next midnight, use the actual end
-    const currentEnd = nextMidnight.getTime() <= finalEnd ? nextMidnight.getTime() : finalEnd;
-
-    // Only add if there's meaningful duration (at least 1 second)
-    if (currentEnd - currentStart >= 1000) {
-      result.push({ start: currentStart, end: currentEnd });
-    }
-
-    currentStart = currentEnd;
-  }
-
-  return result;
 };
 
 export type SaveRecordResult = 'saved' | 'failed' | 'skipped';
@@ -258,8 +231,9 @@ export const useStudySession = ({
       }
 
       const rowsToInsert: StudySessionRow[] = currentSessionIntervals
-        // First, split each interval at midnight boundaries
-        .flatMap(interval => splitIntervalAtMidnight(interval))
+        // First, split each interval at study-day (05:00) boundaries so each
+        // row's created_at (= interval end) lands in the study day it belongs to
+        .flatMap(interval => splitIntervalAtStudyDayBoundary(interval))
         // Then, convert each split interval to a row
         .map(interval => ({
           mode: recordMode,
@@ -363,12 +337,15 @@ export const useStudySession = ({
             // Legacy drafts only carry group_id; move the batch id into
             // session_batch_id so recovered rows land in the new schema and
             // group_id is no longer written.
-            const rowsToInsert: StudySessionRow[] = rows.map(
-              ({ group_id: _legacyBatchId, ...row }) => ({
-                ...row,
-                session_batch_id: row.session_batch_id ?? sessionId,
-              })
-            );
+            const rowsToInsert: StudySessionRow[] = rows.map((row) => ({
+              mode: row.mode,
+              duration: row.duration,
+              user_id: row.user_id,
+              task: row.task,
+              task_id: row.task_id,
+              created_at: row.created_at,
+              session_batch_id: row.session_batch_id ?? sessionId,
+            }));
             const { error } = await supabase.from('study_sessions').insert(rowsToInsert);
             if (error) throw error;
             recoveredSeconds += rowsToInsert.reduce((sum, row) => sum + row.duration, 0);

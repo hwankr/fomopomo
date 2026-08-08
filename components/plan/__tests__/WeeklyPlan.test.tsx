@@ -129,11 +129,14 @@ describe('WeeklyPlan', () => {
       if (table === 'study_sessions') {
         return {
           select: vi.fn(() => ({
-            in: vi.fn(async (_field: string, ids: string[]) => ({
-              data: sessions.filter(
-                (row) => row.task_id !== null && ids.includes(row.task_id)
-              ),
-              error: null,
+            // duration 합산은 본인 세션으로 한정된다: .eq('user_id', …).in('task_id', …)
+            eq: vi.fn(() => ({
+              in: vi.fn(async (_inField: string, ids: string[]) => ({
+                data: sessions.filter(
+                  (row) => row.task_id !== null && ids.includes(row.task_id)
+                ),
+                error: null,
+              })),
             })),
           })),
         };
