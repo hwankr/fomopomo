@@ -141,7 +141,15 @@ select
     'anon_debug_logs_select',
     has_table_privilege('anon', 'public.debug_logs', 'SELECT'),
     'authenticated_debug_logs_select',
-    has_table_privilege('authenticated', 'public.debug_logs', 'SELECT')
+    has_table_privilege('authenticated', 'public.debug_logs', 'SELECT'),
+    'authenticated_friend_requests_insert',
+    has_table_privilege('authenticated', 'public.friend_requests', 'INSERT'),
+    'authenticated_friend_requests_update',
+    has_table_privilege('authenticated', 'public.friend_requests', 'UPDATE'),
+    'authenticated_friend_requests_delete',
+    has_table_privilege('authenticated', 'public.friend_requests', 'DELETE'),
+    'authenticated_friend_requests_select',
+    has_table_privilege('authenticated', 'public.friend_requests', 'SELECT')
   ) as privilege_summary,
   jsonb_build_object(
     'feedback_upload_bucket_exists',

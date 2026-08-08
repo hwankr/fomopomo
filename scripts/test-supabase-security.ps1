@@ -5,6 +5,7 @@ $harnessRoot = Join-Path $projectRoot 'test-harness'
 $fixturePath = Join-Path $projectRoot 'supabase\tests\fixtures\security_base.sql'
 $baseMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260807001129_harden_authorization_and_push_webhook.sql'
 $migrationPath = Join-Path $projectRoot 'supabase\migrations\20260807052639_secure_groups_storage_push.sql'
+$friendRequestDmlMigrationPath = Join-Path $projectRoot 'supabase\migrations\20260808120000_lock_friend_request_dml.sql'
 $testPath = Join-Path $projectRoot 'supabase\tests\authorization_hardening.test.sql'
 $preflightPath = Join-Path $projectRoot 'supabase\verification\security_preflight.sql'
 $postflightPath = Join-Path $projectRoot 'supabase\verification\security_postflight.sql'
@@ -68,6 +69,9 @@ try {
 
     Invoke-LocalSqlFile -Path $migrationPath
     Write-Output 'Forward-only migration apply: PASS'
+
+    Invoke-LocalSqlFile -Path $friendRequestDmlMigrationPath
+    Write-Output 'Friend-request DML lockdown migration apply: PASS'
 
     Invoke-CheckedCommand -Arguments @(
         'supabase', '--workdir', $harnessRoot, 'test', 'db', '--local',

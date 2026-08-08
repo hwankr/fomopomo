@@ -60,11 +60,7 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
 
   const handleReject = async (requestId: string) => {
     try {
-      const { error } = await supabase
-        .from('friend_requests')
-        .update({ status: 'rejected' })
-        .eq('id', requestId);
-
+      const { error } = await supabase.rpc('reject_friend_request', { request_id: requestId });
       if (error) throw error;
       onUpdate();
       fetchRequests();

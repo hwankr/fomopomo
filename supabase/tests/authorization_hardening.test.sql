@@ -1,7 +1,7 @@
 begin;
 
 set local search_path = extensions, public, pg_catalog;
-select plan(126);
+select plan(158);
 
 create schema tests;
 grant usage on schema tests to anon, authenticated, service_role;
@@ -472,6 +472,8 @@ select is(
         'delete_unconfirmed_users',
         'send_friend_request',
         'accept_friend_request',
+        'reject_friend_request',
+        'cancel_friend_request',
         'delete_friend',
         'create_group',
         'join_group_by_code',
@@ -503,6 +505,8 @@ select is(
         'delete_unconfirmed_users',
         'send_friend_request',
         'accept_friend_request',
+        'reject_friend_request',
+        'cancel_friend_request',
         'delete_friend',
         'create_group',
         'join_group_by_code',
@@ -765,6 +769,467 @@ select is(
   ),
   2::bigint,
   'acceptance creates one friendship row in each direction'
+);
+
+-- ==========================================================================
+-- friend_requests direct-DML lockdown and RPC-only state transitions
+-- ==========================================================================
+-- These assertions reproduce the identity-forgery attack and prove it is now
+-- blocked: browser roles have no direct INSERT/UPDATE/DELETE on friend_requests
+-- (neither table GRANT nor RLS write policy), and every transition is decided
+-- by a SECURITY DEFINER RPC that derives identity from auth.uid().
+
+-- Direct write privileges are fully revoked from browser roles; reads remain.
+select is(
+  has_table_privilege('authenticated', 'public.friend_requests', 'INSERT'),
+  false,
+  'authenticated cannot directly INSERT a friend request'
+);
+select is(
+  has_table_privilege('authenticated', 'public.friend_requests', 'UPDATE'),
+  false,
+  'authenticated cannot directly UPDATE a friend request'
+);
+select is(
+  has_table_privilege('authenticated', 'public.friend_requests', 'DELETE'),
+  false,
+  'authenticated cannot directly DELETE a friend request'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.friend_requests', 'SELECT'),
+  'authenticated can still read friend requests for lists and Realtime'
+);
+select is(
+  has_table_privilege('anon', 'public.friend_requests', 'INSERT'),
+  false,
+  'anon cannot directly INSERT a friend request'
+);
+select is(
+  has_table_privilege('anon', 'public.friend_requests', 'UPDATE'),
+  false,
+  'anon cannot directly UPDATE a friend request'
+);
+select is(
+  (
+    select count(*)::integer
+    from pg_policies as p
+    where p.schemaname = 'public'
+      and p.tablename = 'friend_requests'
+      and p.cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+  ),
+  0,
+  'friend_requests exposes no direct write RLS policy'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.reject_friend_request(uuid)',
+    'EXECUTE'
+  )
+    and has_function_privilege(
+      'authenticated',
+      'public.cancel_friend_request(uuid)',
+      'EXECUTE'
+    ),
+  'authenticated can execute the reject and cancel RPCs'
+);
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.reject_friend_request(uuid)',
+    'EXECUTE'
+  )
+    and not has_function_privilege(
+      'anon',
+      'public.cancel_friend_request(uuid)',
+      'EXECUTE'
+    ),
+  'anon cannot execute the reject or cancel RPCs'
+);
+
+-- Attack step 1: the attacker (member A) tries to seed a self-request directly.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$insert into public.friend_requests (sender_id, receiver_id, sender_email)
+      values (
+        '00000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000001',
+        'member-a@example.invalid'
+      )$$
+  ),
+  '42501',
+  'attack step 1: a direct self-request INSERT is denied'
+);
+
+reset role;
+
+-- Seed a legitimate pending request from member C to member A via the RPC.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000003',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.send_friend_request('member-a@example.invalid')$$
+  ),
+  null::text,
+  'member C can send a normal pending request to member A'
+);
+
+reset role;
+
+-- Stash the seeded request id (reset role bypasses RLS) for later RPC calls.
+select set_config(
+  'tests.fr_c_to_a',
+  (
+    select id::text
+    from public.friend_requests
+    where sender_id = '00000000-0000-0000-0000-000000000003'
+      and receiver_id = '00000000-0000-0000-0000-000000000001'
+  ),
+  true
+);
+
+-- Attack step 2+: as the receiver, member A tries to forge identity/status or
+-- delete the row through direct DML. Every attempt is denied.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$update public.friend_requests
+      set sender_id = '00000000-0000-0000-0000-000000000004'
+      where receiver_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'attack step 2: a receiver cannot rewrite sender_id to forge a victim'
+);
+select is(
+  tests.capture_sqlstate(
+    $$update public.friend_requests
+      set status = 'accepted'
+      where receiver_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'a receiver cannot self-approve a request through a direct status UPDATE'
+);
+select is(
+  tests.capture_sqlstate(
+    $$update public.friend_requests
+      set sender_email = 'attacker@example.invalid'
+      where receiver_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'a receiver cannot rewrite sender_email'
+);
+select is(
+  tests.capture_sqlstate(
+    $$delete from public.friend_requests
+      where receiver_id = '00000000-0000-0000-0000-000000000001'$$
+  ),
+  '42501',
+  'a receiver cannot directly DELETE a received request'
+);
+
+reset role;
+
+-- The blocked forge changed nothing: no victim friendship, row identity intact.
+select is(
+  (
+    select count(*)
+    from public.friendships
+    where (user_id, friend_id) in (
+      (
+        '00000000-0000-0000-0000-000000000004'::uuid,
+        '00000000-0000-0000-0000-000000000001'::uuid
+      ),
+      (
+        '00000000-0000-0000-0000-000000000001'::uuid,
+        '00000000-0000-0000-0000-000000000004'::uuid
+      )
+    )
+  ),
+  0::bigint,
+  'the blocked identity forge created no friendship with the victim'
+);
+select is(
+  (
+    select sender_id
+    from public.friend_requests
+    where receiver_id = '00000000-0000-0000-0000-000000000001'
+  ),
+  '00000000-0000-0000-0000-000000000003'::uuid,
+  'the received request sender_id was not mutated by the forge attempt'
+);
+select is(
+  (
+    select status
+    from public.friend_requests
+    where receiver_id = '00000000-0000-0000-0000-000000000001'
+  ),
+  'pending',
+  'the received request is still pending after the blocked forge'
+);
+
+-- reject: only the receiver of a pending request may reject it.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.reject_friend_request(
+      current_setting('tests.fr_c_to_a')::uuid
+    )$$
+  ),
+  '42501',
+  'a non-receiver cannot reject a friend request'
+);
+
+reset role;
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000001',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.reject_friend_request(
+      current_setting('tests.fr_c_to_a')::uuid
+    )$$
+  ),
+  null::text,
+  'the receiver can reject a pending friend request'
+);
+
+reset role;
+
+select is(
+  (
+    select status
+    from public.friend_requests
+    where id = current_setting('tests.fr_c_to_a')::uuid
+  ),
+  'rejected',
+  'rejecting transitions the request to rejected'
+);
+select is(
+  (
+    select count(*)
+    from public.friendships
+    where (user_id, friend_id) in (
+      (
+        '00000000-0000-0000-0000-000000000003'::uuid,
+        '00000000-0000-0000-0000-000000000001'::uuid
+      ),
+      (
+        '00000000-0000-0000-0000-000000000001'::uuid,
+        '00000000-0000-0000-0000-000000000003'::uuid
+      )
+    )
+  ),
+  0::bigint,
+  'rejecting a request creates no friendship'
+);
+
+-- cancel: only the sender of a pending request may withdraw it.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.send_friend_request('admin@example.invalid')$$
+  ),
+  null::text,
+  'member B can send a pending request to the admin user'
+);
+
+reset role;
+
+select set_config(
+  'tests.fr_b_to_d',
+  (
+    select id::text
+    from public.friend_requests
+    where sender_id = '00000000-0000-0000-0000-000000000002'
+      and receiver_id = '00000000-0000-0000-0000-000000000004'
+  ),
+  true
+);
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000003',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.cancel_friend_request(
+      current_setting('tests.fr_b_to_d')::uuid
+    )$$
+  ),
+  '42501',
+  'a non-sender cannot cancel a friend request'
+);
+
+reset role;
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.cancel_friend_request(
+      current_setting('tests.fr_b_to_d')::uuid
+    )$$
+  ),
+  null::text,
+  'the sender can cancel their own pending request'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.friend_requests
+    where sender_id = '00000000-0000-0000-0000-000000000002'
+      and receiver_id = '00000000-0000-0000-0000-000000000004'
+  ),
+  0::bigint,
+  'cancel removes the pending request row'
+);
+
+-- accept: sender / unrelated users are rejected; re-accept makes no duplicate.
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.send_friend_request('nonmember@example.invalid')$$
+  ),
+  null::text,
+  'member B can send a pending request to member C'
+);
+
+reset role;
+
+select set_config(
+  'tests.fr_b_to_c',
+  (
+    select id::text
+    from public.friend_requests
+    where sender_id = '00000000-0000-0000-0000-000000000002'
+      and receiver_id = '00000000-0000-0000-0000-000000000003'
+  ),
+  true
+);
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000002',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.accept_friend_request(
+      current_setting('tests.fr_b_to_c')::uuid
+    )$$
+  ),
+  '42501',
+  'the sender cannot accept their own request'
+);
+
+reset role;
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000004',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.accept_friend_request(
+      current_setting('tests.fr_b_to_c')::uuid
+    )$$
+  ),
+  '42501',
+  'an unrelated user cannot accept another pair''s request'
+);
+
+reset role;
+
+select tests.set_auth_context(
+  '00000000-0000-0000-0000-000000000003',
+  'authenticated'
+);
+set local role authenticated;
+
+select is(
+  tests.capture_sqlstate(
+    $$select public.accept_friend_request(
+      current_setting('tests.fr_b_to_c')::uuid
+    )$$
+  ),
+  null::text,
+  'the receiver can accept the pending request'
+);
+select is(
+  tests.capture_sqlstate(
+    $$select public.accept_friend_request(
+      current_setting('tests.fr_b_to_c')::uuid
+    )$$
+  ),
+  '42501',
+  're-accepting an already-accepted request is rejected'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.friendships
+    where (user_id, friend_id) in (
+      (
+        '00000000-0000-0000-0000-000000000002'::uuid,
+        '00000000-0000-0000-0000-000000000003'::uuid
+      ),
+      (
+        '00000000-0000-0000-0000-000000000003'::uuid,
+        '00000000-0000-0000-0000-000000000002'::uuid
+      )
+    )
+  ),
+  2::bigint,
+  'acceptance yields exactly one friendship per direction with no duplicate on re-accept'
 );
 
 insert into public.groups (id, name, code, leader_id)

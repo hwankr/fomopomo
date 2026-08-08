@@ -5,6 +5,8 @@
 with expected_authenticated_functions(signature) as (
   values
     ('public.accept_friend_request(uuid)'),
+    ('public.reject_friend_request(uuid)'),
+    ('public.cancel_friend_request(uuid)'),
     ('public.create_group(text)'),
     ('public.delete_friend(uuid)'),
     ('public.delete_group(uuid)'),
@@ -124,6 +126,34 @@ checks(check_name, passed) as (
         'public.friendships',
         'friend_id',
         'UPDATE'
+      )
+    ),
+    (
+      'direct friend request writes are revoked from authenticated',
+      not has_table_privilege('authenticated', 'public.friend_requests', 'INSERT')
+        and not has_table_privilege(
+          'authenticated',
+          'public.friend_requests',
+          'UPDATE'
+        )
+        and not has_table_privilege(
+          'authenticated',
+          'public.friend_requests',
+          'DELETE'
+        )
+    ),
+    (
+      'friend request reads remain available to authenticated',
+      has_table_privilege('authenticated', 'public.friend_requests', 'SELECT')
+    ),
+    (
+      'friend_requests exposes no direct write RLS policy',
+      not exists (
+        select 1
+        from pg_catalog.pg_policies as p
+        where p.schemaname = 'public'
+          and p.tablename = 'friend_requests'
+          and p.cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
       )
     ),
     (

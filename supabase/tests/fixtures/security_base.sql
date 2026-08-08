@@ -144,6 +144,19 @@ create policy "Users can view requests sent by them or to them"
 on public.friend_requests for select to authenticated
 using (auth.uid() = sender_id or auth.uid() = receiver_id);
 
+-- Pre-remediation production policies. These reproduce the attackable state that
+-- the friend_requests DML lockdown migration must close:
+--   * INSERT gated only on the caller being the sender (self-requests allowed).
+--   * UPDATE gated only on receiver ownership with NO `with check`, so a receiver
+--     can rewrite identity columns (sender_id / sender_email / status).
+create policy "Users can create requests"
+on public.friend_requests for insert to authenticated
+with check (auth.uid() = sender_id);
+
+create policy "Users can update requests received by them"
+on public.friend_requests for update to authenticated
+using (auth.uid() = receiver_id);
+
 create policy "Users can see their own friendships."
 on public.friendships for select to authenticated
 using (auth.uid() = user_id or auth.uid() = friend_id);
