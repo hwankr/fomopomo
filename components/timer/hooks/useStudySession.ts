@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { splitIntervalAtStudyDayBoundary } from '@/lib/dateUtils';
+import { getCurrentUserId } from '@/lib/userScopedStorage';
 import toast from 'react-hot-toast';
 
 type ProfileStatusUpdate = {
@@ -235,20 +236,51 @@ const classifyRpcError = (error: { code?: string; message?: string } | null): Rp
 const sumSegmentSeconds = (segments: SessionSegment[]) =>
   segments.reduce((sum, segment) => sum + segment.duration, 0);
 
-// A retry may rebuild segments with slightly drifted end timestamps (the open
-// interval is re-closed at "now"). When the semantic content — mode, task and
-// the ordered duration list — matches the stored draft, resending the draft's
-// exact payload keeps the idempotency key AND payload stable so the server
-// answers already_processed instead of a payload conflict.
-const draftMatchesBuiltPayload = (
-  draft: PendingSessionDraftV2,
-  built: { mode: string; task: string | null; taskId: string | null; segments: SessionSegment[] }
-) =>
-  draft.mode === built.mode &&
-  draft.task === built.task &&
-  draft.taskId === built.taskId &&
-  draft.segments.length === built.segments.length &&
-  draft.segments.every((segment, i) => segment.duration === built.segments[i].duration);
+// Builds the RPC segment list for a save: closes the still-open interval at
+// endTimeToUse, splits everything at study-day (05:00) boundaries, and falls
+// back to one synthesized interval anchored at endTimeToUse when no usable
+// interval remains.
+const buildSessionSegments = (
+  intervalsList: { start: number; end: number }[],
+  currentStart: number | null,
+  endTimeToUse: number,
+  duration: number
+): SessionSegment[] => {
+  let sessionIntervals = [...intervalsList];
+  if (currentStart) {
+    sessionIntervals.push({ start: currentStart, end: endTimeToUse });
+  }
+  sessionIntervals = sessionIntervals.filter(i => i.start > 0 && i.end > 0);
+  if (sessionIntervals.length === 0 && duration > 0 && duration < 24 * 60 * 60) {
+    sessionIntervals.push({ start: endTimeToUse - duration * 1000, end: endTimeToUse });
+  }
+
+  const splitSegments = sessionIntervals
+    .flatMap(interval => splitIntervalAtStudyDayBoundary(interval))
+    .map(interval => ({
+      duration: Math.round((interval.end - interval.start) / 1000),
+      ended_at: new Date(interval.end).toISOString(),
+    }))
+    .filter(segment => segment.duration >= 10 && segment.duration < 24 * 60 * 60)
+    .map((segment, index) => ({ index, ...segment }));
+
+  return splitSegments.length > 0
+    ? splitSegments
+    : [{ index: 0, duration, ended_at: new Date(endTimeToUse).toISOString() }];
+};
+
+// One logical study record, captured atomically at creation time. The id,
+// owner, and segments are frozen here so no later async work (auto-started
+// sessions, account switches, retries, modal answers) can attach this
+// record's save to another record's identity or content.
+export type PendingStudyRecord = {
+  sessionId: string;
+  ownerId: string;
+  mode: string;
+  duration: number;
+  forcedEndTime: number;
+  segments: SessionSegment[];
+};
 
 const formatKoreanDuration = (totalSeconds: number) => {
   const minutes = Math.floor(totalSeconds / 60);
@@ -261,14 +293,12 @@ const formatKoreanDuration = (totalSeconds: number) => {
 interface UseStudySessionProps {
   isLoggedIn: boolean;
   onRecordSaved: () => void;
-  selectedTaskId: string | null;
   selectedTaskTitle: string;
 }
 
 export const useStudySession = ({
   isLoggedIn,
   onRecordSaved,
-  selectedTaskId,
   selectedTaskTitle,
 }: UseStudySessionProps) => {
   const [isSaving, setIsSaving] = useState(false);
@@ -276,10 +306,6 @@ export const useStudySession = ({
   // Ref-based lock to prevent duplicate saves (sync check, unlike useState)
   const isSavingRef = useRef(false);
   const currentIntervalStartRef = useRef<number | null>(null);
-  // Stable id for the session being saved: kept across failed attempts so a
-  // retry reuses the same outbox key and session_batch_id (the server-side
-  // idempotency key), and only reset once the RPC has confirmed the batch.
-  const pendingSessionIdRef = useRef<string | null>(null);
 
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
     try {
@@ -312,42 +338,79 @@ export const useStudySession = ({
     }
   }, [selectedTaskTitle]);
 
-  // taskIdOverride: undefined attaches the ambient selectedTaskId; null (or an
-  // explicit id) replaces it. Skip-style saves pass null so a task clicked but
-  // then abandoned in the popup cannot claim the session.
-  const saveRecord = useCallback(
-    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number, taskIdOverride?: string | null): Promise<SaveRecordResult> => {
-      // Prevent duplicate saves using ref (synchronous check)
+  // Creates one logical study record SYNCHRONOUSLY: freezes the segments from
+  // the live interval state, consumes that state, and parks the record as an
+  // unlabeled outbox draft — all before anything async can run. From this
+  // moment the record can survive a refresh (mount recovery finishes it), an
+  // auto-started next session cannot corrupt its segments, and its batch id
+  // can never be confused with another record's. Returns null when no
+  // authenticated owner can be resolved (the caller should treat it as a
+  // login-required save).
+  const createPendingRecord = useCallback(
+    (recordMode: string, duration: number, forcedEndTime?: number): PendingStudyRecord | null => {
+      const ownerId = getCurrentUserId();
+      if (!ownerId) return null;
+
+      const endTime = forcedEndTime || Date.now();
+      const record: PendingStudyRecord = {
+        sessionId: generateUUID(),
+        ownerId,
+        mode: recordMode,
+        duration,
+        forcedEndTime: endTime,
+        segments: buildSessionSegments(intervals, currentIntervalStartRef.current, endTime, duration),
+      };
+
+      // Content ownership moves to the record atomically: the live interval
+      // state belongs to the NEXT session from here on.
+      setIntervals([]);
+      currentIntervalStartRef.current = null;
+
+      // Shield the parked draft from this tab's own recovery passes (the
+      // effect re-runs on auth transitions) while the record is still live
+      // here — e.g. waiting in the task popup. A reload clears the shield,
+      // which is exactly when recovery SHOULD take over.
+      recoveringSessionIds.add(record.sessionId);
+
+      upsertPendingSession({
+        version: 2,
+        sessionId: record.sessionId,
+        ownerId,
+        mode: record.mode,
+        task: null,
+        taskId: null,
+        segments: record.segments,
+        failedAt: Date.now(),
+      });
+
+      return record;
+    },
+    [intervals]
+  );
+
+  // Saves a created record, attaching the given label. Retries call this again
+  // with the SAME record (closures carry it), so the batch id and segments are
+  // byte-identical across attempts and the server's idempotency contract can
+  // always prove a duplicate.
+  const savePendingRecord = useCallback(
+    async (record: PendingStudyRecord, taskText = '', taskId: string | null = null): Promise<SaveRecordResult> => {
+      // Prevent duplicate saves using ref (synchronous check). The record
+      // stays shielded: the in-flight save's own terminal handling owns it.
       if (isSavingRef.current) {
-        console.log('[saveRecord] Already saving, ignoring duplicate request');
+        console.log('[savePendingRecord] Already saving, ignoring duplicate request');
         return 'skipped';
       }
 
-      if (duration < 10) {
-        toast.error('10초 미만은 저장되지 않습니다.');
-        return 'skipped';
-      }
-
-      if (!isLoggedIn) {
+      if (!isLoggedIn || getCurrentUserId() !== record.ownerId) {
+        // The account is gone or changed since the record was created. This
+        // tab relinquishes the record: unshield it so recovery can flush the
+        // parked draft once its owner signs back in.
+        recoveringSessionIds.delete(record.sessionId);
         toast.error('로그인이 필요한 기능입니다.');
         return 'skipped';
       }
 
-      // Set ref immediately (synchronous) to block rapid duplicate calls
       isSavingRef.current = true;
-
-      // Reuse the pending session id on retries so the outbox draft and the
-      // batch's session_batch_id stay stable until the save is confirmed.
-      const sessionId = pendingSessionIdRef.current ?? generateUUID();
-      pendingSessionIdRef.current = sessionId;
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        isSavingRef.current = false;
-        toast.error('로그인이 필요한 기능입니다.');
-        return 'skipped';
-      }
-
       setIsSaving(true);
       const toastId = toast.loading('기록 저장 중...', {
         style: {
@@ -358,73 +421,21 @@ export const useStudySession = ({
         },
       });
 
-      const now = Date.now();
-      const endTimeToUse = forcedEndTime || now; // Use forced time if provided
-
-      let currentSessionIntervals = [...intervals];
-
-      if (currentIntervalStartRef.current) {
-        currentSessionIntervals.push({ start: currentIntervalStartRef.current, end: endTimeToUse });
-      }
-
-      currentSessionIntervals = currentSessionIntervals.filter(i => i.start > 0 && i.end > 0);
-
-      if (currentSessionIntervals.length === 0) {
-        if (duration > 0 && duration < 24 * 60 * 60) {
-          currentSessionIntervals.push({ start: endTimeToUse - duration * 1000, end: endTimeToUse });
-        }
-      }
-
-      // Split each interval at study-day (05:00) boundaries so each segment's
-      // ended_at (= the row's created_at) lands in the study day it belongs to.
-      const splitSegments: SessionSegment[] = currentSessionIntervals
-        .flatMap(interval => splitIntervalAtStudyDayBoundary(interval))
-        .map(interval => ({
-          duration: Math.round((interval.end - interval.start) / 1000),
-          ended_at: new Date(interval.end).toISOString(),
-        }))
-        .filter(segment => segment.duration >= 10 && segment.duration < 24 * 60 * 60)
-        .map((segment, index) => ({ index, ...segment }));
-
-      const builtPayload = {
-        mode: recordMode,
+      const payload = {
+        mode: record.mode,
         task: taskText.trim() || null,
-        taskId: taskIdOverride === undefined ? selectedTaskId : taskIdOverride,
-        segments: splitSegments.length > 0
-          ? splitSegments
-          : [{ index: 0, duration, ended_at: new Date(endTimeToUse).toISOString() }],
+        taskId,
+        segments: record.segments,
       };
 
-      // On a retry, prefer the stored draft payload when it carries the same
-      // content — this guarantees byte-identical segments and turns a
-      // "server committed but the response was lost" retry into a clean
-      // already_processed instead of a payload conflict.
-      const storedDraft = readPendingSessions()[sessionId];
-      const storedV2 = storedDraft ? toDraftV2(sessionId, storedDraft) : null;
-      const payload =
-        storedV2 &&
-        storedV2.ownerId === user.id &&
-        draftMatchesBuiltPayload(storedV2, builtPayload)
-          ? {
-              mode: storedV2.mode,
-              task: storedV2.task,
-              taskId: storedV2.taskId,
-              segments: storedV2.segments,
-            }
-          : builtPayload;
-
       try {
-        const { data, error } = await callRecordBatchRpc({ sessionId, ...payload });
+        const { data, error } = await callRecordBatchRpc({ sessionId: record.sessionId, ...payload });
 
         if (!error) {
           // 'saved' and 'already_processed' are both durable success: the
-          // batch exists on the server exactly once. Cleanup only now; a
-          // failed save must keep the intervals and its outbox draft.
-          removePendingSession(sessionId);
-          pendingSessionIdRef.current = null;
-          setIntervals([]);
-          currentIntervalStartRef.current = null;
-
+          // batch exists on the server exactly once.
+          removePendingSession(record.sessionId);
+          recoveringSessionIds.delete(record.sessionId);
           const savedSeconds =
             typeof data?.total_seconds === 'number'
               ? data.total_seconds
@@ -436,11 +447,29 @@ export const useStudySession = ({
 
         const kind = classifyRpcError(error);
 
+        if (kind === 'conflict' && payload.task !== null) {
+          // The batch id already exists with different content. Records are
+          // parked unlabeled at creation and batch ids are per-record UUIDs,
+          // so the writer is another tab's mount recovery committing the
+          // unlabeled twin: the study time is on the server exactly once —
+          // only the label could not be attached.
+          removePendingSession(record.sessionId);
+          recoveringSessionIds.delete(record.sessionId);
+          toast.success('기록은 이미 저장되어 있어요. 방금 고른 작업 이름은 반영되지 않았을 수 있어요.', {
+            id: toastId,
+            duration: 6000,
+          });
+          onRecordSaved();
+          return 'saved';
+        }
+
         if (kind === 'retryable') {
+          // Refresh the draft with the label so a post-refresh recovery saves
+          // it fully, not just unlabeled.
           upsertPendingSession({
             version: 2,
-            sessionId,
-            ownerId: user.id,
+            sessionId: record.sessionId,
+            ownerId: record.ownerId,
             ...payload,
             failedAt: Date.now(),
           });
@@ -452,19 +481,16 @@ export const useStudySession = ({
         }
 
         // Terminal server verdicts. Keep the draft in an explicit recovery
-        // state (never auto-resent), clear the in-memory session so the next
-        // save cannot double-count time the server may already hold.
+        // state (never auto-resent) for inspection.
         upsertPendingSession({
           version: 2,
-          sessionId,
-          ownerId: user.id,
+          sessionId: record.sessionId,
+          ownerId: record.ownerId,
           ...payload,
           failedAt: Date.now(),
           state: kind === 'conflict' ? 'conflict' : 'invalid',
         });
-        pendingSessionIdRef.current = null;
-        setIntervals([]);
-        currentIntervalStartRef.current = null;
+        recoveringSessionIds.delete(record.sessionId);
         toast.error(
           kind === 'conflict'
             ? '이 세션은 이미 다른 내용으로 저장되어 있어요. 최근 활동에서 저장된 기록을 확인해주세요.'
@@ -477,8 +503,8 @@ export const useStudySession = ({
         console.error(error);
         upsertPendingSession({
           version: 2,
-          sessionId,
-          ownerId: user.id,
+          sessionId: record.sessionId,
+          ownerId: record.ownerId,
           ...payload,
           failedAt: Date.now(),
         });
@@ -486,11 +512,13 @@ export const useStudySession = ({
         toast.error(`저장 실패: ${errorMessage}\n기록은 임시 보관 중이니 다시 시도해주세요.`, { id: toastId, duration: 5000 });
         return 'failed';
       } finally {
+        // 'failed' keeps the record shielded: this tab's retry toast still
+        // owns it, and a reload clears the shield for mount recovery.
         isSavingRef.current = false;
         setIsSaving(false);
       }
     },
-    [onRecordSaved, intervals, selectedTaskId, isLoggedIn]
+    [onRecordSaved, isLoggedIn]
   );
 
   // Recover drafts orphaned by a reload: a save that failed and never got its
@@ -515,8 +543,9 @@ export const useStudySession = ({
 
       let recoveredSeconds = 0;
       for (const [sessionId, rawDraft] of Object.entries(drafts)) {
-        // Skip drafts owned by an in-progress retry or another recovery pass.
-        if (sessionId === pendingSessionIdRef.current || recoveringSessionIds.has(sessionId)) {
+        // Skip drafts owned by an in-flight interactive save or another
+        // recovery pass (savePendingRecord registers its record id here).
+        if (recoveringSessionIds.has(sessionId)) {
           continue;
         }
 
@@ -550,6 +579,14 @@ export const useStudySession = ({
             if (kind === 'retryable') {
               // Keep the draft for the next mount (upgraded to v2 in place).
               upsertPendingSession(draft);
+            } else if (kind === 'conflict' && draft.task === null && isV2Draft(rawDraft)) {
+              // The batch already exists with different content. v2 batch ids
+              // are per-record UUIDs and unlabeled v2 drafts are the parked
+              // twins of interactive saves, so the committed version is this
+              // record answered WITH a label: content is on the server
+              // exactly once — drop the unlabeled twin. (Legacy v1 drafts
+              // carry no such guarantee and stay flagged instead.)
+              removePendingSession(sessionId);
             } else {
               upsertPendingSession({
                 ...draft,
@@ -628,15 +665,8 @@ export const useStudySession = ({
     setIntervals,
     currentIntervalStartRef,
     updateStatus,
-    saveRecord,
-    // Detaches the current batch id so the NEXT save starts a fresh session.
-    // Needed after a one-shot save of a displaced record: if that save failed,
-    // its id stays in pendingSessionIdRef, and a later interactive save would
-    // reuse it with different content — deleting the displaced record's outbox
-    // draft on success without ever saving it.
-    releasePendingSession: useCallback(() => {
-      pendingSessionIdRef.current = null;
-    }, []),
+    createPendingRecord,
+    savePendingRecord,
     checkActiveSession: useCallback(async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();

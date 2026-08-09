@@ -28,9 +28,13 @@ vi.mock('react-hot-toast', () => ({
   default: toastMock,
 }));
 
-import { useStudySession, type SaveRecordResult } from '../useStudySession';
+import { useStudySession, type PendingStudyRecord, type SaveRecordResult } from '../useStudySession';
 
 const PENDING_SESSIONS_KEY = 'fomopomo_pending_sessions';
+// createPendingRecord resolves the record owner synchronously from the
+// persisted Supabase session (lib/userScopedStorage.getCurrentUserId), so the
+// tests must provide the env-derived token key and a stored session.
+const AUTH_TOKEN_KEY = 'sb-testproj-auth-token';
 
 type OutboxSegment = { index: number; duration: number; ended_at: string };
 
@@ -83,7 +87,7 @@ const rpcValidationError = () => ({
   error: { code: '22023', message: 'segment duration must be between 10 and 86399 seconds' },
 });
 
-describe('useStudySession saveRecord', () => {
+describe('useStudySession study records', () => {
   const onRecordSaved = vi.fn();
 
   const renderStudySession = () =>
@@ -91,7 +95,6 @@ describe('useStudySession saveRecord', () => {
       useStudySession({
         isLoggedIn: true,
         onRecordSaved,
-        selectedTaskId: null,
         selectedTaskTitle: '',
       })
     );
@@ -101,6 +104,9 @@ describe('useStudySession saveRecord', () => {
     vi.useFakeTimers({ now: new Date('2026-08-07T12:00:00') });
     window.localStorage.clear();
     vi.clearAllMocks();
+
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://testproj.supabase.co');
+    window.localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ user: { id: 'user-1' } }));
 
     supabaseMock.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } });
     supabaseMock.from.mockImplementation(() => ({
@@ -115,9 +121,24 @@ describe('useStudySession saveRecord', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
-  it('keeps intervals and stores a durable v2 outbox draft when the RPC fails', async () => {
+  const createRecord = (
+    result: { current: ReturnType<typeof useStudySession> },
+    mode: string,
+    duration: number,
+    forcedEndTime?: number
+  ): PendingStudyRecord => {
+    let record: PendingStudyRecord | null = null;
+    act(() => {
+      record = result.current.createPendingRecord(mode, duration, forcedEndTime);
+    });
+    expect(record).not.toBeNull();
+    return record as unknown as PendingStudyRecord;
+  };
+
+  it('keeps a durable labeled draft when the RPC fails; the content already moved into the record', async () => {
     supabaseMock.rpc.mockResolvedValue(rpcNetworkError());
     const { result } = renderStudySession();
 
@@ -127,36 +148,42 @@ describe('useStudySession saveRecord', () => {
       result.current.setIntervals([{ start, end }]);
     });
 
+    const record = createRecord(result, 'stopwatch', 60, end);
+    // Creation consumed the live state: the record is the single owner of
+    // the content, so the next session cannot double-count it.
+    expect(result.current.intervals).toEqual([]);
+    expect(result.current.currentIntervalStartRef.current).toBeNull();
+
     let saveResult: SaveRecordResult | undefined;
     await act(async () => {
-      saveResult = await result.current.saveRecord('stopwatch', 60, '', end);
+      saveResult = await result.current.savePendingRecord(record, '수학', null);
     });
 
     expect(saveResult).toBe('failed');
-    // A failed save must not clear the in-memory session state.
-    expect(result.current.intervals).toEqual([{ start, end }]);
     expect(onRecordSaved).not.toHaveBeenCalled();
 
-    // The study time survives as a durable draft keyed by the batch id.
+    // The study time survives as a durable draft keyed by the record's batch
+    // id, carrying the label so recovery saves it fully.
     const outbox = readOutbox();
     const drafts = Object.values(outbox);
     expect(drafts).toHaveLength(1);
     const draft = drafts[0];
-    expect(Object.keys(outbox)[0]).toBe(draft.sessionId);
+    expect(draft.sessionId).toBe(record.sessionId);
     expect(draft.version).toBe(2);
     expect(draft.ownerId).toBe('user-1');
+    expect(draft.task).toBe('수학');
     expect(draft.segments.reduce((sum, s) => sum + s.duration, 0)).toBe(60);
 
-    // The RPC received the same batch id and payload the draft preserves,
-    // and never received a client-supplied user id.
+    // The RPC received the record's batch id and segments, and never a
+    // client-supplied user id.
     const params = supabaseMock.rpc.mock.calls[0][1] as RpcParams;
     expect(supabaseMock.rpc.mock.calls[0][0]).toBe('record_study_session_batch');
-    expect(params.p_batch_id).toBe(draft.sessionId);
-    expect(params.p_segments).toEqual(draft.segments);
+    expect(params.p_batch_id).toBe(record.sessionId);
+    expect(params.p_segments).toEqual(record.segments);
     expect(params).not.toHaveProperty('p_user_id');
   });
 
-  it('clears intervals and the outbox only after a confirmed successful save', async () => {
+  it('clears the outbox after a confirmed successful save', async () => {
     const { result } = renderStudySession();
 
     const end = Date.now();
@@ -164,19 +191,21 @@ describe('useStudySession saveRecord', () => {
       result.current.setIntervals([{ start: end - 60_000, end }]);
     });
 
+    const record = createRecord(result, 'stopwatch', 60, end);
+    // The parked draft exists from creation, before any network activity.
+    expect(Object.keys(readOutbox())).toEqual([record.sessionId]);
+
     let saveResult: SaveRecordResult | undefined;
     await act(async () => {
-      saveResult = await result.current.saveRecord('stopwatch', 60, '', end);
+      saveResult = await result.current.savePendingRecord(record, '', null);
     });
 
     expect(saveResult).toBe('saved');
-    expect(result.current.intervals).toEqual([]);
-    expect(result.current.currentIntervalStartRef.current).toBeNull();
     expect(onRecordSaved).toHaveBeenCalledTimes(1);
     expect(readOutbox()).toEqual({});
   });
 
-  it('retries with the same batch id and canonical payload, and treats already_processed as saved', async () => {
+  it('retries the same record with a byte-identical payload, and treats already_processed as saved', async () => {
     // First attempt: the server committed the batch but the response was lost.
     supabaseMock.rpc
       .mockResolvedValueOnce(rpcNetworkError())
@@ -188,15 +217,15 @@ describe('useStudySession saveRecord', () => {
       result.current.setIntervals([{ start: end - 60_000, end }]);
     });
 
+    const record = createRecord(result, 'stopwatch', 60, end);
     await act(async () => {
-      await result.current.saveRecord('stopwatch', 60, '', end);
+      await result.current.savePendingRecord(record, '', null);
     });
-    const draftIds = Object.keys(readOutbox());
-    expect(draftIds).toHaveLength(1);
+    expect(Object.keys(readOutbox())).toEqual([record.sessionId]);
 
     let retryResult: SaveRecordResult | undefined;
     await act(async () => {
-      retryResult = await result.current.saveRecord('stopwatch', 60, '', end);
+      retryResult = await result.current.savePendingRecord(record, '', null);
     });
 
     // already_processed is durable success: no duplicate row exists and the
@@ -204,18 +233,16 @@ describe('useStudySession saveRecord', () => {
     expect(retryResult).toBe('saved');
     expect(onRecordSaved).toHaveBeenCalledTimes(1);
     expect(readOutbox()).toEqual({});
-    expect(result.current.intervals).toEqual([]);
 
     const firstParams = supabaseMock.rpc.mock.calls[0][1] as RpcParams;
     const retryParams = supabaseMock.rpc.mock.calls[1][1] as RpcParams;
     // The idempotency key AND the canonical payload are byte-identical, so
     // the server can prove the retry duplicates the committed batch.
-    expect(retryParams.p_batch_id).toBe(firstParams.p_batch_id);
-    expect(retryParams.p_batch_id).toBe(draftIds[0]);
+    expect(retryParams.p_batch_id).toBe(record.sessionId);
     expect(retryParams).toEqual(firstParams);
   });
 
-  it('parks the draft in an explicit conflict state when the server reports a payload conflict', async () => {
+  it('parks an unlabeled-save conflict in an explicit conflict state', async () => {
     supabaseMock.rpc.mockResolvedValueOnce(rpcConflictError());
     const { result } = renderStudySession();
 
@@ -224,9 +251,10 @@ describe('useStudySession saveRecord', () => {
       result.current.setIntervals([{ start: end - 60_000, end }]);
     });
 
+    const record = createRecord(result, 'stopwatch', 60, end);
     let saveResult: SaveRecordResult | undefined;
     await act(async () => {
-      saveResult = await result.current.saveRecord('stopwatch', 60, '', end);
+      saveResult = await result.current.savePendingRecord(record, '', null);
     });
 
     expect(saveResult).toBe('rejected');
@@ -237,17 +265,30 @@ describe('useStudySession saveRecord', () => {
     expect(drafts[0].state).toBe('conflict');
     expect(toastMock.error).toHaveBeenCalled();
     expect(onRecordSaved).not.toHaveBeenCalled();
+  });
 
-    // The next save starts a fresh batch id so it cannot re-collide, and the
-    // conflicted draft stays parked.
-    supabaseMock.rpc.mockResolvedValueOnce(rpcOk('saved', 60));
-    await act(async () => {
-      await result.current.saveRecord('stopwatch', 60, '', Date.now());
+  it('treats a labeled-save conflict as content-already-saved and releases the draft', async () => {
+    // Another tab's mount recovery committed the parked unlabeled twin; the
+    // answered save then collides on the same batch id. The time is on the
+    // server exactly once — only the label could not be attached.
+    supabaseMock.rpc.mockResolvedValueOnce(rpcConflictError());
+    const { result } = renderStudySession();
+
+    const end = Date.now();
+    act(() => {
+      result.current.setIntervals([{ start: end - 60_000, end }]);
     });
-    const firstBatchId = (supabaseMock.rpc.mock.calls[0][1] as RpcParams).p_batch_id;
-    const secondBatchId = (supabaseMock.rpc.mock.calls[1][1] as RpcParams).p_batch_id;
-    expect(secondBatchId).not.toBe(firstBatchId);
-    expect(Object.values(readOutbox()).map((d) => d.state)).toEqual(['conflict']);
+
+    const record = createRecord(result, 'stopwatch', 60, end);
+    let saveResult: SaveRecordResult | undefined;
+    await act(async () => {
+      saveResult = await result.current.savePendingRecord(record, '독서', null);
+    });
+
+    expect(saveResult).toBe('saved');
+    expect(readOutbox()).toEqual({});
+    expect(onRecordSaved).toHaveBeenCalledTimes(1);
+    expect(toastMock.error).not.toHaveBeenCalled();
   });
 
   it('parks the draft as invalid on a permanent validation error', async () => {
@@ -259,9 +300,10 @@ describe('useStudySession saveRecord', () => {
       result.current.setIntervals([{ start: end - 60_000, end }]);
     });
 
+    const record = createRecord(result, 'stopwatch', 60, end);
     let saveResult: SaveRecordResult | undefined;
     await act(async () => {
-      saveResult = await result.current.saveRecord('stopwatch', 60, '', end);
+      saveResult = await result.current.savePendingRecord(record, '', null);
     });
 
     expect(saveResult).toBe('rejected');
@@ -270,37 +312,20 @@ describe('useStudySession saveRecord', () => {
     expect(drafts[0].state).toBe('invalid');
   });
 
-  it('returns skipped and leaves state untouched for sub-10-second durations', async () => {
-    const { result } = renderStudySession();
-
-    const end = Date.now();
-    act(() => {
-      result.current.setIntervals([{ start: end - 5_000, end }]);
-    });
-
-    let saveResult: SaveRecordResult | undefined;
-    await act(async () => {
-      saveResult = await result.current.saveRecord('stopwatch', 5, '', end);
-    });
-
-    expect(saveResult).toBe('skipped');
-    expect(supabaseMock.rpc).not.toHaveBeenCalled();
-    expect(result.current.intervals).toEqual([{ start: end - 5_000, end }]);
-  });
-
   describe('outbox recovery on mount', () => {
     const seedDraftV2 = (
       sessionId: string,
       ownerId: string,
       duration = 120,
-      state?: 'conflict' | 'invalid'
+      state?: 'conflict' | 'invalid',
+      task: string | null = null
     ) => {
       const draft: OutboxDraftV2 = {
         version: 2,
         sessionId,
         ownerId,
         mode: 'stopwatch',
-        task: null,
+        task,
         taskId: null,
         segments: [
           { index: 0, duration, ended_at: new Date(Date.now() - 60_000).toISOString() },
@@ -445,9 +470,9 @@ describe('useStudySession saveRecord', () => {
       expect(outbox['draft-retry-later'].state).toBeUndefined();
     });
 
-    it('flags a conflicted draft during recovery and never auto-resends it', async () => {
+    it('flags a conflicted labeled draft during recovery and never auto-resends it', async () => {
       supabaseMock.rpc.mockResolvedValue(rpcConflictError());
-      seedDraftV2('draft-conflict', 'user-1');
+      seedDraftV2('draft-conflict', 'user-1', 120, undefined, '수학');
 
       const first = renderStudySession();
       await act(async () => {});
@@ -460,6 +485,21 @@ describe('useStudySession saveRecord', () => {
       renderStudySession();
       await act(async () => {});
       expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops an unlabeled draft whose batch already exists — the labeled twin won the race', async () => {
+      // The answered (labeled) save committed the batch, but the page unloaded
+      // before the parked unlabeled twin was cleaned up. The conflict proves
+      // the content is on the server; keeping the twin flagged forever would
+      // just accumulate zombie drafts.
+      supabaseMock.rpc.mockResolvedValue(rpcConflictError());
+      seedDraftV2('draft-labeled-twin', 'user-1');
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+      expect(readOutbox()).toEqual({});
     });
 
     it('sends a shared draft exactly once when two hook instances recover concurrently', async () => {
@@ -475,6 +515,93 @@ describe('useStudySession saveRecord', () => {
       expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
       const params = supabaseMock.rpc.mock.calls[0][1] as RpcParams;
       expect(params.p_batch_id).toBe('draft-strict-mode');
+      expect(readOutbox()).toEqual({});
+    });
+  });
+
+  describe('createPendingRecord (atomic record creation)', () => {
+    it('freezes the session\'s real segments and parks an unlabeled draft without calling the RPC', () => {
+      const { result } = renderStudySession();
+
+      const end = Date.now();
+      act(() => {
+        // One closed pause-separated interval plus a still-open one.
+        result.current.setIntervals([{ start: end - 300_000, end: end - 240_000 }]);
+      });
+      result.current.currentIntervalStartRef.current = end - 60_000;
+
+      const record = createRecord(result, 'pomo', 120, end);
+
+      // The live state was consumed atomically at creation.
+      expect(result.current.intervals).toEqual([]);
+      expect(result.current.currentIntervalStartRef.current).toBeNull();
+
+      const outbox = readOutbox();
+      const drafts = Object.values(outbox);
+      expect(drafts).toHaveLength(1);
+      const draft = drafts[0];
+      expect(draft.sessionId).toBe(record.sessionId);
+      expect(draft.ownerId).toBe('user-1');
+      expect(draft.mode).toBe('pomo');
+      expect(draft.task).toBeNull();
+      expect(draft.taskId).toBeNull();
+      // Both intervals survive as separate segments (pauses stay pauses).
+      expect(draft.segments).toHaveLength(2);
+      expect(draft.segments.reduce((sum, s) => sum + s.duration, 0)).toBe(120);
+      expect(draft.segments).toEqual(record.segments);
+      // Creation is storage-only; nothing was sent yet.
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+    });
+
+    it('the answered save sends the record\'s frozen segments under its batch id, attaching only the label', async () => {
+      const { result } = renderStudySession();
+
+      const end = Date.now();
+      act(() => {
+        result.current.setIntervals([{ start: end - 300_000, end: end - 240_000 }]);
+      });
+      result.current.currentIntervalStartRef.current = end - 60_000;
+
+      const record = createRecord(result, 'pomo', 120, end);
+
+      // Whatever happens to the live state before the popup is answered (the
+      // next session may already be running) cannot affect this record.
+      act(() => {
+        result.current.setIntervals([{ start: end + 1_000, end: end + 30_000 }]);
+      });
+
+      let saveResult: SaveRecordResult | undefined;
+      await act(async () => {
+        saveResult = await result.current.savePendingRecord(record, '독서', 't1');
+      });
+
+      expect(saveResult).toBe('saved');
+      const params = supabaseMock.rpc.mock.calls[0][1] as RpcParams;
+      expect(params.p_batch_id).toBe(record.sessionId);
+      expect(params.p_task).toBe('독서');
+      expect(params.p_task_id).toBe('t1');
+      expect(params.p_segments).toEqual(record.segments);
+      expect(readOutbox()).toEqual({});
+      // The next session's live intervals were left untouched by the save.
+      expect(result.current.intervals).toEqual([{ start: end + 1_000, end: end + 30_000 }]);
+    });
+
+    it('returns null without parking when no authenticated owner can be resolved', () => {
+      window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      const { result } = renderHook(() =>
+        useStudySession({
+          isLoggedIn: false,
+          onRecordSaved,
+          selectedTaskTitle: '',
+        })
+      );
+
+      let record: PendingStudyRecord | null = null;
+      act(() => {
+        record = result.current.createPendingRecord('pomo', 120, Date.now());
+      });
+
+      expect(record).toBeNull();
       expect(readOutbox()).toEqual({});
     });
   });

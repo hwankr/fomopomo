@@ -10,7 +10,7 @@ import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
-import { useStudySession, type SaveRecordResult } from './timer/hooks/useStudySession';
+import { useStudySession, type PendingStudyRecord, type SaveRecordResult } from './timer/hooks/useStudySession';
 import {
   GUEST_OWNER,
   clearForeignLegacyState,
@@ -91,15 +91,13 @@ export default function TimerApp({
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
 
-  // Pending record state for manual save popup. forcedEndTime carries the
-  // timer's real completion moment: the user may answer the popup minutes
-  // later, and stamping the record with the answer time would inflate it and
-  // can push it across the 05:00 study-day boundary.
+  // The record the task popup is waiting on. The record object carries its
+  // own batch id, frozen segments and real end time, so answering the popup
+  // late (or after other sessions ran) can neither inflate the record nor
+  // attach it to another record's identity.
   const [pendingRecord, setPendingRecord] = useState<{
-    mode: string;
-    duration: number;
+    record: PendingStudyRecord;
     onAfterSave?: () => void;
-    forcedEndTime?: number;
   } | null>(null);
 
   // 1. Settings Hook
@@ -138,13 +136,12 @@ export default function TimerApp({
     setIntervals,
     currentIntervalStartRef,
     updateStatus,
-    saveRecord,
-    releasePendingSession,
+    createPendingRecord,
+    savePendingRecord,
     checkActiveSession,
   } = useStudySession({
     isLoggedIn,
     onRecordSaved,
-    selectedTaskId,
     selectedTaskTitle: getSelectedTaskTitle() || selectedTask,
   });
 
@@ -219,9 +216,10 @@ export default function TimerApp({
     setIntervals([]);
     setSelectedTask('');
     setSelectedTaskId(null);
-    // The task popup must not survive the owner switch: saveRecord resolves
-    // the account at save time, so answering a stale modal would record the
-    // previous account's pending duration into the new account.
+    // The task popup must not survive the owner switch: savePendingRecord
+    // refuses records whose owner no longer matches, but the stale modal
+    // would still be dead UI — close it. The record's parked draft stays in
+    // the outbox until its owner signs back in.
     setTaskModalOpen(false);
     setPendingRecord(null);
   }
@@ -265,14 +263,51 @@ export default function TimerApp({
 
   // --- Handlers ---
 
-  // Saving Logic Helper
-  const triggerSave = useCallback(async function attemptSave(recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number) {
-    // Prevent duplicate trigger if already saving
-    if (isSaving) {
-      console.log('[triggerSave] Already saving, ignoring duplicate request');
-      return;
+  // Saves a created record and, on a retryable failure, offers a toast retry
+  // that re-saves the SAME record object — the batch id and segments travel in
+  // the closure, so a retry can never attach to a different record.
+  const attemptRecordSave = useCallback(async function attempt(record: PendingStudyRecord, taskText: string, taskId: string | null, onAfterSave?: () => void): Promise<SaveRecordResult> {
+    const result = await savePendingRecord(record, taskText, taskId);
+    if (result === 'saved' || result === 'rejected') {
+      // Reset/close only when the save reached a terminal verdict: confirmed
+      // ('saved') or permanently refused with the draft parked in the outbox
+      // ('rejected'). A retryable failure keeps the draft for a retry.
+      if (onAfterSave) onAfterSave();
+    } else if (result === 'failed') {
+      toast(
+        (t) => (
+          <div className="flex items-center gap-3">
+            <span>저장에 실패했습니다. 기록은 보관 중입니다.</span>
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                void attempt(record, taskText, taskId, onAfterSave);
+              }}
+              className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-bold text-white"
+            >
+              재시도
+            </button>
+          </div>
+        ),
+        { duration: 12000, icon: '⚠️' }
+      );
     }
+    // 'skipped': another save is in flight or the account changed — the
+    // parked draft keeps the record recoverable either way.
+    return result;
+  }, [savePendingRecord]);
 
+  // Saving Logic Helper: creates the record (freezing its content and parking
+  // it durably, both synchronous) and either saves it directly or hands it to
+  // the task popup. onRecordCreated runs right after the record exists so the
+  // caller can persist its own "content consumed" state in the same tick.
+  const triggerSave = useCallback(async (recordMode: string, duration: number, onAfterSave?: () => void, forcedEndTime?: number, onRecordCreated?: () => void) => {
+    // No in-flight guard here: a completion arriving while another save's RPC
+    // is on the wire must still CREATE (and durably park) its record — the
+    // attempt below then returns 'skipped' and mount recovery finishes the
+    // parked draft. Double-clicks are already inert because onRecordCreated
+    // consumes the content synchronously (the second click has nothing left
+    // to save), and savePendingRecord's own synchronous lock serializes RPCs.
     if (duration < 10) {
       toast.error('10초 미만은 저장되지 않습니다.');
       return;
@@ -282,47 +317,27 @@ export default function TimerApp({
       return;
     }
 
+    const record = createPendingRecord(recordMode, duration, forcedEndTime);
+    if (!record) {
+      toast.error('로그인이 필요한 기능입니다.');
+      return;
+    }
+    if (onRecordCreated) onRecordCreated();
+
     if (settings.taskPopupEnabled && !selectedTaskId) {
       if (pendingRecord) {
         // A second completion arrived while the modal was still waiting for
-        // an answer: save the earlier record unlabeled instead of silently
-        // overwriting it (a failure parks it in the outbox). Then detach the
-        // batch id so the record the user eventually answers for cannot reuse
-        // it and clobber the parked draft.
-        await saveRecord(pendingRecord.mode, pendingRecord.duration, '', pendingRecord.forcedEndTime, null);
-        releasePendingSession();
+        // an answer: finish the displaced record unlabeled under its own
+        // batch id. Fire-and-forget — a failure leaves its parked draft for
+        // recovery, and awaiting here would delay the modal swap.
+        void attemptRecordSave(pendingRecord.record, '', null, pendingRecord.onAfterSave);
       }
-      setPendingRecord({ mode: recordMode, duration, onAfterSave, forcedEndTime });
+      setPendingRecord({ record, onAfterSave });
       setTaskModalOpen(true);
     } else {
-      const result = await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
-      if (result === 'saved' || result === 'rejected') {
-        // Reset/close only when the save reached a terminal verdict: confirmed
-        // ('saved') or permanently refused with the draft parked in the outbox
-        // ('rejected'). A retryable failure keeps the timer state for a retry.
-        if (onAfterSave) onAfterSave();
-      } else if (result === 'failed') {
-        toast(
-          (t) => (
-            <div className="flex items-center gap-3">
-              <span>저장에 실패했습니다. 기록은 보관 중입니다.</span>
-              <button
-                onClick={() => {
-                  toast.dismiss(t.id);
-                  void attemptSave(recordMode, duration, onAfterSave, forcedEndTime);
-                }}
-                className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-bold text-white"
-              >
-                재시도
-              </button>
-            </div>
-          ),
-          { duration: 12000, icon: '⚠️' }
-        );
-      }
-      // 'skipped': another save is in flight (or nothing to save) - leave state untouched.
+      await attemptRecordSave(record, selectedTask, selectedTaskId, onAfterSave);
     }
-  }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord, pendingRecord, releasePendingSession]);
+  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, createPendingRecord, attemptRecordSave, pendingRecord]);
 
   // Auto-start must go through the same atomic start transition as a manual
   // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
@@ -350,6 +365,10 @@ export default function TimerApp({
     // Play alarm (handled in useEffect/hook but let's make sure)
     playAlarm();
 
+    let nextMode: TimerMode;
+    let nextSeconds: number;
+    let nextCycle = cycleCount;
+
     if (timerMode === 'focus') {
       const duration = settings.pomoTime * 60;
       const remaining = duration - focusLoggedSeconds;
@@ -361,19 +380,19 @@ export default function TimerApp({
       }
       setFocusLoggedSeconds(0);
 
-      const newCycle = cycleCount + 1;
-      setCycleCount(newCycle);
+      nextCycle = cycleCount + 1;
+      setCycleCount(nextCycle);
 
-      if (newCycle % settings.longBreakInterval === 0) {
-        setTimerMode('longBreak');
-        setTimeLeft(settings.longBreak * 60);
+      if (nextCycle % settings.longBreakInterval === 0) {
+        nextMode = 'longBreak';
+        nextSeconds = settings.longBreak * 60;
         toast('🎉 긴 휴식 시간입니다!', { icon: '☕' });
         if (settings.autoStartBreaks) setTimeout(() => {
           autoStartTimerRef.current('longBreak', settings.longBreak * 60);
         }, 1000);
       } else {
-        setTimerMode('shortBreak');
-        setTimeLeft(settings.shortBreak * 60);
+        nextMode = 'shortBreak';
+        nextSeconds = settings.shortBreak * 60;
         toast('잠시 휴식하세요.', { icon: '☕' });
         if (settings.autoStartBreaks) setTimeout(() => {
           autoStartTimerRef.current('shortBreak', settings.shortBreak * 60);
@@ -382,16 +401,27 @@ export default function TimerApp({
     } else {
       // 긴 휴식 완료 후 focus로 돌아올 때 사이클 리셋
       if (timerMode === 'longBreak') {
+        nextCycle = 0;
         setCycleCount(0);
       }
-      setTimerMode('focus');
-      setTimeLeft(settings.pomoTime * 60);
+      nextMode = 'focus';
+      nextSeconds = settings.pomoTime * 60;
       setFocusLoggedSeconds(0);
       toast('다시 집중할 시간입니다!', { icon: '🔥' });
       if (settings.autoStartPomos) setTimeout(() => {
         autoStartTimerRef.current('focus', settings.pomoTime * 60);
       }, 1000);
     }
+
+    // Apply and persist the post-completion transition from the same values,
+    // so the on-screen state and the stored snapshot cannot diverge. Without
+    // the persist, storage kept "running focus with an expired deadline plus
+    // the old interval start" and a refresh during the break resurrected the
+    // save button, re-saving the session inflated by the break time. (The
+    // record itself is already durable: triggerSave parked it synchronously.)
+    setTimerMode(nextMode);
+    setTimeLeft(nextSeconds);
+    saveState(tab, nextMode, false, nextSeconds, null, nextCycle, 0, isStopwatchRunning, stopwatchTime, null, [], null);
 
     // ✨ Push Notification Trigger
     if ('serviceWorker' in navigator && Notification.permission === 'granted') {
@@ -414,9 +444,11 @@ export default function TimerApp({
       });
     }
 
+    // For logged-in users triggerSave's record creation already consumed the
+    // interval state; this covers the guest path, where no record is created.
     setIntervals([]);
-    // currentIntervalStartRef.current = null; // Managed by hook, but we need to reset it? Hook exposes `currentIntervalStartRef`.
-  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIntervals, endTimeRef]);
+    currentIntervalStartRef.current = null;
+  }, [timerMode, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setIntervals, endTimeRef, saveState, tab, isStopwatchRunning, stopwatchTime, currentIntervalStartRef]);
 
   // Update the ref handler whenever `handleTimerComplete` changes
   useEffect(() => {
@@ -482,7 +514,7 @@ export default function TimerApp({
       const elapsed = fullTime - timeLeft;
       const additional = elapsed - focusLoggedSeconds;
       if (additional > 0 && timeLeft > 0) {
-        triggerSave('pomo', additional);
+        triggerSave('pomo', additional, undefined, Date.now());
       }
     }
 
@@ -521,28 +553,31 @@ export default function TimerApp({
         saveState(tab, timerMode, false, fullTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null);
         updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
       };
-      triggerSave('pomo', additional, afterSave);
+      triggerSave('pomo', additional, afterSave, Date.now(), () => {
+        // The record now owns these minutes: advance loggedSeconds (hiding
+        // the save button) and persist the consumed snapshot, so a refresh
+        // cannot re-offer time whose durable copy is the parked draft.
+        const newLogged = focusLoggedSeconds + additional;
+        setFocusLoggedSeconds(newLogged);
+        saveState(tab, timerMode, false, timeLeft, null, cycleCount, newLogged, isStopwatchRunning, stopwatchTime, null, [], null);
+      });
     }
   };
 
   const handleSaveStopwatch = async () => {
-    // Capture current interval before stopping (if running)
-    if (isStopwatchRunning && currentIntervalStartRef.current) {
-      const newInterval = { start: currentIntervalStartRef.current, end: Date.now() };
-      setIntervals(prev => [...prev, newInterval]);
-      currentIntervalStartRef.current = null;
-    }
-
-    setIsStopwatchRunning(false);
-    const afterSave = () => {
+    await triggerSave('stopwatch', stopwatchTime, undefined, Date.now(), () => {
+      // Stop only once the record actually exists: flipping the flag before
+      // triggerSave's guards would desync memory from the persisted snapshot
+      // on an early return.
+      setIsStopwatchRunning(false);
+      // The record froze the full session content (including the still-open
+      // interval, closed at the click time above) — consume the stopwatch
+      // eagerly and persist the consumed snapshot, so neither a re-click nor
+      // a refresh can save the same time again.
       setStopwatchTime(0);
-      setIntervals([]);
-      currentIntervalStartRef.current = null;
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null);
-      // Clear server state
       updateStatus('online', undefined, undefined, 0);
-    };
-    await triggerSave('stopwatch', stopwatchTime, afterSave);
+    });
   };
 
   const handleResetStopwatch = () => {
@@ -556,9 +591,9 @@ export default function TimerApp({
 
   // 'failed' keeps the modal open for an in-place retry. 'skipped' with no
   // save in flight means clicking again can never succeed (the auth session
-  // is gone and saveRecord already toasted about it) — close the modal
-  // instead of trapping the user under a full-screen overlay with no
-  // dismiss control.
+  // is gone or changed; savePendingRecord already toasted) — close the modal
+  // instead of trapping the user under a full-screen overlay with no dismiss
+  // control. The record's parked outbox draft keeps it recoverable.
   const closeIfUnrecoverable = (result: SaveRecordResult) => {
     if (result === 'skipped' && !isSaving) {
       setTaskModalOpen(false);
@@ -571,11 +606,11 @@ export default function TimerApp({
     setSettings(updated);
     await persistSettings(updated);
     // Announce only the setting change here; the save outcome gets its own
-    // toast from saveRecord, so a premature success message can't contradict
-    // a failed save.
+    // toast from savePendingRecord, so a premature success message can't
+    // contradict a failed save.
     toast.success('자동 팝업을 껐어요. 설정에서 다시 켤 수 있어요.');
     if (pendingRecord) {
-      const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask, pendingRecord.forcedEndTime);
+      const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId);
       // Keep the modal and pending record only on retryable failure; 'rejected'
       // is terminal (the draft is parked in the outbox) so clean up as well.
       if (result !== 'saved' && result !== 'rejected') {
@@ -592,7 +627,7 @@ export default function TimerApp({
 
   const handleTaskSubmit = async () => {
     if (!pendingRecord) return;
-    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask, pendingRecord.forcedEndTime);
+    const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
     if (result !== 'saved' && result !== 'rejected') {
@@ -608,10 +643,10 @@ export default function TimerApp({
 
   const handleTaskSkip = async () => {
     if (!pendingRecord) return;
-    // Skipping means "record this session without a task": force taskId to
-    // null so a db-task chip clicked (then abandoned) inside the modal cannot
-    // attribute the session to that task via the ambient selectedTaskId.
-    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, '', pendingRecord.forcedEndTime, null);
+    // Skipping means "record this session without a task": pass an explicit
+    // null taskId so a db-task chip clicked (then abandoned) inside the modal
+    // cannot attribute the session to that task.
+    const result = await savePendingRecord(pendingRecord.record, '', null);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
     if (result !== 'saved' && result !== 'rejected') {
