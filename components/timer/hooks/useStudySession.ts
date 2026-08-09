@@ -312,8 +312,11 @@ export const useStudySession = ({
     }
   }, [selectedTaskTitle]);
 
+  // taskIdOverride: undefined attaches the ambient selectedTaskId; null (or an
+  // explicit id) replaces it. Skip-style saves pass null so a task clicked but
+  // then abandoned in the popup cannot claim the session.
   const saveRecord = useCallback(
-    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number): Promise<SaveRecordResult> => {
+    async (recordMode: string, duration: number, taskText = '', forcedEndTime?: number, taskIdOverride?: string | null): Promise<SaveRecordResult> => {
       // Prevent duplicate saves using ref (synchronous check)
       if (isSavingRef.current) {
         console.log('[saveRecord] Already saving, ignoring duplicate request');
@@ -386,7 +389,7 @@ export const useStudySession = ({
       const builtPayload = {
         mode: recordMode,
         task: taskText.trim() || null,
-        taskId: selectedTaskId,
+        taskId: taskIdOverride === undefined ? selectedTaskId : taskIdOverride,
         segments: splitSegments.length > 0
           ? splitSegments
           : [{ index: 0, duration, ended_at: new Date(endTimeToUse).toISOString() }],
@@ -626,6 +629,14 @@ export const useStudySession = ({
     currentIntervalStartRef,
     updateStatus,
     saveRecord,
+    // Detaches the current batch id so the NEXT save starts a fresh session.
+    // Needed after a one-shot save of a displaced record: if that save failed,
+    // its id stays in pendingSessionIdRef, and a later interactive save would
+    // reuse it with different content — deleting the displaced record's outbox
+    // draft on success without ever saving it.
+    releasePendingSession: useCallback(() => {
+      pendingSessionIdRef.current = null;
+    }, []),
     checkActiveSession: useCallback(async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();

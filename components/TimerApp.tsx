@@ -10,7 +10,7 @@ import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
-import { useStudySession } from './timer/hooks/useStudySession';
+import { useStudySession, type SaveRecordResult } from './timer/hooks/useStudySession';
 import {
   GUEST_OWNER,
   clearForeignLegacyState,
@@ -91,11 +91,15 @@ export default function TimerApp({
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
 
-  // Pending record state for manual save popup
+  // Pending record state for manual save popup. forcedEndTime carries the
+  // timer's real completion moment: the user may answer the popup minutes
+  // later, and stamping the record with the answer time would inflate it and
+  // can push it across the 05:00 study-day boundary.
   const [pendingRecord, setPendingRecord] = useState<{
     mode: string;
     duration: number;
     onAfterSave?: () => void;
+    forcedEndTime?: number;
   } | null>(null);
 
   // 1. Settings Hook
@@ -135,6 +139,7 @@ export default function TimerApp({
     currentIntervalStartRef,
     updateStatus,
     saveRecord,
+    releasePendingSession,
     checkActiveSession,
   } = useStudySession({
     isLoggedIn,
@@ -192,6 +197,9 @@ export default function TimerApp({
   // (once per mount per account).
   const storageOwner = isLoggedIn ? getStorageOwner() : GUEST_OWNER;
   const hasSyncedRef = useRef(false);
+  // Guards the task-persistence effect below: stays false until a real
+  // (restored or user-made) task selection has been seen for this owner.
+  const taskStateDirtyRef = useRef(false);
 
   // Auth changed (login/logout/account switch): reset all in-memory timer
   // state during this render — before any effect can persist the previous
@@ -211,6 +219,11 @@ export default function TimerApp({
     setIntervals([]);
     setSelectedTask('');
     setSelectedTaskId(null);
+    // The task popup must not survive the owner switch: saveRecord resolves
+    // the account at save time, so answering a stale modal would record the
+    // previous account's pending duration into the new account.
+    setTaskModalOpen(false);
+    setPendingRecord(null);
   }
 
   // --- Persistence Logic ---
@@ -270,7 +283,16 @@ export default function TimerApp({
     }
 
     if (settings.taskPopupEnabled && !selectedTaskId) {
-      setPendingRecord({ mode: recordMode, duration, onAfterSave });
+      if (pendingRecord) {
+        // A second completion arrived while the modal was still waiting for
+        // an answer: save the earlier record unlabeled instead of silently
+        // overwriting it (a failure parks it in the outbox). Then detach the
+        // batch id so the record the user eventually answers for cannot reuse
+        // it and clobber the parked draft.
+        await saveRecord(pendingRecord.mode, pendingRecord.duration, '', pendingRecord.forcedEndTime, null);
+        releasePendingSession();
+      }
+      setPendingRecord({ mode: recordMode, duration, onAfterSave, forcedEndTime });
       setTaskModalOpen(true);
     } else {
       const result = await saveRecord(recordMode, duration, selectedTask, forcedEndTime);
@@ -300,7 +322,7 @@ export default function TimerApp({
       }
       // 'skipped': another save is in flight (or nothing to save) - leave state untouched.
     }
-  }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord]);
+  }, [isSaving, isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, saveRecord, pendingRecord, releasePendingSession]);
 
   // Auto-start must go through the same atomic start transition as a manual
   // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
@@ -532,29 +554,51 @@ export default function TimerApp({
     updateStatus('online', undefined, undefined, 0);
   };
 
+  // 'failed' keeps the modal open for an in-place retry. 'skipped' with no
+  // save in flight means clicking again can never succeed (the auth session
+  // is gone and saveRecord already toasted about it) — close the modal
+  // instead of trapping the user under a full-screen overlay with no
+  // dismiss control.
+  const closeIfUnrecoverable = (result: SaveRecordResult) => {
+    if (result === 'skipped' && !isSaving) {
+      setTaskModalOpen(false);
+      setPendingRecord(null);
+    }
+  };
+
   const handleDisableTaskPopup = async () => {
     const updated = { ...settings, taskPopupEnabled: false };
     setSettings(updated);
     await persistSettings(updated);
-    toast.success('자동 팝업을 끄고 바로 저장합니다. 설정에서 다시 켤 수 있어요.');
+    // Announce only the setting change here; the save outcome gets its own
+    // toast from saveRecord, so a premature success message can't contradict
+    // a failed save.
+    toast.success('자동 팝업을 껐어요. 설정에서 다시 켤 수 있어요.');
     if (pendingRecord) {
-      const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+      const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask, pendingRecord.forcedEndTime);
       // Keep the modal and pending record only on retryable failure; 'rejected'
       // is terminal (the draft is parked in the outbox) so clean up as well.
-      if (result !== 'saved' && result !== 'rejected') return;
+      if (result !== 'saved' && result !== 'rejected') {
+        closeIfUnrecoverable(result);
+        return;
+      }
       if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
       setPendingRecord(null);
       setSelectedTask('');
+      setSelectedTaskId(null);
     }
     setTaskModalOpen(false);
   };
 
   const handleTaskSubmit = async () => {
     if (!pendingRecord) return;
-    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask);
+    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, selectedTask, pendingRecord.forcedEndTime);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
-    if (result !== 'saved' && result !== 'rejected') return;
+    if (result !== 'saved' && result !== 'rejected') {
+      closeIfUnrecoverable(result);
+      return;
+    }
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);
@@ -564,14 +608,21 @@ export default function TimerApp({
 
   const handleTaskSkip = async () => {
     if (!pendingRecord) return;
-    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration);
+    // Skipping means "record this session without a task": force taskId to
+    // null so a db-task chip clicked (then abandoned) inside the modal cannot
+    // attribute the session to that task via the ambient selectedTaskId.
+    const result = await saveRecord(pendingRecord.mode, pendingRecord.duration, '', pendingRecord.forcedEndTime, null);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
-    if (result !== 'saved' && result !== 'rejected') return;
+    if (result !== 'saved' && result !== 'rejected') {
+      closeIfUnrecoverable(result);
+      return;
+    }
     if (pendingRecord.onAfterSave) pendingRecord.onAfterSave();
     setTaskModalOpen(false);
     setPendingRecord(null);
     setSelectedTask('');
+    setSelectedTaskId(null);
   };
 
 
@@ -584,6 +635,7 @@ export default function TimerApp({
     endTimeRef.current = 0;
     stopwatchStartTimeRef.current = 0;
     currentIntervalStartRef.current = null;
+    taskStateDirtyRef.current = false;
   }, [storageOwner, endTimeRef, stopwatchStartTimeRef, currentIntervalStartRef]);
 
   // --- Restore ---
@@ -826,8 +878,16 @@ export default function TimerApp({
 
 
 
-  // Persist Task
+  // Persist Task. The mount-time flush runs with the initial empty selection
+  // while useTasks' restore only reads the key after its async fetch — an
+  // unconditional write here would clobber the stored selection before it is
+  // ever read, so hold off until a real (restored or user-made) selection has
+  // been seen for this storage owner.
   useEffect(() => {
+    if (!taskStateDirtyRef.current) {
+      if (selectedTaskId === null && selectedTask === '') return;
+      taskStateDirtyRef.current = true;
+    }
     writeOwnedJson(TASK_STATE_KEY, storageOwner, {
       taskId: selectedTaskId,
       taskTitle: selectedTask,
@@ -890,7 +950,6 @@ export default function TimerApp({
     <>
       <TaskModal
         isOpen={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
         dbTasks={dbTasks}
         selectedTask={selectedTask}
         selectedTaskId={selectedTaskId}

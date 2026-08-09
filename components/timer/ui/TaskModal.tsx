@@ -1,18 +1,19 @@
-import { useState } from 'react';
 import { TaskItem } from '../hooks/useTasks';
 
 interface TaskModalProps {
   isOpen: boolean;
-  onClose: () => void;
   dbTasks: TaskItem[];
   selectedTask: string;
   selectedTaskId: string | null;
-  onSelectTask: (task: string, id: string | null) => void; // task title, id
+  onSelectTask: (taskTitle: string, taskId: string | null) => void;
   onSave: () => void;
   onSkip: () => void;
   onDisablePopup: () => void;
 }
 
+// The input mirrors the parent's selectedTask directly: the saved value and
+// the displayed value must be the same state, or a reopened modal can show a
+// stale task name while the record is saved with an empty one.
 export const TaskModal = ({
   isOpen,
   dbTasks,
@@ -23,11 +24,6 @@ export const TaskModal = ({
   onSkip,
   onDisablePopup,
 }: TaskModalProps) => {
-  const [manualInput, setManualInput] = useState(selectedTask);
-
-  // Sync internal state if prop updates (optional, or rely on parent)
-  // Here we use parent state mainly via onSelectTask
-  
   if (!isOpen) return null;
 
   return (
@@ -49,10 +45,7 @@ export const TaskModal = ({
                   {dbTasks.map((task) => (
                     <button
                       key={task.id}
-                      onClick={() => {
-                        onSelectTask(task.title, task.id);
-                        setManualInput(task.title);
-                      }}
+                      onClick={() => onSelectTask(task.title, task.id)}
                       className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
                         ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
                         : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -71,11 +64,8 @@ export const TaskModal = ({
               </label>
               <input
                 type="text"
-                value={manualInput}
-                onChange={(e) => {
-                  setManualInput(e.target.value);
-                  onSelectTask(e.target.value, null); // Clear ID
-                }}
+                value={selectedTask}
+                onChange={(e) => onSelectTask(e.target.value, null)}
                 placeholder="예: 독서, 코딩..."
                 className="w-full bg-gray-50 dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-700 rounded-xl px-4 py-3 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
                 autoFocus
@@ -92,7 +82,7 @@ export const TaskModal = ({
             </button>
             <button
               onClick={onSave}
-              disabled={!manualInput.trim()}
+              disabled={!selectedTask.trim()}
               className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-500/30 transition-all"
             >
               저장
