@@ -87,16 +87,24 @@ vi.mock('@/components/timer/hooks/useSettings', () => ({
   useSettings: () => mocks.useSettingsResult,
 }));
 
+// TimerApp reads the persisted settings synchronously through the store for
+// restore-time decisions; route that to the same mock settings object.
+vi.mock('@/components/timer/hooks/settingsStore', () => ({
+  readSettingsSnapshot: () => mocks.settings,
+}));
+
 vi.mock('@/components/timer/hooks/useSound', () => ({
   useSound: () => mocks.useSoundResult,
 }));
 
 vi.mock('@/components/timer/hooks/useTasks', () => ({
   useTasks: () => mocks.useTasksResult,
+  TASK_STATE_KEY: 'fomopomo_task_state',
 }));
 
 vi.mock('@/components/timer/hooks/useStudySession', () => ({
   useStudySession: () => mocks.useStudySessionResult,
+  MIN_SAVABLE_SECONDS: 10,
 }));
 
 vi.mock('@/components/timer/hooks/useStopwatchLogic', () => ({
@@ -134,27 +142,38 @@ vi.mock('react-hot-toast', () => {
   return { default: toastFn };
 });
 
-const seedRunningFocusTimer = (secondsLeft: number) => {
+const seedTimerState = (overrides: {
+  mode?: string;
+  secondsLeft?: number;
+  targetTime?: number;
+  intervals?: { start: number; end: number }[];
+  currentIntervalStart?: number | null;
+  cycleCount?: number;
+  lastUpdated?: number;
+}) => {
   const now = Date.now();
+  const secondsLeft = overrides.secondsLeft ?? 3;
   window.localStorage.setItem(
     'fomopomo_full_state',
     JSON.stringify({
       activeTab: 'timer',
       timer: {
-        mode: 'focus',
+        mode: overrides.mode ?? 'focus',
         isRunning: true,
         timeLeft: secondsLeft,
-        targetTime: now + secondsLeft * 1000,
-        cycleCount: 0,
+        targetTime: overrides.targetTime ?? now + secondsLeft * 1000,
+        cycleCount: overrides.cycleCount ?? 0,
         loggedSeconds: 0,
       },
       stopwatch: { isRunning: false, elapsed: 0, startTime: null },
-      intervals: [],
-      currentIntervalStart: now,
-      lastUpdated: now,
+      intervals: overrides.intervals ?? [],
+      currentIntervalStart: overrides.currentIntervalStart ?? now,
+      lastUpdated: overrides.lastUpdated ?? now,
     })
   );
 };
+
+const seedRunningFocusTimer = (secondsLeft: number) => seedTimerState({ secondsLeft });
 
 const savedFullState = () =>
   JSON.parse(window.localStorage.getItem('fomopomo_full_state') as string);
@@ -249,5 +268,147 @@ describe('TimerApp completion persistence', () => {
     expect(saved.timer.mode).toBe('shortBreak');
     expect(saved.timer.isRunning).toBe(false);
     expect(saved.timer.targetTime).toBeNull();
+  });
+
+  describe('timer expired while the tab was closed', () => {
+    const expiredBatchId = (targetTime: number) =>
+      `00000000-0000-4000-8000-${targetTime.toString(16).padStart(12, '0').slice(-12)}`;
+
+    it('saves the interval evidence clamped at the deadline with the persisted task label and settles into the break', async () => {
+      const now = Date.now();
+      const targetTime = now - 10 * 60_000; // deadline passed 10 minutes ago
+      const closedInterval = { start: targetTime - 20 * 60_000, end: targetTime - 15 * 60_000 };
+      const openStart = targetTime - 10 * 60_000;
+      seedTimerState({
+        targetTime,
+        intervals: [closedInterval],
+        currentIntervalStart: openStart,
+      });
+      window.localStorage.setItem(
+        'fomopomo_task_state',
+        JSON.stringify({ taskId: 't1', taskTitle: '독서' })
+      );
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      // The record is built from the snapshot's intervals under a
+      // deterministic batch id, ends at the real deadline, is sized by the
+      // interval evidence (5min closed + 10min open = 15min — never the full
+      // pomoTime), and keeps the persisted label.
+      expect(mocks.createPendingRecord).toHaveBeenCalledTimes(1);
+      expect(mocks.createPendingRecord).toHaveBeenCalledWith(
+        'pomo',
+        15 * 60,
+        targetTime,
+        {
+          intervals: [closedInterval],
+          currentStart: openStart,
+          sessionId: expiredBatchId(targetTime),
+        }
+      );
+      expect(mocks.savePendingRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'pomo' }),
+        '독서',
+        't1'
+      );
+
+      // The transition is settled and persisted: a stopped break, cycle
+      // advanced, no expired deadline left to re-trigger this branch.
+      const saved = savedFullState();
+      expect(saved.timer.mode).toBe('shortBreak');
+      expect(saved.timer.isRunning).toBe(false);
+      expect(saved.timer.targetTime).toBeNull();
+      expect(saved.timer.cycleCount).toBe(1);
+      expect(saved.intervals).toEqual([]);
+      expect(saved.currentIntervalStart).toBeNull();
+    });
+
+    it('routes the expired record through the task popup when it is enabled and no task is persisted', async () => {
+      mocks.settings.taskPopupEnabled = true;
+      const now = Date.now();
+      const targetTime = now - 60_000;
+      seedTimerState({
+        targetTime,
+        intervals: [],
+        currentIntervalStart: targetTime - 20 * 60_000,
+      });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      // The record exists (durably parked by the real hook) but the save
+      // waits for the user's label — nothing is sent unlabeled.
+      expect(mocks.createPendingRecord).toHaveBeenCalledTimes(1);
+      expect(mocks.savePendingRecord).not.toHaveBeenCalled();
+    });
+
+    it('does not fabricate a record when the snapshot holds no interval evidence', async () => {
+      seedTimerState({
+        targetTime: Date.now() - 60_000,
+        intervals: [],
+        currentIntervalStart: null,
+      });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      // No evidence → no record; the transition still settles.
+      expect(mocks.createPendingRecord).not.toHaveBeenCalled();
+      const saved = savedFullState();
+      expect(saved.timer.mode).toBe('shortBreak');
+      expect(saved.timer.isRunning).toBe(false);
+    });
+
+    it('completes a session from a stale (>24h) snapshot instead of discarding it', async () => {
+      const now = Date.now();
+      const targetTime = now - 25 * 60 * 60_000; // expired 25 hours ago
+      seedTimerState({
+        targetTime,
+        intervals: [],
+        currentIntervalStart: targetTime - 20 * 60_000,
+        lastUpdated: targetTime - 20 * 60_000,
+      });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      // The snapshot is too old to rehydrate UI state, but the session it
+      // holds is still saved (segments end at the deadline).
+      expect(mocks.createPendingRecord).toHaveBeenCalledWith(
+        'pomo',
+        20 * 60,
+        targetTime,
+        expect.objectContaining({ currentStart: targetTime - 20 * 60_000 })
+      );
+    });
+
+    it('settles an expired break into a fresh focus without saving a record', async () => {
+      seedTimerState({
+        mode: 'shortBreak',
+        targetTime: Date.now() - 60_000,
+      });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(mocks.createPendingRecord).not.toHaveBeenCalled();
+      expect(mocks.savePendingRecord).not.toHaveBeenCalled();
+
+      const saved = savedFullState();
+      expect(saved.timer.mode).toBe('focus');
+      expect(saved.timer.isRunning).toBe(false);
+      expect(saved.timer.timeLeft).toBe(25 * 60);
+    });
   });
 });

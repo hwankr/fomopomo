@@ -10,10 +10,13 @@ import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
-import { useStudySession, type PendingStudyRecord, type SaveRecordResult } from './timer/hooks/useStudySession';
+import { useStudySession, MIN_SAVABLE_SECONDS, type PendingStudyRecord, type SaveRecordResult } from './timer/hooks/useStudySession';
+import { TASK_STATE_KEY, type SavedTaskState } from './timer/hooks/useTasks';
+import { readSettingsSnapshot } from './timer/hooks/settingsStore';
 import {
   GUEST_OWNER,
   clearForeignLegacyState,
+  getCurrentUserId,
   getStorageOwner,
   readOwnedJson,
   writeOwnedJson,
@@ -79,8 +82,42 @@ const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
   return 'focus';
 };
 
+const isValidInterval = (interval: { start: number; end: number }) =>
+  interval.start > 0 && interval.end > 0;
+
+// Pure completion-transition kernel shared by the live completion handler and
+// the restore-time completion of a timer that expired while the tab was
+// closed — the two paths must never disagree on cadence or cycle bookkeeping.
+const computeNextTimerPhase = (
+  completedMode: TimerMode,
+  cycleCount: number,
+  settings: Settings
+): { nextMode: TimerMode; nextSeconds: number; nextCycle: number } => {
+  if (completedMode === 'focus') {
+    const nextCycle = cycleCount + 1;
+    const nextMode: TimerMode =
+      nextCycle % settings.longBreakInterval === 0 ? 'longBreak' : 'shortBreak';
+    return {
+      nextMode,
+      nextSeconds: (nextMode === 'longBreak' ? settings.longBreak : settings.shortBreak) * 60,
+      nextCycle,
+    };
+  }
+  return {
+    nextMode: 'focus',
+    nextSeconds: settings.pomoTime * 60,
+    nextCycle: completedMode === 'longBreak' ? 0 : cycleCount,
+  };
+};
+
+// Deterministic UUID-shaped batch id for a restore-completed session, derived
+// from the expired deadline: every context that completes the same snapshot
+// (a second tab, a remount after a failed settle-write) produces the same id,
+// so the server's batch idempotency dedupes them.
+const expiredSessionBatchId = (targetTime: number) =>
+  `00000000-0000-4000-8000-${targetTime.toString(16).padStart(12, '0').slice(-12)}`;
+
 const FULL_STATE_KEY = 'fomopomo_full_state';
-const TASK_STATE_KEY = 'fomopomo_task_state';
 
 export default function TimerApp({
   settingsUpdated,
@@ -308,7 +345,7 @@ export default function TimerApp({
     // parked draft. Double-clicks are already inert because onRecordCreated
     // consumes the content synchronously (the second click has nothing left
     // to save), and savePendingRecord's own synchronous lock serializes RPCs.
-    if (duration < 10) {
+    if (duration < MIN_SAVABLE_SECONDS) {
       toast.error('10초 미만은 저장되지 않습니다.');
       return;
     }
@@ -365,9 +402,7 @@ export default function TimerApp({
     // Play alarm (handled in useEffect/hook but let's make sure)
     playAlarm();
 
-    let nextMode: TimerMode;
-    let nextSeconds: number;
-    let nextCycle = cycleCount;
+    const { nextMode, nextSeconds, nextCycle } = computeNextTimerPhase(timerMode, cycleCount, settings);
 
     if (timerMode === 'focus') {
       const duration = settings.pomoTime * 60;
@@ -379,37 +414,19 @@ export default function TimerApp({
         triggerSave('pomo', remaining, undefined, forcedEndTime);
       }
       setFocusLoggedSeconds(0);
-
-      nextCycle = cycleCount + 1;
       setCycleCount(nextCycle);
 
-      if (nextCycle % settings.longBreakInterval === 0) {
-        nextMode = 'longBreak';
-        nextSeconds = settings.longBreak * 60;
-        toast('🎉 긴 휴식 시간입니다!', { icon: '☕' });
-        if (settings.autoStartBreaks) setTimeout(() => {
-          autoStartTimerRef.current('longBreak', settings.longBreak * 60);
-        }, 1000);
-      } else {
-        nextMode = 'shortBreak';
-        nextSeconds = settings.shortBreak * 60;
-        toast('잠시 휴식하세요.', { icon: '☕' });
-        if (settings.autoStartBreaks) setTimeout(() => {
-          autoStartTimerRef.current('shortBreak', settings.shortBreak * 60);
-        }, 1000);
-      }
+      toast(nextMode === 'longBreak' ? '🎉 긴 휴식 시간입니다!' : '잠시 휴식하세요.', { icon: '☕' });
+      if (settings.autoStartBreaks) setTimeout(() => {
+        autoStartTimerRef.current(nextMode, nextSeconds);
+      }, 1000);
     } else {
       // 긴 휴식 완료 후 focus로 돌아올 때 사이클 리셋
-      if (timerMode === 'longBreak') {
-        nextCycle = 0;
-        setCycleCount(0);
-      }
-      nextMode = 'focus';
-      nextSeconds = settings.pomoTime * 60;
+      if (nextCycle !== cycleCount) setCycleCount(nextCycle);
       setFocusLoggedSeconds(0);
       toast('다시 집중할 시간입니다!', { icon: '🔥' });
       if (settings.autoStartPomos) setTimeout(() => {
-        autoStartTimerRef.current('focus', settings.pomoTime * 60);
+        autoStartTimerRef.current('focus', nextSeconds);
       }, 1000);
     }
 
@@ -509,11 +526,17 @@ export default function TimerApp({
   };
 
   const handleChangeTimerMode = (mode: TimerMode) => {
-    if (timerMode === 'focus' && focusLoggedSeconds > 0) {
+    if (timerMode === 'focus' && isLoggedIn) {
       const fullTime = settings.pomoTime * 60;
       const elapsed = fullTime - timeLeft;
       const additional = elapsed - focusLoggedSeconds;
-      if (additional > 0 && timeLeft > 0) {
+      // Save unsaved focus time before the switch discards it — but only
+      // with actual session evidence: `elapsed` derived from settings alone
+      // can be phantom time (pomoTime raised while the timer sat idle).
+      // Sub-savable remainders and guests skip silently — a mode switch must
+      // never surface an error toast.
+      const hasSessionEvidence = intervals.length > 0 || currentIntervalStartRef.current !== null;
+      if (additional >= MIN_SAVABLE_SECONDS && hasSessionEvidence) {
         triggerSave('pomo', additional, undefined, Date.now());
       }
     }
@@ -673,6 +696,116 @@ export default function TimerApp({
     taskStateDirtyRef.current = false;
   }, [storageOwner, endTimeRef, stopwatchStartTimeRef, currentIntervalStartRef]);
 
+  // Completion transition for a timer whose deadline passed while the tab was
+  // closed: the closed tab never ran handleTimerComplete, so the restore must
+  // save the focus session (clamped at the real deadline — the away time is
+  // NOT study time) and settle the mode transition. useEffectEvent so the
+  // mount-time restore effect can read live settings/handlers without them
+  // becoming re-run triggers.
+  const completeExpiredTimer = useEffectEvent((state: SavedAppState, targetTime: number) => {
+    // Cross-account race guard: this snapshot belongs to storageOwner. If the
+    // live auth identity moved on between render and this effect, leave the
+    // snapshot untouched for its owner's next mount instead of attributing
+    // the session to the wrong account.
+    if (storageOwner !== GUEST_OWNER && getCurrentUserId() !== storageOwner) return;
+
+    // The React settings snapshot can still be the hydration default when
+    // this runs in the mount effect; read the persisted settings directly so
+    // the transition and the record use the user's real configuration.
+    const currentSettings = readSettingsSnapshot();
+
+    let savedDirectly = false;
+
+    if (state.timer.mode === 'focus') {
+      // Only time that actually passed before the deadline counts — clamp
+      // every piece of evidence at targetTime.
+      const savedIntervals = (state.intervals ?? [])
+        .filter(isValidInterval)
+        .filter((interval) => interval.start < targetTime)
+        .map((interval) => ({ start: interval.start, end: Math.min(interval.end, targetTime) }));
+      const currentStart =
+        state.currentIntervalStart && state.currentIntervalStart < targetTime
+          ? state.currentIntervalStart
+          : null;
+      // The record can never exceed the snapshot's actual interval evidence:
+      // a settings change while away (or clock skew) must not let the
+      // synthesized fallback fabricate study time.
+      const evidenceSeconds = Math.round(
+        (savedIntervals.reduce((sum, interval) => sum + (interval.end - interval.start), 0) +
+          (currentStart ? targetTime - currentStart : 0)) / 1000
+      );
+      const remaining = Math.min(
+        currentSettings.pomoTime * 60 - (state.timer.loggedSeconds || 0),
+        evidenceSeconds
+      );
+
+      if (remaining >= MIN_SAVABLE_SECONDS && isLoggedIn) {
+        const record = createPendingRecord('pomo', remaining, targetTime, {
+          intervals: savedIntervals,
+          currentStart,
+          sessionId: expiredSessionBatchId(targetTime),
+        });
+        if (!record) {
+          // isLoggedIn is stale-true but no auth owner is resolvable: leave
+          // the snapshot claimable instead of consuming its content with no
+          // durable copy anywhere.
+          return;
+        }
+        // The task selection is restored asynchronously elsewhere; read the
+        // persisted selection directly so the record keeps its label.
+        const savedTask = readOwnedJson<SavedTaskState>(TASK_STATE_KEY, storageOwner);
+        if (currentSettings.taskPopupEnabled && !savedTask?.taskId) {
+          // Same labeling policy as a live completion: the user labels the
+          // finished session in the popup. The record is already parked, so
+          // abandoning the popup cannot lose it.
+          setPendingRecord({ record });
+          setTaskModalOpen(true);
+        } else {
+          void attemptRecordSave(record, savedTask?.taskTitle || '', savedTask?.taskId || null);
+          savedDirectly = true;
+        }
+      }
+    }
+
+    const { nextMode, nextSeconds, nextCycle } = computeNextTimerPhase(
+      state.timer.mode,
+      state.timer.cycleCount,
+      currentSettings
+    );
+    setCycleCount(nextCycle);
+    setTimerMode(nextMode);
+    setTimeLeft(nextSeconds);
+    setFocusLoggedSeconds(0);
+    setIsRunning(false);
+    // Persist the settled transition. The stopwatch slice is carried over
+    // faithfully so storage cannot disagree with the hydration this restore
+    // performs from the same snapshot.
+    const stopwatchRunning = Boolean(state.stopwatch?.isRunning && state.stopwatch?.startTime);
+    saveState(
+      state.activeTab, nextMode, false, nextSeconds, null, nextCycle, 0,
+      stopwatchRunning, state.stopwatch?.elapsed ?? 0, state.stopwatch?.startTime ?? null,
+      [], null
+    );
+
+    if (state.timer.mode === 'focus') {
+      toast(
+        savedDirectly
+          ? '자리 비운 사이 뽀모도로가 완료되어 기록을 저장했어요. 휴식할 시간!'
+          : '자리 비운 사이 뽀모도로가 완료되었어요.',
+        { icon: '✅' }
+      );
+    } else {
+      toast('휴식이 끝났어요. 다시 집중할 시간입니다!', { icon: '🔥' });
+    }
+
+    // The session is settled: skip this mount's server-state sync so stale
+    // paused/studying profile data cannot resurrect what was just recorded,
+    // and clear the server-side session state (the closed tab's offline
+    // beacon is best-effort and may never have landed).
+    hasSyncedRef.current = true;
+    void updateStatus('online', undefined, undefined, 0, 'timer', nextMode, 0);
+  });
+
   // --- Restore ---
   useEffect(() => {
     const restoreState = () => {
@@ -689,28 +822,34 @@ export default function TimerApp({
       if (state) {
         try {
           const now = Date.now();
+          // A deadline that passed while the tab was closed means the timer
+          // completed without its completion handler ever running.
+          const expiredTargetTime =
+            state.timer?.isRunning && state.timer.targetTime && state.timer.targetTime <= now
+              ? state.timer.targetTime
+              : null;
+
           if (now - state.lastUpdated < 24 * 60 * 60 * 1000) {
             setTab(state.activeTab);
-            setTimerMode(state.timer.mode);
-            setCycleCount(state.timer.cycleCount);
-            setFocusLoggedSeconds(state.timer.loggedSeconds || 0);
 
-            if (state.timer.isRunning && state.timer.targetTime) {
-              const diff = Math.ceil((state.timer.targetTime - now) / 1000);
-              if (diff > 0) {
-                setTimeLeft(diff);
+            // For an expired timer, completeExpiredTimer (below) both applies
+            // and persists the settled transition, and the snapshot's
+            // intervals belong to the record it creates — so the timer slice
+            // and interval hydration are skipped entirely in that case.
+            if (!expiredTargetTime) {
+              setTimerMode(state.timer.mode);
+              setCycleCount(state.timer.cycleCount);
+              setFocusLoggedSeconds(state.timer.loggedSeconds || 0);
+
+              if (state.timer.isRunning && state.timer.targetTime) {
+                setTimeLeft(Math.ceil((state.timer.targetTime - now) / 1000));
                 setIsRunning(true);
                 endTimeRef.current = state.timer.targetTime;
                 currentIntervalStartRef.current = Date.now();
               } else {
-                setTimeLeft(0);
+                setTimeLeft(state.timer.timeLeft);
                 setIsRunning(false);
-                endTimeRef.current = state.timer.targetTime;
-                // Timer was already completed while away - will handle in restore complete logic
               }
-            } else {
-              setTimeLeft(state.timer.timeLeft);
-              setIsRunning(false);
             }
 
             if (state.stopwatch.isRunning && state.stopwatch.startTime) {
@@ -729,21 +868,26 @@ export default function TimerApp({
               setIsStopwatchRunning(false);
             }
 
-            if (state.intervals) {
-              setIntervals(
-                state.intervals.filter(
-                  (interval) => interval.start > 0 && interval.end > 0
-                )
-              );
-            }
+            if (!expiredTargetTime) {
+              if (state.intervals) {
+                setIntervals(state.intervals.filter(isValidInterval));
+              }
 
-            // Restore current interval start if available
-            if (state.currentIntervalStart) {
-              currentIntervalStartRef.current = state.currentIntervalStart;
-            } else if ((state.timer.isRunning || state.stopwatch.isRunning) && !currentIntervalStartRef.current) {
-              // Fallback for migration or if missing but running
-              currentIntervalStartRef.current = Date.now();
+              // Restore current interval start if available
+              if (state.currentIntervalStart) {
+                currentIntervalStartRef.current = state.currentIntervalStart;
+              } else if ((state.timer.isRunning || state.stopwatch.isRunning) && !currentIntervalStartRef.current) {
+                // Fallback for migration or if missing but running
+                currentIntervalStartRef.current = Date.now();
+              }
+            } else {
+              completeExpiredTimer(state, expiredTargetTime);
             }
+          } else if (expiredTargetTime) {
+            // The snapshot is too old to rehydrate UI state, but the session
+            // it holds is still real and its segments end at the deadline —
+            // complete and save it instead of silently discarding it.
+            completeExpiredTimer(state, expiredTargetTime);
           }
         } catch (e) { console.error(e); }
       }

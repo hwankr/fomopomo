@@ -36,9 +36,9 @@ const TABLE_BY_KIND: Record<TaskKind, string> = {
   monthly: 'monthly_plans',
 };
 
-const TASK_STATE_KEY = 'fomopomo_task_state';
+export const TASK_STATE_KEY = 'fomopomo_task_state';
 
-type SavedTaskState = {
+export type SavedTaskState = {
   taskId?: string | null;
   taskTitle?: string;
 };

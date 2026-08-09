@@ -86,16 +86,24 @@ vi.mock('@/components/timer/hooks/useSettings', () => ({
   useSettings: () => mocks.useSettingsResult,
 }));
 
+// TimerApp reads the persisted settings synchronously through the store for
+// restore-time decisions; route that to the same mock settings object.
+vi.mock('@/components/timer/hooks/settingsStore', () => ({
+  readSettingsSnapshot: () => mocks.settings,
+}));
+
 vi.mock('@/components/timer/hooks/useSound', () => ({
   useSound: () => mocks.useSoundResult,
 }));
 
 vi.mock('@/components/timer/hooks/useTasks', () => ({
   useTasks: () => mocks.useTasksResult,
+  TASK_STATE_KEY: 'fomopomo_task_state',
 }));
 
 vi.mock('@/components/timer/hooks/useStudySession', () => ({
   useStudySession: () => mocks.useStudySessionResult,
+  MIN_SAVABLE_SECONDS: 10,
 }));
 
 vi.mock('@/components/timer/hooks/useStopwatchLogic', () => ({

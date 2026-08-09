@@ -32,6 +32,11 @@ const generateUUID = () => {
 // state, in-memory session state is cleared, and callers must not auto-retry.
 export type SaveRecordResult = 'saved' | 'failed' | 'skipped' | 'rejected';
 
+// Durations under this are not savable ("10초 미만은 저장되지 않습니다"). The
+// single source for every caller-side gate, so a policy change cannot leave a
+// silent pre-gate passing durations the save itself will refuse.
+export const MIN_SAVABLE_SECONDS = 10;
+
 // One ordered slice of a save batch, as the recording RPC consumes it.
 // ended_at is the interval end (the row's created_at on the server); the
 // server derives the start as ended_at - duration.
@@ -346,25 +351,46 @@ export const useStudySession = ({
   // can never be confused with another record's. Returns null when no
   // authenticated owner can be resolved (the caller should treat it as a
   // login-required save).
+  //
+  // contentOverride builds the record from explicitly supplied intervals
+  // instead of the live state (which is then left untouched) — used when a
+  // restore finds a timer that completed while the tab was closed, whose
+  // content exists only in the persisted snapshot. Its optional sessionId
+  // makes the batch id deterministic: two tabs (or repeated mounts after a
+  // failed settle-write) completing the SAME expired snapshot then collide on
+  // one batch id and the server's idempotency dedupes them.
   const createPendingRecord = useCallback(
-    (recordMode: string, duration: number, forcedEndTime?: number): PendingStudyRecord | null => {
+    (
+      recordMode: string,
+      duration: number,
+      forcedEndTime?: number,
+      contentOverride?: {
+        intervals: { start: number; end: number }[];
+        currentStart: number | null;
+        sessionId?: string;
+      }
+    ): PendingStudyRecord | null => {
       const ownerId = getCurrentUserId();
       if (!ownerId) return null;
 
       const endTime = forcedEndTime || Date.now();
+      const sourceIntervals = contentOverride ? contentOverride.intervals : intervals;
+      const sourceStart = contentOverride ? contentOverride.currentStart : currentIntervalStartRef.current;
       const record: PendingStudyRecord = {
-        sessionId: generateUUID(),
+        sessionId: contentOverride?.sessionId ?? generateUUID(),
         ownerId,
         mode: recordMode,
         duration,
         forcedEndTime: endTime,
-        segments: buildSessionSegments(intervals, currentIntervalStartRef.current, endTime, duration),
+        segments: buildSessionSegments(sourceIntervals, sourceStart, endTime, duration),
       };
 
-      // Content ownership moves to the record atomically: the live interval
-      // state belongs to the NEXT session from here on.
-      setIntervals([]);
-      currentIntervalStartRef.current = null;
+      if (!contentOverride) {
+        // Content ownership moves to the record atomically: the live interval
+        // state belongs to the NEXT session from here on.
+        setIntervals([]);
+        currentIntervalStartRef.current = null;
+      }
 
       // Shield the parked draft from this tab's own recovery passes (the
       // effect re-runs on auth transitions) while the record is still live
