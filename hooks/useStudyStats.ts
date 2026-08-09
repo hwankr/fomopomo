@@ -27,6 +27,78 @@ export type HeatmapData = {
   count: number; // seconds (or intensity level)
 };
 
+type SessionRow = {
+  duration: number;
+  created_at: string;
+  task?: string | null;
+};
+
+// PostgREST silently caps an unbounded select at max-rows (default 1000), so
+// a heavy user's lifetime scan would shrink their total hours and heatmap.
+// Page through the full result set instead. (created_at, id) ordering keeps
+// pages stable across requests — created_at alone can tie within a batch and
+// reshuffle rows between pages — and puts the earliest session first. The
+// loop only stops on an empty page: stopping at a short page would silently
+// re-truncate if the server's max-rows cap is ever below our page size.
+// Returns null when any page fails, so callers keep previous aggregates
+// instead of showing zeros.
+const SESSION_PAGE_SIZE = 1000;
+
+type SessionColumns = 'duration, created_at, task' | 'duration, created_at';
+
+async function fetchSessionRows(
+  userId: string,
+  columns: SessionColumns,
+  range?: TimeRange
+): Promise<SessionRow[] | null> {
+  const rows: SessionRow[] = [];
+  for (let from = 0; ; ) {
+    let query = supabase
+      .from('study_sessions')
+      .select(columns)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + SESSION_PAGE_SIZE - 1);
+    if (range) {
+      query = query
+        .gte('created_at', range.start.toISOString())
+        .lte('created_at', range.end.toISOString());
+    }
+
+    const { data, error } = await query;
+    if (error) return null;
+    const page = (data ?? []) as unknown as SessionRow[];
+    if (page.length === 0) break;
+    rows.push(...page);
+    from += page.length;
+  }
+  return rows;
+}
+
+// The lifetime scan is expensive (all rows, possibly many pages), and two
+// hook instances mount on /profile at once — share one in-flight scan per
+// user so simultaneous callers (and rapid period navigation during the
+// initial scan) do not each download the full history.
+const inflightLifetimeScans = new Map<string, Promise<SessionRow[] | null>>();
+
+function fetchAllSessionRowsShared(userId: string): Promise<SessionRow[] | null> {
+  const existing = inflightLifetimeScans.get(userId);
+  if (existing) return existing;
+
+  const scan = fetchSessionRows(userId, 'duration, created_at').finally(() => {
+    inflightLifetimeScans.delete(userId);
+  });
+  inflightLifetimeScans.set(userId, scan);
+  return scan;
+}
+
+// Test-only escape hatch: a test that intentionally leaves a scan unresolved
+// would otherwise leak its in-flight promise into the next test.
+export function __clearInflightLifetimeScansForTests() {
+  inflightLifetimeScans.clear();
+}
+
 export function useStudyStats(sessionUserId?: string | null) {
   const [loading, setLoading] = useState(true);
   const [totalFocusTime, setTotalFocusTime] = useState(0);
@@ -37,6 +109,11 @@ export function useStudyStats(sessionUserId?: string | null) {
 
   // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 요청의 응답은 폐기된다.
   const requestGenerationRef = useRef(0);
+
+  // 전체 세션 스캔은 사용자당 마운트당 1회만 수행한다: 총 누적 시간·최초
+  // 연도·히트맵은 기간 네비게이션으로 바뀌지 않는 값인데, 매 네비게이션마다
+  // 사용자의 전체 기록을 다시 내려받는 것이 기존 병목이었다.
+  const allSessionsCacheRef = useRef<{ userId: string; rows: SessionRow[] } | null>(null);
 
   // 계정 전환/로그아웃 시 이전 계정의 통계가 잠시라도 남지 않도록 렌더 중 동기적으로 초기화한다.
   const [lastSessionUserId, setLastSessionUserId] = useState(sessionUserId);
@@ -51,8 +128,10 @@ export function useStudyStats(sessionUserId?: string | null) {
   }
 
   useEffect(() => {
-    // 사용자가 바뀌면 이전 사용자의 in-flight 응답을 무효화한다.
+    // 사용자가 바뀌면 이전 사용자의 in-flight 응답을 무효화하고 캐시를 비운다.
+    // (캐시는 userId 키 검사로도 보호되므로 이 정리는 메모리 위생 목적이다.)
     requestGenerationRef.current += 1;
+    allSessionsCacheRef.current = null;
   }, [sessionUserId]);
 
   const fetchStats = useCallback(
@@ -93,56 +172,58 @@ export function useStudyStats(sessionUserId?: string | null) {
       }
       const start = range.start;
 
-      // 2. Fetch Period Sessions (for Chart)
-      const { data: periodSessions } = await supabase
-        .from('study_sessions')
-        .select('duration, created_at, task')
-        .eq('user_id', targetUserId)
-        .gte('created_at', range.start.toISOString())
-        .lte('created_at', range.end.toISOString());
+      // 2-4. 기간 세션(차트)·전체 세션(총합/최초연도/히트맵)·오늘 세션을 병렬로
+      // 조회한다. 전체 스캔은 페이지네이션으로 행 수 제한을 넘고, 이 마운트에서
+      // 이미 가져왔다면 캐시를 재사용한다 — 기간 네비게이션은 기간·오늘 쿼리만
+      // 다시 실행한다.
+      const cachedAll =
+        allSessionsCacheRef.current?.userId === targetUserId
+          ? allSessionsCacheRef.current.rows
+          : null;
+
+      const [periodSessions, allSessions, todaySessions] = await Promise.all([
+        fetchSessionRows(targetUserId, 'duration, created_at, task', range),
+        cachedAll ? Promise.resolve(cachedAll) : fetchAllSessionRowsShared(targetUserId),
+        fetchSessionRows(targetUserId, 'duration, created_at', getStudyDayRange()),
+      ]);
       if (isStale()) return;
 
-      // 3. Fetch All Sessions (for Total Time & Earliest Year)
-      // optimization: we might not need this EVERY time if we cache it or split it out.
-      // For now, keeping logical parity with ReportModal.
-      const { data: allSessions } = await supabase
-        .from('study_sessions')
-        .select('duration, created_at')
-        .eq('user_id', targetUserId);
-      if (isStale()) return;
+      if (allSessions) {
+        allSessionsCacheRef.current = { userId: targetUserId, rows: allSessions };
 
-      const totalSeconds =
-        allSessions?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
-      setTotalFocusTime(totalSeconds);
+        const totalSeconds = allSessions.reduce((acc, curr) => acc + curr.duration, 0);
+        setTotalFocusTime(totalSeconds);
 
-      const earliestSessionDate =
-        allSessions?.reduce<Date | null>((acc, curr) => {
-          const createdAt = curr.created_at ? new Date(curr.created_at) : null;
-          if (!createdAt || Number.isNaN(createdAt.getTime())) return acc;
-          if (!acc || createdAt < acc) return createdAt;
-          return acc;
-        }, null) ?? null;
+        // 오름차순 정렬이므로 앞에서부터 첫 유효 행이 최초 세션이다.
+        for (const session of allSessions) {
+          const createdAt = session.created_at ? new Date(session.created_at) : null;
+          if (createdAt && !Number.isNaN(createdAt.getTime())) {
+            const firstYear = createdAt.getFullYear();
+            setEarliestYear((prev) =>
+              prev === null || firstYear < prev ? firstYear : prev
+            );
+            break;
+          }
+        }
 
-      if (earliestSessionDate) {
-        const firstYear = earliestSessionDate.getFullYear();
-        setEarliestYear((prev) =>
-          prev === null || firstYear < prev ? firstYear : prev
+        const dailyMap: Record<string, number> = {};
+        allSessions.forEach((session) => {
+          const date = getDayStart(new Date(session.created_at));
+          const key = format(date, 'yyyy-MM-dd');
+          dailyMap[key] = (dailyMap[key] || 0) + session.duration;
+        });
+        setHeatmapData(
+          Object.entries(dailyMap).map(([date, count]) => ({ date, count }))
         );
       }
+      // 전체 스캔이 실패한 경우(null + 캐시 없음)에는 0을 덮어쓰는 대신 기존
+      // 집계를 유지한다. 오늘 조회도 마찬가지다.
 
-      // 4. Fetch Today's Sessions
-      const todayRange = getStudyDayRange();
-      const todaySessions = await supabase
-        .from('study_sessions')
-        .select('duration')
-        .eq('user_id', targetUserId)
-        .gte('created_at', todayRange.start.toISOString())
-        .lte('created_at', todayRange.end.toISOString());
-      if (isStale()) return;
-
-      const todaySeconds =
-        todaySessions.data?.reduce((acc, curr) => acc + curr.duration, 0) || 0;
-      setTodayFocusTime(todaySeconds);
+      if (todaySessions) {
+        setTodayFocusTime(
+          todaySessions.reduce((acc, curr) => acc + curr.duration, 0)
+        );
+      }
 
       // 5. Process Chart Data
       const buckets: Record<
@@ -236,25 +317,6 @@ export function useStudyStats(sessionUserId?: string | null) {
       }));
 
       setChartData(newChartData);
-
-      // 6. Process Heatmap Data (if needed, or maybe separate function)
-      // For now, let's just use allSessions to build a simple heatmap if available
-      // But heatmap usually needs the WHOLE year, not just the filtered period
-      // Efficient way: aggregate allSessions by day.
-      if (allSessions) {
-        const dailyMap: Record<string, number> = {};
-        allSessions.forEach(session => {
-            const date = getDayStart(new Date(session.created_at));
-            const key = format(date, 'yyyy-MM-dd');
-            dailyMap[key] = (dailyMap[key] || 0) + session.duration;
-        });
-        
-        const heatmap = Object.entries(dailyMap).map(([date, count]) => ({
-            date,
-            count
-        }));
-        setHeatmapData(heatmap);
-      }
 
       setLoading(false);
     },
