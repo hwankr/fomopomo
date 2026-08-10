@@ -525,6 +525,41 @@ describe('TimerApp completion persistence', () => {
       });
     });
 
+    it('recovers an idle snapshot stuck at 00:00 to the full duration', async () => {
+      // An old client that persisted pomoTime 0 (cleared input) left an idle
+      // snapshot with timeLeft 0. Settings now clamp to a positive duration;
+      // restoring 0 verbatim would show 00:00 and offer a phantom save for
+      // the full pomoTime.
+      seedTimerState({ isRunning: false, secondsLeft: 0 });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(25 * 60);
+      expect(lastTimerDisplayProps().showSaveButton).toBe(false);
+    });
+
+    it('clears banked seconds when recovering a broken 00:00 snapshot', async () => {
+      // Keeping loggedSeconds against a freshly recovered full timer would
+      // violate elapsed >= logged and under-record the next real session.
+      seedTimerState({ isRunning: false, secondsLeft: 0, loggedSeconds: 300 });
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(25 * 60);
+
+      // Starting the timer persists the live state — loggedSeconds must be 0.
+      await act(async () => {
+        (lastTimerDisplayProps().onToggleTimer as () => void)();
+      });
+      expect(savedFullState().timer.loggedSeconds).toBe(0);
+    });
+
     it('restores an idle snapshot with banked focus seconds verbatim', async () => {
       seedTimerState({
         isRunning: false,

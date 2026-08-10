@@ -70,6 +70,30 @@ const cloneTasks = (tasks: string[]) => [...tasks];
 const clonePresets = (presets: Preset[]) =>
   presets.map((preset) => ({ ...preset }));
 
+// Bounds for the user-tunable numbers. Out-of-range values break the timer
+// outright — pomoTime 0 completes the instant it starts (an alarm loop with
+// auto-start on), longBreakInterval 0 makes `cycle % interval` NaN so the
+// long break never arrives — and they can enter through a cleared input
+// saved by an old client (Number('') === 0), corrupt localStorage, or a
+// remote user_settings row written by anything.
+const MAX_MINUTES = 999;
+const MAX_LONG_BREAK_INTERVAL = 99;
+const DEFAULT_PRESET_MINUTES = 25;
+
+// Finite numbers are rounded and clamped into [min, max]; everything else
+// (NaN, Infinity, strings, null, missing) recovers to the fallback.
+const clampIntSetting = (
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
+};
+
 const getValidTasks = (
   tasks: string[] | null | undefined,
   fallback: string[]
@@ -82,14 +106,35 @@ const getValidTasks = (
 };
 
 const getValidPresets = (
-  presets: Preset[] | null | undefined,
+  presets: readonly (Preset | null | undefined)[] | null | undefined,
   fallback: Preset[]
 ): Preset[] => {
   if (!Array.isArray(presets) || presets.length === 0) {
     return clonePresets(fallback);
   }
 
-  return clonePresets(presets);
+  // Corrupt persisted data can hold null entries (JSON.stringify turns
+  // undefined array slots into null); this runs inside useSyncExternalStore's
+  // getSnapshot, so a throw here would crash the render. Drop them rather
+  // than resurrect empty presets.
+  const validPresets = presets.filter(
+    (preset): preset is Preset => typeof preset === 'object' && preset !== null
+  );
+  if (validPresets.length === 0) {
+    return clonePresets(fallback);
+  }
+
+  // Preset minutes feed setTimeLeft directly on click — same instant-complete
+  // failure mode as pomoTime 0, same defense.
+  return validPresets.map((preset) => ({
+    ...preset,
+    minutes: clampIntSetting(
+      preset.minutes,
+      DEFAULT_PRESET_MINUTES,
+      1,
+      MAX_MINUTES
+    ),
+  }));
 };
 
 export function normalizeSettings(
@@ -99,6 +144,36 @@ export function normalizeSettings(
   return {
     ...DEFAULT_FOMOPOMO_SETTINGS,
     ...rawSettings,
+    pomoTime: clampIntSetting(
+      rawSettings?.pomoTime,
+      DEFAULT_FOMOPOMO_SETTINGS.pomoTime,
+      1,
+      MAX_MINUTES
+    ),
+    shortBreak: clampIntSetting(
+      rawSettings?.shortBreak,
+      DEFAULT_FOMOPOMO_SETTINGS.shortBreak,
+      1,
+      MAX_MINUTES
+    ),
+    longBreak: clampIntSetting(
+      rawSettings?.longBreak,
+      DEFAULT_FOMOPOMO_SETTINGS.longBreak,
+      1,
+      MAX_MINUTES
+    ),
+    longBreakInterval: clampIntSetting(
+      rawSettings?.longBreakInterval,
+      DEFAULT_FOMOPOMO_SETTINGS.longBreakInterval,
+      1,
+      MAX_LONG_BREAK_INTERVAL
+    ),
+    volume: clampIntSetting(
+      rawSettings?.volume,
+      DEFAULT_FOMOPOMO_SETTINGS.volume,
+      0,
+      100
+    ),
     taskPopupEnabled:
       raw?.taskPopupEnabled ??
       DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled,

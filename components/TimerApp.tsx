@@ -886,7 +886,25 @@ export default function TimerApp({
                   stampedFull !== undefined &&
                   state.timer.timeLeft === stampedFull &&
                   !(state.timer.loggedSeconds > 0);
-                setTimeLeft(idleAtStampedFull ? configuredFull : state.timer.timeLeft);
+                // A non-positive (or non-numeric) idle timeLeft is never
+                // real progress — it is a finished-but-unsettled or corrupt
+                // snapshot (e.g. an old client that persisted pomoTime 0
+                // from a cleared input, whose settings now clamp to a
+                // positive duration). Restoring it verbatim would show 00:00
+                // and offer a save button for fullTime seconds never studied.
+                const brokenIdle = !(state.timer.timeLeft > 0);
+                if (brokenIdle) {
+                  // The banked seconds' durable copy is the saved record or
+                  // parked draft; keeping them against a fresh full timer
+                  // would violate elapsed >= logged and silently under-record
+                  // the next session.
+                  setFocusLoggedSeconds(0);
+                }
+                setTimeLeft(
+                  idleAtStampedFull || brokenIdle
+                    ? configuredFull
+                    : state.timer.timeLeft
+                );
                 setIsRunning(false);
               }
             }

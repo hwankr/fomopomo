@@ -275,8 +275,14 @@ describe('SettingsModal', () => {
 
   it('saves settings to localStorage, dispatches settingsChanged, and closes', async () => {
     mockUser('user-save');
+    setStoredSettings({ pomoTime: 26 });
 
     const { onClose, onSave } = renderModal();
+
+    // Saves are gated on the stored settings having hydrated the form.
+    await waitFor(() => {
+      expect(getTimeInputs()[0]).toHaveValue(26);
+    });
 
     const [pomoInput] = getTimeInputs();
     fireEvent.change(pomoInput, { target: { value: '33' } });
@@ -299,6 +305,116 @@ describe('SettingsModal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('설정이 저장되었습니다!');
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismisses without saving when the stored settings have not loaded yet', async () => {
+    setStoredSettings({ pomoTime: 40 });
+    // Keep the load permanently in flight.
+    supabaseMock.auth.getUser.mockReturnValue(new Promise(() => {}));
+
+    const { onClose, onSave } = renderModal();
+
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }));
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    // The stored settings survive: the untouched default form was never
+    // persisted over them.
+    expect(upsertMock).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(toastMock.success).not.toHaveBeenCalled();
+    const savedSettings = JSON.parse(
+      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+    ) as SettingsShape;
+    expect(savedSettings.pomoTime).toBe(40);
+  });
+
+  it('recovers cleared inputs to the stored values and clamps zeros on save', async () => {
+    setStoredSettings({ pomoTime: 30 });
+    mockUser('user-clamp');
+
+    renderModal();
+
+    // Wait for the async settings load so it cannot overwrite the form
+    // edits below.
+    await waitFor(() => {
+      expect(getTimeInputs()[0]).toHaveValue(30);
+    });
+
+    const [pomoInput, shortBreakInput] = getTimeInputs();
+    // Clearing a field is allowed while typing — no snap to 0…
+    fireEvent.change(pomoInput, { target: { value: '' } });
+    expect(pomoInput).toHaveValue(null);
+    fireEvent.change(shortBreakInput, { target: { value: '0' } });
+
+    const intervalRow = screen.getByText(/긴 휴식 간격/).closest('div');
+    const intervalInput = intervalRow?.querySelector('input[type="number"]');
+    if (!intervalInput) {
+      throw new Error('Failed to locate long break interval input');
+    }
+    fireEvent.change(intervalInput, { target: { value: '0' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }));
+
+    await waitFor(() => {
+      expect(upsertMock).toHaveBeenCalled();
+    });
+
+    // …but the save stores sane values: a field left cleared keeps the value
+    // the user already had (dismissing the modal mid-edit must never destroy
+    // it), and an explicit 0 clamps to the minimum.
+    const savedSettings = JSON.parse(
+      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+    ) as SettingsShape;
+    expect(savedSettings.pomoTime).toBe(30);
+    expect(savedSettings.shortBreak).toBe(1);
+    expect(savedSettings.longBreakInterval).toBe(1);
+    expect(upsertMock).toHaveBeenCalledWith({
+      user_id: 'user-clamp',
+      settings: expect.objectContaining({
+        pomoTime: 30,
+        shortBreak: 1,
+        longBreakInterval: 1,
+      }),
+    });
+
+    // The form reflects exactly what was stored.
+    expect(getTimeInputs()[0]).toHaveValue(30);
+    expect(getTimeInputs()[1]).toHaveValue(1);
+  });
+
+  it('keeps a preset whose minutes were cleared instead of saving a 1-minute preset', async () => {
+    setStoredSettings({
+      presets: [{ id: 'p1', label: '심화', minutes: 47 }],
+    });
+    mockUser('user-preset');
+
+    renderModal();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('47')).toBeInTheDocument();
+    });
+
+    const presetMinutesInput = screen.getByDisplayValue('47');
+    // Clearing shows an empty field, not a snap to 0…
+    fireEvent.change(presetMinutesInput, { target: { value: '' } });
+    expect(presetMinutesInput).toHaveValue(null);
+
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }));
+
+    await waitFor(() => {
+      expect(upsertMock).toHaveBeenCalled();
+    });
+
+    // …and saving recovers the preset's previous minutes.
+    const savedSettings = JSON.parse(
+      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+    ) as SettingsShape;
+    expect(savedSettings.presets).toEqual([
+      { id: 'p1', label: '심화', minutes: 47 },
+    ]);
   });
 
   it('resets settings to defaults through the confirm flow', async () => {

@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import NotificationManager from './NotificationManager';
@@ -8,6 +8,7 @@ import ConfirmModal from './ConfirmModal';
 import {
   DEFAULT_FOMOPOMO_SETTINGS,
   loadPersistedSettings,
+  normalizeSettings,
   persistSettings as persistStoredSettings,
   type FomopomoSettings,
   type Preset,
@@ -27,21 +28,31 @@ type ConflictPayload = {
   message?: string;
 };
 
+// Form-side preset: minutes tolerates '' while the user is typing, exactly
+// like the duration fields.
+type PresetFormEntry = Omit<Preset, 'minutes'> & { minutes: number | '' };
+
 export default function SettingsModal({
   isOpen,
   onClose,
   onSave,
 }: SettingsModalProps) {
-  const [pomoTime, setPomoTime] = useState(DEFAULT_FOMOPOMO_SETTINGS.pomoTime);
-  const [shortBreak, setShortBreak] = useState(DEFAULT_FOMOPOMO_SETTINGS.shortBreak);
-  const [longBreak, setLongBreak] = useState(DEFAULT_FOMOPOMO_SETTINGS.longBreak);
+  // False until the load effect hydrates the form with the user's stored
+  // settings. Every dismissal path saves, so persisting before hydration
+  // would overwrite the stored settings with the untouched default form.
+  const hydratedRef = useRef(false);
+  // Duration fields tolerate '' while the user is typing (clearing a number
+  // input would otherwise snap to 0); saving normalizes them back to numbers.
+  const [pomoTime, setPomoTime] = useState<number | ''>(DEFAULT_FOMOPOMO_SETTINGS.pomoTime);
+  const [shortBreak, setShortBreak] = useState<number | ''>(DEFAULT_FOMOPOMO_SETTINGS.shortBreak);
+  const [longBreak, setLongBreak] = useState<number | ''>(DEFAULT_FOMOPOMO_SETTINGS.longBreak);
   const [autoStartBreaks, setAutoStartBreaks] = useState(
     DEFAULT_FOMOPOMO_SETTINGS.autoStartBreaks
   );
   const [autoStartPomos, setAutoStartPomos] = useState(
     DEFAULT_FOMOPOMO_SETTINGS.autoStartPomos
   );
-  const [longBreakInterval, setLongBreakInterval] = useState(
+  const [longBreakInterval, setLongBreakInterval] = useState<number | ''>(
     DEFAULT_FOMOPOMO_SETTINGS.longBreakInterval
   );
   const [volume, setVolume] = useState(DEFAULT_FOMOPOMO_SETTINGS.volume);
@@ -51,12 +62,20 @@ export default function SettingsModal({
   );
   const [seasonalEffectEnabled, setSeasonalEffectEnabled] = useState(DEFAULT_FOMOPOMO_SETTINGS.seasonalEffectEnabled);
   const [tasks, setTasks] = useState<string[]>(DEFAULT_FOMOPOMO_SETTINGS.tasks);
-  const [presets, setPresets] = useState<Preset[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
+  const [presets, setPresets] = useState<PresetFormEntry[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
+  // The settings the form was last hydrated from (load, save, or reset).
+  // Fields cleared at save time recover to these values — dismissing the
+  // modal with an emptied field must restore what the user had, never
+  // replace it with a global default.
+  const [loadedSettings, setLoadedSettings] = useState<FomopomoSettings>(
+    DEFAULT_FOMOPOMO_SETTINGS
+  );
   const [isResetSettingsConfirmOpen, setIsResetSettingsConfirmOpen] = useState(false);
   const [isResetAccountConfirmOpen, setIsResetAccountConfirmOpen] = useState(false);
   const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
 
   const applySettingsToForm = useCallback((settings: FomopomoSettings) => {
+    setLoadedSettings(settings);
     setPomoTime(settings.pomoTime);
     setShortBreak(settings.shortBreak);
     setLongBreak(settings.longBreak);
@@ -71,35 +90,72 @@ export default function SettingsModal({
     setPresets(settings.presets);
   }, []);
 
-  const buildSettingsFromForm = (): FomopomoSettings => ({
-    pomoTime,
-    shortBreak,
-    longBreak,
-    autoStartBreaks,
-    autoStartPomos,
-    longBreakInterval,
-    volume,
-    isMuted,
-    taskPopupEnabled,
-    seasonalEffectEnabled,
-    tasks,
-    presets,
-  });
+  // Normalizing here (not just inside persistSettings) keeps the UI honest:
+  // handleSave writes these exact values back into the form, so what the
+  // user sees is what got stored. Fields left cleared recover to the values
+  // the form was hydrated with (a brand-new preset falls back to its
+  // default); out-of-range numbers clamp.
+  const buildSettingsFromForm = (): FomopomoSettings =>
+    normalizeSettings({
+      pomoTime: pomoTime === '' ? loadedSettings.pomoTime : pomoTime,
+      shortBreak: shortBreak === '' ? loadedSettings.shortBreak : shortBreak,
+      longBreak: longBreak === '' ? loadedSettings.longBreak : longBreak,
+      autoStartBreaks,
+      autoStartPomos,
+      longBreakInterval:
+        longBreakInterval === '' ? loadedSettings.longBreakInterval : longBreakInterval,
+      volume,
+      isMuted,
+      taskPopupEnabled,
+      seasonalEffectEnabled,
+      tasks,
+      presets: presets.map((preset) => ({
+        ...preset,
+        minutes:
+          preset.minutes === ''
+            ? loadedSettings.presets.find((p) => p.id === preset.id)?.minutes ??
+              Number.NaN
+            : preset.minutes,
+      })),
+    });
 
   useEffect(() => {
-    const loadSettings = async () => {
-      if (!isOpen) {
-        return;
-      }
+    if (!isOpen) {
+      return;
+    }
 
-      applySettingsToForm(await loadPersistedSettings());
+    // The cancellation flag keeps a slow load from clobbering the form after
+    // the modal saved and closed — handleSave's write-back must stay the
+    // last word on what the form (and the next open) shows.
+    let cancelled = false;
+    hydratedRef.current = false;
+    const loadSettings = async () => {
+      const persistedSettings = await loadPersistedSettings();
+      if (!cancelled) {
+        applySettingsToForm(persistedSettings);
+        hydratedRef.current = true;
+      }
     };
 
-    loadSettings();
+    void loadSettings();
+    return () => {
+      cancelled = true;
+    };
   }, [applySettingsToForm, isOpen]);
 
   const handleSave = async () => {
-    await persistStoredSettings(buildSettingsFromForm());
+    if (!hydratedRef.current) {
+      // The stored settings haven't reached the form yet — persisting now
+      // would replace them with defaults. Dismiss without saving.
+      onClose();
+      return;
+    }
+
+    const settingsToSave = buildSettingsFromForm();
+    // Reflect the normalized values in the form so the UI never disagrees
+    // with what was stored (a cleared field shows its recovered default).
+    applySettingsToForm(settingsToSave);
+    await persistStoredSettings(settingsToSave);
     toast.success('설정이 저장되었습니다!');
     onSave();
     onClose();
@@ -412,9 +468,14 @@ export default function SettingsModal({
                     />
                     <input
                       type="number"
+                      min={1}
                       value={preset.minutes}
                       onChange={(e) =>
-                        updatePreset(preset.id, 'minutes', Number(e.target.value))
+                        updatePreset(
+                          preset.id,
+                          'minutes',
+                          e.target.value === '' ? '' : Number(e.target.value)
+                        )
                       }
                       className={`${inputStyle} w-20 text-center`}
                       placeholder="분"
@@ -441,8 +502,11 @@ export default function SettingsModal({
                   </span>
                   <input
                     type="number"
+                    min={1}
                     value={pomoTime}
-                    onChange={(e) => setPomoTime(Number(e.target.value))}
+                    onChange={(e) =>
+                      setPomoTime(e.target.value === '' ? '' : Number(e.target.value))
+                    }
                     className={inputStyle}
                   />
                 </div>
@@ -452,8 +516,11 @@ export default function SettingsModal({
                   </span>
                   <input
                     type="number"
+                    min={1}
                     value={shortBreak}
-                    onChange={(e) => setShortBreak(Number(e.target.value))}
+                    onChange={(e) =>
+                      setShortBreak(e.target.value === '' ? '' : Number(e.target.value))
+                    }
                     className={inputStyle}
                   />
                 </div>
@@ -463,8 +530,11 @@ export default function SettingsModal({
                   </span>
                   <input
                     type="number"
+                    min={1}
                     value={longBreak}
-                    onChange={(e) => setLongBreak(Number(e.target.value))}
+                    onChange={(e) =>
+                      setLongBreak(e.target.value === '' ? '' : Number(e.target.value))
+                    }
                     className={inputStyle}
                   />
                 </div>
@@ -527,8 +597,11 @@ export default function SettingsModal({
                 </span>
                 <input
                   type="number"
+                  min={1}
                   value={longBreakInterval}
-                  onChange={(e) => setLongBreakInterval(Number(e.target.value))}
+                  onChange={(e) =>
+                    setLongBreakInterval(e.target.value === '' ? '' : Number(e.target.value))
+                  }
                   className="w-16 bg-gray-100 text-gray-700 p-1 rounded text-center font-bold focus:outline-none"
                 />
               </div>

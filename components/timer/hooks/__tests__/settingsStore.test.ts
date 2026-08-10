@@ -78,6 +78,122 @@ describe('settingsStore', () => {
     });
   });
 
+  describe('numeric validation', () => {
+    it('clamps zero and negative values up to their minimums', () => {
+      expect(
+        normalizeSettings({
+          pomoTime: 0,
+          shortBreak: 0,
+          longBreak: -3,
+          longBreakInterval: 0,
+          volume: -5,
+        })
+      ).toEqual({
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 1,
+        shortBreak: 1,
+        longBreak: 1,
+        longBreakInterval: 1,
+        volume: 0,
+      });
+    });
+
+    it('recovers NaN and non-numeric values to defaults', () => {
+      expect(
+        normalizeSettings({
+          pomoTime: Number.NaN,
+          shortBreak: '10' as unknown as number,
+          longBreak: 'abc' as unknown as number,
+          longBreakInterval: Number.POSITIVE_INFINITY,
+          volume: null as unknown as number,
+        })
+      ).toEqual(DEFAULT_FOMOPOMO_SETTINGS);
+    });
+
+    it('rounds fractional values and clamps runaway numbers to sane caps', () => {
+      expect(
+        normalizeSettings({
+          pomoTime: 25.6,
+          shortBreak: 1e9,
+          longBreakInterval: 1000,
+          volume: 250,
+        })
+      ).toEqual({
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 26,
+        shortBreak: 999,
+        longBreakInterval: 99,
+        volume: 100,
+      });
+    });
+
+    it('sanitizes preset minutes the same way', () => {
+      expect(
+        normalizeSettings({
+          presets: [
+            { id: '1', label: '즉시 완료', minutes: 0 },
+            { id: '2', label: '깨진 값', minutes: Number.NaN },
+            { id: '3', label: '정상', minutes: 50 },
+          ],
+        }).presets
+      ).toEqual([
+        { id: '1', label: '즉시 완료', minutes: 1 },
+        { id: '2', label: '깨진 값', minutes: 25 },
+        { id: '3', label: '정상', minutes: 50 },
+      ]);
+    });
+
+    it('survives null preset entries in persisted data instead of crashing the snapshot read', () => {
+      // JSON.stringify turns undefined array slots into null; this runs
+      // inside useSyncExternalStore's getSnapshot, so a throw would take
+      // down the whole render. Corrupt entries are dropped, not resurrected
+      // as empty presets.
+      window.localStorage.setItem(
+        SETTINGS_KEY,
+        JSON.stringify({
+          ...DEFAULT_FOMOPOMO_SETTINGS,
+          presets: [null, { id: 'ok', label: '생존', minutes: 40 }],
+        })
+      );
+
+      expect(readSettingsSnapshot().presets).toEqual([
+        { id: 'ok', label: '생존', minutes: 40 },
+      ]);
+
+      // All entries corrupt → canonical defaults.
+      window.localStorage.setItem(
+        SETTINGS_KEY,
+        JSON.stringify({ ...DEFAULT_FOMOPOMO_SETTINGS, presets: [null] })
+      );
+
+      expect(readSettingsSnapshot().presets).toEqual(
+        DEFAULT_FOMOPOMO_SETTINGS.presets
+      );
+    });
+
+    it('sanitizes corrupt remote settings on load', async () => {
+      supabaseMock.auth.getUser.mockResolvedValue({
+        data: { user: { id: 'user-1' } },
+      });
+      userSettingsResult = {
+        data: {
+          settings: {
+            ...DEFAULT_FOMOPOMO_SETTINGS,
+            pomoTime: 0,
+            longBreakInterval: 0,
+          },
+        },
+        error: null,
+      };
+
+      await expect(loadPersistedSettings()).resolves.toEqual({
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 1,
+        longBreakInterval: 1,
+      });
+    });
+  });
+
   it('falls back to canonical defaults when persisted JSON is invalid', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
