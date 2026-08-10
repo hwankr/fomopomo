@@ -25,11 +25,36 @@ export const useTimerLogic = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const endTimeRef = useRef<number>(0);
 
-  // Initialize timer based on mode
-  useEffect(() => {
-    // Only set initial time if not restored
-    // (This might conflict with restore, handling inside restore is better or careful initialization)
-  }, []);
+  // Re-sync an idle timer when the configured durations change (e.g. the
+  // settings modal saves pomoTime 25 -> 50), adjusting state during render —
+  // the same idiom as TimerApp's storage-owner reset. Only a timer still
+  // sitting at the PREVIOUS settings' full duration for its mode is
+  // re-synced: a running or paused session, and partial progress restored
+  // from storage, keep their real remaining time — overwriting them would
+  // fabricate or destroy elapsed time. TimerApp's restore effect commits
+  // after this render, so a restored snapshot always wins over the re-sync.
+  const configuredDurations: Record<TimerMode, number> = {
+    focus: settings.pomoTime * 60,
+    shortBreak: settings.shortBreak * 60,
+    longBreak: settings.longBreak * 60,
+  };
+  const [prevDurations, setPrevDurations] = useState(configuredDurations);
+  if (
+    prevDurations.focus !== configuredDurations.focus ||
+    prevDurations.shortBreak !== configuredDurations.shortBreak ||
+    prevDurations.longBreak !== configuredDurations.longBreak
+  ) {
+    // Consume the change unconditionally: a duration change that arrives
+    // mid-session must not be re-applied later against a stale baseline.
+    setPrevDurations(configuredDurations);
+    if (
+      !isRunning &&
+      focusLoggedSeconds === 0 &&
+      timeLeft === prevDurations[timerMode]
+    ) {
+      setTimeLeft(configuredDurations[timerMode]);
+    }
+  }
 
   // Timer interval
   useEffect(() => {

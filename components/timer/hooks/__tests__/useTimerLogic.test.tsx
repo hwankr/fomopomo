@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { useTimerLogic } from '../useTimerLogic';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -284,6 +285,115 @@ describe('useTimerLogic', () => {
 
       expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 1, 0);
       expect(mockOnTimerComplete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('settings changes while idle (re-sync)', () => {
+    // StrictMode locks in the render-phase state adjustment's double-render
+    // safety (the app runs under Next's default reactStrictMode).
+    const renderTimer = (initialSettings: Settings = defaultSettings) =>
+      renderHook(
+        ({ settings }: { settings: Settings }) =>
+          useTimerLogic({
+            settings,
+            onTimerCompleteRef: { current: mockOnTimerComplete },
+            playClickSound: mockPlayClickSound,
+            updateStatus: mockUpdateStatus,
+          }),
+        { initialProps: { settings: initialSettings }, wrapper: StrictMode }
+      );
+
+    it('re-syncs an idle focus timer to the new pomoTime', () => {
+      const { result, rerender } = renderTimer();
+      expect(result.current.timeLeft).toBe(25 * 60);
+
+      rerender({ settings: { ...defaultSettings, pomoTime: 50 } });
+
+      expect(result.current.timeLeft).toBe(50 * 60);
+
+      // Starting now runs against the new duration, not the stale one
+      act(() => {
+        result.current.toggleTimer();
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(result.current.timeLeft).toBeCloseTo(50 * 60 - 1, 0);
+    });
+
+    it('re-syncs an idle break timer to the new break length', () => {
+      const { result, rerender } = renderTimer();
+      act(() => {
+        result.current.changeTimerMode('shortBreak');
+      });
+      expect(result.current.timeLeft).toBe(5 * 60);
+
+      rerender({ settings: { ...defaultSettings, shortBreak: 10 } });
+
+      expect(result.current.timeLeft).toBe(10 * 60);
+    });
+
+    it('keeps the remaining time of a running timer', () => {
+      const { result, rerender } = renderTimer();
+      act(() => {
+        result.current.toggleTimer();
+      });
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 10, 0);
+
+      rerender({ settings: { ...defaultSettings, pomoTime: 50 } });
+
+      expect(result.current.isRunning).toBe(true);
+      expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 10, 0);
+
+      // Still counting down against the original deadline
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 11, 0);
+    });
+
+    it('keeps the remaining time of a paused timer', () => {
+      const { result, rerender } = renderTimer();
+      act(() => {
+        result.current.toggleTimer();
+      });
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+      act(() => {
+        result.current.toggleTimer(); // pause
+      });
+      expect(result.current.isRunning).toBe(false);
+
+      rerender({ settings: { ...defaultSettings, pomoTime: 50 } });
+
+      expect(result.current.timeLeft).toBeCloseTo(25 * 60 - 10, 0);
+    });
+
+    it('keeps partial progress hydrated from a restored snapshot', () => {
+      const { result, rerender } = renderTimer();
+      // Simulate TimerApp's restore effect rehydrating a paused snapshot
+      act(() => {
+        result.current.setTimeLeft(20 * 60);
+      });
+
+      rerender({ settings: { ...defaultSettings, pomoTime: 50 } });
+
+      expect(result.current.timeLeft).toBe(20 * 60);
+    });
+
+    it('keeps a session with banked focus seconds even at full duration', () => {
+      const { result, rerender } = renderTimer();
+      act(() => {
+        result.current.setFocusLoggedSeconds(600);
+      });
+
+      rerender({ settings: { ...defaultSettings, pomoTime: 50 } });
+
+      expect(result.current.timeLeft).toBe(25 * 60);
     });
   });
 

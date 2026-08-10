@@ -71,6 +71,12 @@ type SavedAppState = {
   stopwatch: SavedStopwatchState;
   intervals?: SavedInterval[];
   currentIntervalStart?: number | null;
+  // Full durations (seconds) configured when this snapshot was written. Lets
+  // the restore effect tell an untouched idle timer (timeLeft === the full
+  // duration of ITS OWN settings era) apart from partial progress, so a
+  // settings change between save and restore can re-sync the idle display
+  // instead of resurrecting the stale duration. Absent on legacy snapshots.
+  configuredDurations?: Record<TimerMode, number>;
   lastUpdated: number;
   ownerUserId?: string;
 };
@@ -276,6 +282,13 @@ export default function TimerApp({
     currentIntervals: { start: number; end: number }[],
     currentStart: number | null // NEW PARAMETER
   ) => {
+    // Stamp from the store, not the React `settings` closure: the preset
+    // handler writes the store synchronously right before saving (the closure
+    // still holds the pre-preset durations), and the expired-timer settle
+    // path can run while the closure is still the hydration default. The
+    // stamp must come from the same settings era as the timeLeft beside it,
+    // or the restore re-sync misreads the snapshot.
+    const configuredSettings = readSettingsSnapshot();
     const state = {
       activeTab: currentTab,
       timer: {
@@ -293,6 +306,11 @@ export default function TimerApp({
       },
       intervals: currentIntervals,
       currentIntervalStart: currentStart, // SAVE IT
+      configuredDurations: {
+        focus: configuredSettings.pomoTime * 60,
+        shortBreak: configuredSettings.shortBreak * 60,
+        longBreak: configuredSettings.longBreak * 60,
+      },
       lastUpdated: Date.now(),
     };
     writeOwnedJson(FULL_STATE_KEY, storageOwner, state);
@@ -847,7 +865,28 @@ export default function TimerApp({
                 endTimeRef.current = state.timer.targetTime;
                 currentIntervalStartRef.current = Date.now();
               } else {
-                setTimeLeft(state.timer.timeLeft);
+                // An idle snapshot still sitting at the full duration that
+                // was configured when it was written adopts the CURRENTLY
+                // configured duration instead: settings may have changed
+                // since (another tab, another device, or a save right before
+                // this reload), and resurrecting the stale full time would
+                // both display the old duration and open a phantom-save
+                // window (fullTime - timeLeft counting minutes never
+                // studied). Anything else — partial progress, banked
+                // seconds, unstamped legacy snapshots — restores verbatim.
+                const stampedFull = state.configuredDurations?.[state.timer.mode];
+                const restoredSettings = readSettingsSnapshot();
+                const configuredFull =
+                  state.timer.mode === 'focus'
+                    ? restoredSettings.pomoTime * 60
+                    : state.timer.mode === 'shortBreak'
+                      ? restoredSettings.shortBreak * 60
+                      : restoredSettings.longBreak * 60;
+                const idleAtStampedFull =
+                  stampedFull !== undefined &&
+                  state.timer.timeLeft === stampedFull &&
+                  !(state.timer.loggedSeconds > 0);
+                setTimeLeft(idleAtStampedFull ? configuredFull : state.timer.timeLeft);
                 setIsRunning(false);
               }
             }

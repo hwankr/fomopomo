@@ -42,7 +42,18 @@ const mocks = vi.hoisted(() => ({
 
 mocks.useSettingsResult = {
   settings: mocks.settings,
-  setSettings: vi.fn(),
+  // The real setSettings writes the settings store synchronously; mirror
+  // that by mutating the shared settings object, so the mocked
+  // readSettingsSnapshot() sees the update immediately like production.
+  setSettings: vi.fn((value: unknown) => {
+    const next =
+      typeof value === 'function'
+        ? (value as (prev: typeof mocks.settings) => typeof mocks.settings)(
+            mocks.settings
+          )
+        : (value as typeof mocks.settings);
+    Object.assign(mocks.settings, next);
+  }),
   persistSettings: vi.fn(),
 };
 
@@ -144,14 +155,18 @@ vi.mock('react-hot-toast', () => {
 
 const seedTimerState = (overrides: {
   mode?: string;
+  isRunning?: boolean;
   secondsLeft?: number;
-  targetTime?: number;
+  targetTime?: number | null;
+  loggedSeconds?: number;
   intervals?: { start: number; end: number }[];
   currentIntervalStart?: number | null;
+  configuredDurations?: { focus: number; shortBreak: number; longBreak: number };
   cycleCount?: number;
   lastUpdated?: number;
 }) => {
   const now = Date.now();
+  const isRunning = overrides.isRunning ?? true;
   const secondsLeft = overrides.secondsLeft ?? 3;
   window.localStorage.setItem(
     'fomopomo_full_state',
@@ -159,15 +174,26 @@ const seedTimerState = (overrides: {
       activeTab: 'timer',
       timer: {
         mode: overrides.mode ?? 'focus',
-        isRunning: true,
+        isRunning,
         timeLeft: secondsLeft,
-        targetTime: overrides.targetTime ?? now + secondsLeft * 1000,
+        targetTime:
+          overrides.targetTime !== undefined
+            ? overrides.targetTime
+            : isRunning
+              ? now + secondsLeft * 1000
+              : null,
         cycleCount: overrides.cycleCount ?? 0,
-        loggedSeconds: 0,
+        loggedSeconds: overrides.loggedSeconds ?? 0,
       },
       stopwatch: { isRunning: false, elapsed: 0, startTime: null },
       intervals: overrides.intervals ?? [],
-      currentIntervalStart: overrides.currentIntervalStart ?? now,
+      currentIntervalStart:
+        overrides.currentIntervalStart !== undefined
+          ? overrides.currentIntervalStart
+          : isRunning
+            ? now
+            : null,
+      configuredDurations: overrides.configuredDurations,
       lastUpdated: overrides.lastUpdated ?? now,
     })
   );
@@ -199,6 +225,9 @@ describe('TimerApp completion persistence', () => {
     mocks.timerDisplayProps.length = 0;
     mocks.currentIntervalStartRef.current = null;
     mocks.settings.taskPopupEnabled = false;
+    mocks.settings.pomoTime = 25;
+    mocks.settings.shortBreak = 5;
+    mocks.settings.longBreak = 15;
     window.localStorage.clear();
   });
 
@@ -244,6 +273,13 @@ describe('TimerApp completion persistence', () => {
     expect(saved.timer.cycleCount).toBe(1);
     expect(saved.intervals).toEqual([]);
     expect(saved.currentIntervalStart).toBeNull();
+    // The snapshot is stamped with its settings era so a later restore can
+    // tell "untouched idle" apart from partial progress.
+    expect(saved.configuredDurations).toEqual({
+      focus: 25 * 60,
+      shortBreak: 5 * 60,
+      longBreak: 15 * 60,
+    });
   });
 
   it('hands the created record to the task popup instead of saving immediately', async () => {
@@ -409,6 +445,101 @@ describe('TimerApp completion persistence', () => {
       expect(saved.timer.mode).toBe('focus');
       expect(saved.timer.isRunning).toBe(false);
       expect(saved.timer.timeLeft).toBe(25 * 60);
+    });
+  });
+
+  describe('idle snapshot restore after a settings change', () => {
+    const lastTimerDisplayProps = () =>
+      mocks.timerDisplayProps[mocks.timerDisplayProps.length - 1];
+
+    it('re-syncs an untouched idle snapshot to the newly configured duration', async () => {
+      // Saved while sitting untouched at the full 25:00 of its own settings
+      // era; pomoTime has since been raised to 50 (settings modal on this
+      // device before a reload, or another device via remote settings).
+      seedTimerState({
+        isRunning: false,
+        secondsLeft: 25 * 60,
+        configuredDurations: { focus: 25 * 60, shortBreak: 5 * 60, longBreak: 15 * 60 },
+      });
+      mocks.settings.pomoTime = 50;
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(50 * 60);
+      // Regression: restoring the stale 25:00 against pomoTime 50 used to
+      // offer a save button for 25 phantom minutes never studied.
+      expect(lastTimerDisplayProps().showSaveButton).toBe(false);
+    });
+
+    it('restores partial idle progress verbatim', async () => {
+      seedTimerState({
+        isRunning: false,
+        secondsLeft: 20 * 60,
+        configuredDurations: { focus: 25 * 60, shortBreak: 5 * 60, longBreak: 15 * 60 },
+      });
+      mocks.settings.pomoTime = 50;
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(20 * 60);
+    });
+
+    it('restores an unstamped legacy snapshot verbatim', async () => {
+      seedTimerState({ isRunning: false, secondsLeft: 25 * 60 });
+      mocks.settings.pomoTime = 50;
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(25 * 60);
+    });
+
+    it('preset clicks stamp the just-written settings era, not the stale closure', async () => {
+      // No snapshot seeded: the timer mounts idle at 25:00.
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      await act(async () => {
+        (lastTimerDisplayProps().onPresetClick as (minutes: number) => void)(50);
+      });
+
+      const saved = savedFullState();
+      expect(saved.timer.timeLeft).toBe(50 * 60);
+      // Regression: the stamp used to come from the pre-preset settings
+      // closure (25:00 era), so the snapshot read as partial progress on
+      // restore and was excluded from the idle re-sync forever after.
+      expect(saved.configuredDurations).toEqual({
+        focus: 50 * 60,
+        shortBreak: 5 * 60,
+        longBreak: 15 * 60,
+      });
+    });
+
+    it('restores an idle snapshot with banked focus seconds verbatim', async () => {
+      seedTimerState({
+        isRunning: false,
+        secondsLeft: 25 * 60,
+        loggedSeconds: 300,
+        configuredDurations: { focus: 25 * 60, shortBreak: 5 * 60, longBreak: 15 * 60 },
+      });
+      mocks.settings.pomoTime = 50;
+
+      render(
+        <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
+      );
+      await act(async () => {});
+
+      expect(lastTimerDisplayProps().timeLeft).toBe(25 * 60);
     });
   });
 });
