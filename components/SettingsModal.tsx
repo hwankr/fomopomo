@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import NotificationManager from './NotificationManager';
@@ -38,6 +39,7 @@ export default function SettingsModal({
   onClose,
   onSave,
 }: SettingsModalProps) {
+  const router = useRouter();
   // False until the load effect hydrates the form with the user's stored
   // settings. Every dismissal path saves, so persisting before hydration
   // would overwrite the stored settings with the untouched default form.
@@ -335,7 +337,7 @@ export default function SettingsModal({
       } catch (error) {
         console.error('로그아웃 실패:', error);
       }
-      window.location.href = '/';
+      router.replace('/');
     } catch (e) {
       console.error('계정 삭제 오류:', e);
       toast.error('계정 삭제에 실패했습니다. 다시 시도해주세요.', { id: toastId });

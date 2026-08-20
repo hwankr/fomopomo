@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const { toastMock, supabaseMock } = vi.hoisted(() => ({
+const { toastMock, supabaseMock, routerReplaceMock } = vi.hoisted(() => ({
   toastMock: {
     loading: vi.fn(),
     success: vi.fn(),
@@ -20,6 +20,11 @@ const { toastMock, supabaseMock } = vi.hoisted(() => ({
     },
     from: vi.fn(),
   },
+  routerReplaceMock: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: routerReplaceMock }),
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -189,6 +194,7 @@ describe('SettingsModal', () => {
     mockUser(null);
     mockSession(null);
     supabaseMock.auth.signOut.mockResolvedValue({ error: null });
+    routerReplaceMock.mockReset();
 
     toastMock.loading.mockReset();
     toastMock.success.mockReset();
@@ -641,7 +647,7 @@ describe('SettingsModal', () => {
     });
 
     expect(window.localStorage.getItem('fomopomo_settings')).toBeNull();
-    expect(window.location.href.endsWith('/')).toBe(true);
+    expect(routerReplaceMock).toHaveBeenCalledWith('/');
   });
 
   it('short-circuits account actions when there is no active session', async () => {
