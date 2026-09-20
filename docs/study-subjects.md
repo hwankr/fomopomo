@@ -53,3 +53,25 @@ SQL 테스트는 별도 `fomopomo-security-test` 로컬 데이터베이스를 �
 - TypeScript, ESLint, 프로덕션 빌드 통과. SQL lint에는 기존 세션 저장 함수에서 이어진 반복문 변수 `i`의 중복 선언 경고만 있으며 오류는 없다.
 - 브라우저에서 실제 화면에 격리된 예시 응답을 사용해 과목 합계, 일괄 분류 후 합계 보존, 과목을 지정한 할 일 생성, 390px 모바일 가로 넘침 없음을 확인했다. 실제 사용자 계정·기록은 수정하지 않았다.
 - 운영 데이터베이스 마이그레이션과 배포는 이 검증에 포함하지 않았다.
+
+## 운영 DB 적용 기록 (2026-09-20)
+
+사용자 승인에 따라 실제 운영 사이트의 공개 번들, 연결된 프로젝트와 기존 운영 기록을 대조한 뒤 `fomopomo` 프로젝트(`pqfozgiprhizwavfhjgv`, PostgreSQL 17.6)에 다음 두 건만 적용했다. 로컬 `.env.local`은 별도의 비활성 개발 프로젝트를 가리키므로 적용 대상 선택에 사용하지 않았다.
+
+| 소스 마이그레이션 | 운영에 기록된 버전 |
+| --- | --- |
+| `20260920002248_study_subjects_and_session_classification.sql` | `20260920094637` |
+| `20260920004025_harden_schema_function_defaults.sql` | `20260920094643` |
+
+관리 API는 적용 시각으로 운영 버전을 생성한다. 소스와 운영의 타임스탬프가 다르다는 이유로 다시 적용하지 말고 이름과 위 대응표를 확인한다. 과거 마이그레이션 전체를 `db push`로 재실행하지 않는다.
+
+적용 직후 읽기 전용 검증에서 다음을 확인했다.
+
+- 기존 보안 postflight 52개 항목 모두 통과.
+- 6개 참조 테이블의 nullable `subject_id`와 사용자 소유권 복합 외래 키, 과목 테이블 RLS와 네 가지 소유자 정책, Realtime publication 등록 확인.
+- 6인자 저장 RPC의 마지막 인자 기본값과 구형 5인자 overload 제거 확인. 인증된 사용자만 분류 RPC를 호출할 수 있고 기록의 과목을 직접 UPDATE할 수 없음.
+- 적용 전후 공부 기록 개수와 전체 공부 시간 동일. 기존 기록은 미분류로 유지했으며 실제 사용자 기록을 테스트용으로 수정하지 않음.
+
+운영 Security Advisor는 의도적으로 인증 사용자에게 허용한 분류 RPC를 기존 저장 RPC들과 같은 `SECURITY DEFINER` 안내 대상으로 표시한다. 두 RPC는 소유권과 입력을 검증하며 정확한 실행 권한 allowlist에 포함된다. 기존 `debug_logs`의 정책 없는 RLS 안내와 비밀번호 유출 보호 비활성화 경고도 유지되므로, 운영 advisor 경고가 0건이라고 주장하지 않는다. [RPC advisor 설명](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable).
+
+앱 자동 배포가 새 스키마보다 먼저 시작되지 않도록 이 DB 적용과 사후 검증을 `main` 푸시 전에 수행했다.
