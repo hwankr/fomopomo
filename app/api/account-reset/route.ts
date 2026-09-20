@@ -225,6 +225,7 @@ export async function POST(request: NextRequest) {
     await deleteByUserId('pinned_tasks');
     await deleteByUserId('weekly_plans');
     await deleteByUserId('monthly_plans');
+    await deleteByUserId('study_subjects');
 
     await deleteByUserId('user_settings');
     await deleteByUserId('timer_states');
