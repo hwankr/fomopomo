@@ -89,6 +89,60 @@ describe('기존 기록 과목 일괄 분류', () => {
     expect(screen.getByText('블록체인 4 복습')).toBeInTheDocument();
   });
 
+  it.each([
+    { label: '공백 없는 검색어', query: '데이터베이스' },
+    { label: '띄어 쓴 검색어', query: '데이터 베이스' },
+    { label: '여러 공백이 있는 검색어', query: '  데이터   베이스  ' },
+    { label: '탭이 있는 검색어', query: '데이터\t베이스' },
+    { label: '전각 공백이 있는 검색어', query: '데이터\u3000베이스' },
+  ])('$label로 띄어쓰기가 다른 제목을 함께 찾는다', async ({ query }) => {
+    mock.rows = [
+      row(1, { task: '데이터 베이스 9/17 복습' }),
+      row(2, { task: '데이터베이스 9/12 복습' }),
+      row(3, { task: '블록체인 9/17 복습' }),
+    ];
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 3개 · 표시 3개 · 선택 0개');
+
+    fireEvent.change(screen.getByLabelText('할 일 검색'), { target: { value: query } });
+
+    expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
+    expect(screen.getByText('데이터 베이스 9/17 복습')).toBeInTheDocument();
+    expect(screen.getByText('데이터베이스 9/12 복습')).toBeInTheDocument();
+    expect(screen.queryByText('블록체인 9/17 복습')).not.toBeInTheDocument();
+  });
+
+  it('띄어쓰기를 무시한 검색 결과를 원래 제목 그대로 선택하고 함께 분류한다', async () => {
+    const titles = ['데이터 베이스 9/17 복습', '데이터베이스 9/12 복습'];
+    mock.rows = [row(1, { task: titles[0] }), row(2, { task: titles[1] }), row(3, { task: '블록체인 9/17 복습' })];
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 3개 · 표시 3개 · 선택 0개');
+    fireEvent.change(screen.getByLabelText('할 일 검색'), { target: { value: '데이터베이스' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+
+    expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 2개')).toBeInTheDocument();
+    for (const title of titles) {
+      expect(screen.getByText(title).textContent).toBe(title);
+      expect(screen.getByRole('checkbox', { name: `${title} 선택` })).toBeChecked();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '선택 2개 미분류로 변경' }));
+    await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [1, 2], p_subject_id: null }));
+  });
+
+  it('공백을 무시하면서 기존 대소문자 구분 없는 검색을 유지한다', async () => {
+    mock.rows = [row(1, { task: 'Data Base SQL 복습' }), row(2, { task: 'database SQL 문제' }), row(3, { task: '블록체인 복습' })];
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 3개 · 표시 3개 · 선택 0개');
+
+    fireEvent.change(screen.getByLabelText('할 일 검색'), { target: { value: 'dAtAbAsE' } });
+
+    expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
+    expect(screen.getByText('Data Base SQL 복습')).toBeInTheDocument();
+    expect(screen.getByText('database SQL 문제')).toBeInTheDocument();
+    expect(screen.queryByText('블록체인 복습')).not.toBeInTheDocument();
+  });
+
   it('계정 전환 시 기록과 선택을 초기화하고 늦게 온 이전 저장 응답을 무시한다', async () => {
     let resolve!: (value: unknown) => void;
     mock.rpc.mockImplementationOnce(() => new Promise(done => { resolve = done; }));

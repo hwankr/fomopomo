@@ -26,6 +26,7 @@ type LogicalRecord = HistoryRow & { key: string; subjectIds: Set<string | null> 
 
 const PAGE_SIZE = 500;
 const DISPLAY_SIZE = 30;
+const normalizeSearchText = (value: string) => value.replace(/\s+/g, '').toLocaleLowerCase();
 export default function SubjectHistoryManager({ userId }: { userId: string | null }) {
   return userId ? <HistoryManager key={userId} userId={userId} /> : null;
 }
@@ -106,13 +107,16 @@ function HistoryManager({ userId }: { userId: string }) {
     return [...grouped.values()];
   }, [rows]);
 
-  const filtered = useMemo(() => records.filter(record => {
-    const studyDate = format(getDayStart(new Date(record.created_at)), 'yyyy-MM-dd');
-    return (record.task ?? '').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
-      && (subjectFilter === 'all' || record.subjectIds.has(subjectFilter === 'unclassified' ? null : subjectFilter))
-      && (!fromDate || studyDate >= fromDate)
-      && (!toDate || studyDate <= toDate);
-  }), [records, search, subjectFilter, fromDate, toDate]);
+  const filtered = useMemo(() => {
+    const query = normalizeSearchText(search);
+    return records.filter(record => {
+      const studyDate = format(getDayStart(new Date(record.created_at)), 'yyyy-MM-dd');
+      return normalizeSearchText(record.task ?? '').includes(query)
+        && (subjectFilter === 'all' || record.subjectIds.has(subjectFilter === 'unclassified' ? null : subjectFilter))
+        && (!fromDate || studyDate >= fromDate)
+        && (!toDate || studyDate <= toDate);
+    });
+  }, [records, search, subjectFilter, fromDate, toDate]);
 
   const visible = filtered.slice(0, visibleCount);
   const subjectNames = new Map(subjects.map(subject => [subject.id, subject.name]));
