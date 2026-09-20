@@ -65,16 +65,20 @@ export const StopwatchDisplay = ({
         </div>
       </div>
 
-      <div className={`${stopwatchTime >= 3600 ? 'text-5xl min-[400px]:text-6xl sm:text-7xl' : 'text-7xl sm:text-8xl'} font-bold mb-10 font-mono tabular-nums tracking-tighter text-indigo-500 dark:text-indigo-400`}>
+      <div className={`${stopwatchTime >= 3600 ? 'text-5xl min-[400px]:text-6xl sm:text-7xl' : 'text-7xl sm:text-8xl'} font-bold mb-3 font-mono tabular-nums tracking-tighter text-indigo-500 dark:text-indigo-400`}>
         {formatTime(stopwatchTime)}
       </div>
+
+      <p className="mb-8 text-xs leading-relaxed text-gray-500 dark:text-slate-400">
+        시작·재개 후 4시간 연속 실행 시 자동 일시정지
+      </p>
 
       <div className="flex flex-wrap gap-2 sm:gap-4 justify-center items-center">
         <button
           onClick={onToggleStopwatch}
           className="h-14 sm:h-auto px-4 sm:px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 min-w-24 sm:min-w-[140px]"
         >
-          {isStopwatchRunning ? '일시정지' : '시작'}
+          {isStopwatchRunning ? '일시정지' : stopwatchTime > 0 ? '재개' : '시작'}
         </button>
 
         {!isStopwatchRunning && stopwatchTime > 0 && (

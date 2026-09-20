@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useEffectEvent, useRef } from 'react';
+import { useState, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import TaskSidebar from './TaskSidebar';
 
@@ -10,6 +10,7 @@ import { useSound } from '@/components/timer/hooks/useSound';
 import { useTasks } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
+import { getStopwatchSnapshot, type StopwatchSnapshot } from './timer/hooks/stopwatchUtils';
 import { useStudySession, MIN_SAVABLE_SECONDS, type PendingStudyRecord, type SaveRecordResult } from './timer/hooks/useStudySession';
 import { TASK_STATE_KEY, type SavedTaskState } from './timer/hooks/useTasks';
 import { readSettingsSnapshot } from './timer/hooks/settingsStore';
@@ -64,6 +65,7 @@ type SavedStopwatchState = {
   isRunning: boolean;
   elapsed: number;
   startTime: number | null;
+  runStartTime?: number | null;
 };
 
 type SavedAppState = {
@@ -91,6 +93,23 @@ const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
 
 const isValidInterval = (interval: { start: number; end: number }) =>
   interval.start > 0 && interval.end > 0;
+
+const closeStopwatchIntervals = (
+  intervals: SavedInterval[], currentStart: number | null, endTime: number
+) => {
+  const closed = intervals
+    .filter(interval => isValidInterval(interval) && interval.start < endTime)
+    .map(interval => ({ start: interval.start, end: Math.min(interval.end, endTime) }));
+  if (currentStart !== null && currentStart < endTime) {
+    closed.push({ start: currentStart, end: endTime });
+  }
+  return closed;
+};
+
+const notifyStopwatchAutoPause = () => toast(
+  '4시간 연속 실행되어 자동 일시정지했어요. 기록은 유지되며 다시 시작하거나 저장할 수 있어요.',
+  { icon: '⏸️', duration: 6000 }
+);
 
 // Pure completion-transition kernel shared by the live completion handler and
 // the restore-time completion of a timer that expired while the tab was
@@ -230,6 +249,7 @@ export default function TimerApp({
   });
 
   // 6. Stopwatch Logic Hook
+  const onStopwatchAutoPauseRef = useRef<(snapshot: StopwatchSnapshot) => void>(() => {});
   const {
     stopwatchTime,
     isStopwatchRunning,
@@ -238,9 +258,11 @@ export default function TimerApp({
     toggleStopwatch,
     resetStopwatch,
     stopwatchStartTimeRef,
+    stopwatchRunStartTimeRef,
   } = useStopwatchLogic({
     playClickSound,
-    updateStatus: (status, task, startTime, elapsed) => updateStatus(status, task, startTime, elapsed),
+    updateStatus: (status, task, startTime, elapsed, activityTime) => updateStatus(status, task, startTime, elapsed, 'stopwatch', 'focus', 0, activityTime),
+    onAutoPauseRef: onStopwatchAutoPauseRef,
   });
 
   // --- Account-scoped persistence namespace ---
@@ -324,6 +346,7 @@ export default function TimerApp({
         isRunning: sRunning,
         elapsed: sElapsed,
         startTime: sStart,
+        runStartTime: sRunning ? stopwatchRunStartTimeRef.current : null,
       },
       intervals: currentIntervals,
       currentIntervalStart: currentStart, // SAVE IT
@@ -335,7 +358,7 @@ export default function TimerApp({
       lastUpdated: Date.now(),
     };
     writeOwnedJson(FULL_STATE_KEY, storageOwner, state);
-  }, [storageOwner]);
+  }, [storageOwner, stopwatchRunStartTimeRef]);
 
   // --- Handlers ---
 
@@ -537,6 +560,20 @@ export default function TimerApp({
     toggleTimer();
   };
 
+  const persistStopwatchPause = useCallback((snapshot: StopwatchSnapshot) => {
+    const closed = closeStopwatchIntervals(intervals, currentIntervalStartRef.current, snapshot.endTime);
+    setIntervals(closed);
+    currentIntervalStartRef.current = null;
+    saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds,
+      false, snapshot.elapsed, null, closed, null, timerDuration);
+    if (snapshot.autoPaused) notifyStopwatchAutoPause();
+  }, [intervals, currentIntervalStartRef, setIntervals, saveState, tab, timerMode, isRunning,
+    timeLeft, cycleCount, focusLoggedSeconds, timerDuration]);
+
+  useLayoutEffect(() => {
+    onStopwatchAutoPauseRef.current = persistStopwatchPause;
+  }, [persistStopwatchPause]);
+
   const handleToggleStopwatch = () => {
     const hasTimerProgress = !isRunning && timeLeft < timerDuration && timeLeft > 0;
 
@@ -545,22 +582,15 @@ export default function TimerApp({
       return;
     }
 
-    if (isStopwatchRunning) {
-      // Stopping
-      let newIntervals = intervals;
-      if (currentIntervalStartRef.current) {
-        newIntervals = [...intervals, { start: currentIntervalStartRef.current, end: Date.now() }];
-        setIntervals(newIntervals);
-        currentIntervalStartRef.current = null;
-      }
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, stopwatchTime, null, newIntervals, null, timerDuration);
+    const snapshot = toggleStopwatch();
+    if (!snapshot) return;
+    if (!snapshot.isRunning) {
+      persistStopwatchPause(snapshot);
     } else {
-      // Starting
-      const start = Date.now() - (stopwatchTime * 1000);
-      currentIntervalStartRef.current = Date.now();
-      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, true, stopwatchTime, start, intervals, currentIntervalStartRef.current, timerDuration);
+      currentIntervalStartRef.current = snapshot.endTime;
+      saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds,
+        true, snapshot.elapsed, stopwatchStartTimeRef.current, intervals, snapshot.endTime, timerDuration);
     }
-    toggleStopwatch();
   };
 
   const handleChangeTimerMode = (mode: TimerMode) => {
@@ -649,12 +679,11 @@ export default function TimerApp({
       // Stop only once the record actually exists: flipping the flag before
       // triggerSave's guards would desync memory from the persisted snapshot
       // on an early return.
-      setIsStopwatchRunning(false);
+      resetStopwatch();
       // The record froze the full session content (including the still-open
       // interval, closed at the click time above) — consume the stopwatch
       // eagerly and persist the consumed snapshot, so neither a re-click nor
       // a refresh can save the same time again.
-      setStopwatchTime(0);
       saveState(tab, timerMode, isRunning, timeLeft, null, cycleCount, focusLoggedSeconds, false, 0, null, [], null, timerDuration);
       updateStatus('online', undefined, undefined, 0);
     });
@@ -764,6 +793,7 @@ export default function TimerApp({
     hasSyncedRef.current = false;
     endTimeRef.current = 0;
     stopwatchStartTimeRef.current = 0;
+    stopwatchRunStartTimeRef.current = null;
     currentIntervalStartRef.current = null;
     taskStateDirtyRef.current = false;
     return () => {
@@ -771,7 +801,7 @@ export default function TimerApp({
       // eventual return to the original account before a save resolves.
       sessionRevisionRef.current += 1;
     };
-  }, [storageOwner, endTimeRef, stopwatchStartTimeRef, currentIntervalStartRef]);
+  }, [storageOwner, endTimeRef, stopwatchStartTimeRef, stopwatchRunStartTimeRef, currentIntervalStartRef]);
 
   // Completion transition for a timer whose deadline passed while the tab was
   // closed: the closed tab never ran handleTimerComplete, so the restore must
@@ -887,6 +917,51 @@ export default function TimerApp({
     void updateStatus('online', undefined, undefined, 0, 'timer', nextMode, 0);
   });
 
+  const pauseRecoveredStopwatch = useEffectEvent((snapshot: StopwatchSnapshot) => {
+    updateStatus('paused', undefined, undefined, snapshot.elapsed, 'stopwatch', 'focus', 0, snapshot.endTime);
+    notifyStopwatchAutoPause();
+  });
+
+  const restoreStopwatchSnapshot = useEffectEvent((state: SavedAppState, now: number): SavedAppState => {
+    const stopwatch = state.stopwatch;
+    if (!stopwatch.isRunning || !stopwatch.startTime || stopwatch.startTime <= 1704067200000) return state;
+    // Old snapshots stored the accumulated baseline at start. Imported
+    // sessions now retain a separate origin because their open ledger starts
+    // at import time, which must never extend the four-hour deadline.
+    const runStartTime = stopwatch.runStartTime
+      ?? state.currentIntervalStart
+      ?? stopwatch.startTime + Math.max(0, stopwatch.elapsed) * 1000;
+    let recoveredIntervals = (state.intervals ?? []).filter(isValidInterval);
+    if (recoveredIntervals.length === 0 && runStartTime > stopwatch.startTime) {
+      recoveredIntervals = [{ start: stopwatch.startTime, end: runStartTime }];
+    }
+    // Legacy snapshots can lack the open ledger pointer. Closed imported
+    // time may already cover part of this run, so reopen after that evidence.
+    const currentStart = state.currentIntervalStart ?? recoveredIntervals.reduce(
+      (latest, interval) => Math.max(latest, interval.end), runStartTime
+    );
+    const snapshot = getStopwatchSnapshot(stopwatch.startTime, runStartTime, now);
+    if (!snapshot.autoPaused) {
+      return { ...state, stopwatch: { ...stopwatch, runStartTime },
+        intervals: recoveredIntervals, currentIntervalStart: currentStart };
+    }
+
+    const settled: SavedAppState = {
+      ...state,
+      stopwatch: { isRunning: false, elapsed: snapshot.elapsed, startTime: null, runStartTime: null },
+      intervals: closeStopwatchIntervals(recoveredIntervals, currentStart, snapshot.endTime),
+      currentIntervalStart: null,
+      lastUpdated: now,
+    };
+    // Settle even snapshots older than a day and persist before notifying,
+    // so a reload cannot reopen or re-notify the same unattended run.
+    writeOwnedJson(FULL_STATE_KEY, storageOwner, settled);
+    sessionRevisionRef.current += 1;
+    hasSyncedRef.current = true;
+    pauseRecoveredStopwatch(snapshot);
+    return settled;
+  });
+
   // --- Restore ---
   useEffect(() => {
     const restoreState = () => {
@@ -899,10 +974,11 @@ export default function TimerApp({
         clearForeignLegacyState(TASK_STATE_KEY);
       }
 
-      const state = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
-      if (state) {
+      const savedState = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
+      if (savedState) {
         try {
           const now = Date.now();
+          const state = restoreStopwatchSnapshot(savedState, now);
           // A deadline that passed while the tab was closed means the timer
           // completed without its completion handler ever running.
           const expiredTargetTime =
@@ -910,7 +986,7 @@ export default function TimerApp({
               ? state.timer.targetTime
               : null;
 
-          if (now - state.lastUpdated < 24 * 60 * 60 * 1000) {
+          if (now - state.lastUpdated < 24 * 60 * 60 * 1000 || state.stopwatch.elapsed > 0) {
             setTab(state.activeTab);
 
             // For an expired timer, completeExpiredTimer (below) both applies
@@ -985,6 +1061,7 @@ export default function TimerApp({
                 setStopwatchTime(elapsed);
                 setIsStopwatchRunning(true);
                 stopwatchStartTimeRef.current = state.stopwatch.startTime;
+                stopwatchRunStartTimeRef.current = state.stopwatch.runStartTime ?? null;
                 currentIntervalStartRef.current = Date.now();
               } else {
                 setStopwatchTime(0);
@@ -1030,7 +1107,7 @@ export default function TimerApp({
       }
     };
     restoreState();
-  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setTimerDuration, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef, storageOwner]);
+  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setTimerDuration, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, stopwatchRunStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef, storageOwner]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -1046,7 +1123,7 @@ export default function TimerApp({
     const syncServerState = async () => {
       try {
         const saved = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
-        const local = saved && Date.now() - saved.lastUpdated < 24 * 60 * 60 * 1000
+        const local = saved && (Date.now() - saved.lastUpdated < 24 * 60 * 60 * 1000 || saved.stopwatch.elapsed > 0)
           ? saved
           : null;
         if (local?.timer.isRunning || local?.stopwatch.isRunning) return;
@@ -1146,13 +1223,18 @@ export default function TimerApp({
         if (local && localDuration - local.timer.timeLeft > (local.timer.loggedSeconds || 0)) return;
 
         const startTime = data.study_start_time ? new Date(data.study_start_time).getTime() : NaN;
-        const running = Number.isFinite(startTime);
-        const elapsed = running ? Math.floor((now - startTime) / 1000) : data.total_stopwatch_time || 0;
-        if (!Number.isFinite(elapsed) || elapsed <= 0 || elapsed >= 24 * 60 * 60 || elapsed < (local?.stopwatch.elapsed || 0)) return;
-        const endedAt = running || !Number.isFinite(remoteUpdated) ? now : Math.min(now, remoteUpdated);
+        const remoteRunning = Number.isFinite(startTime);
+        const baseline = data.total_stopwatch_time || 0;
+        if (!Number.isFinite(baseline) || baseline < 0) return;
+        const runStartTime = remoteRunning ? startTime + baseline * 1000 : null;
+        const snapshot = runStartTime !== null ? getStopwatchSnapshot(startTime, runStartTime, now) : null;
+        const running = remoteRunning && !snapshot?.autoPaused;
+        const elapsed = snapshot?.elapsed ?? baseline;
+        if (!Number.isFinite(elapsed) || elapsed < 0 || (!remoteRunning && elapsed === 0) || elapsed < (local?.stopwatch.elapsed || 0)) return;
+        const endedAt = snapshot?.endTime ?? (!Number.isFinite(remoteUpdated) ? now : Math.min(now, remoteUpdated));
         // Preserve the source device's known total before opening a new local
         // interval. Otherwise the next save only records work since import.
-        const importedIntervals = [{ start: endedAt - elapsed * 1000, end: endedAt }];
+        const importedIntervals = elapsed > 0 ? [{ start: endedAt - elapsed * 1000, end: endedAt }] : [];
         const currentStart = running ? now : null;
         const cycle = local?.timer.cycleCount || 0;
 
@@ -1167,11 +1249,14 @@ export default function TimerApp({
         setStopwatchTime(elapsed);
         setIsStopwatchRunning(running);
         stopwatchStartTimeRef.current = running ? startTime : 0;
+        stopwatchRunStartTimeRef.current = running ? runStartTime : null;
         setIntervals(importedIntervals);
         currentIntervalStartRef.current = currentStart;
         saveState('stopwatch', 'focus', false, focusDuration, null, cycle, 0,
           running, elapsed, running ? startTime : null, importedIntervals, currentStart, focusDuration);
-        if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+        if (snapshot?.autoPaused) {
+          pauseRecoveredStopwatch(snapshot);
+        } else if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
       } catch (e) {
         console.error('Sync failed', e);
       }
@@ -1182,7 +1267,7 @@ export default function TimerApp({
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, currentIntervalStartRef, setIntervals, endTimeRef, setFocusLoggedSeconds, setIsRunning, setTimeLeft, setTimerDuration, setCycleCount, setTimerMode, storageOwner, saveState]);
+  }, [isLoggedIn, checkActiveSession, setTab, setStopwatchTime, setIsStopwatchRunning, stopwatchStartTimeRef, stopwatchRunStartTimeRef, currentIntervalStartRef, setIntervals, endTimeRef, setFocusLoggedSeconds, setIsRunning, setTimeLeft, setTimerDuration, setCycleCount, setTimerMode, storageOwner, saveState]);
 
 
 

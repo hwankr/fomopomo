@@ -24,7 +24,9 @@ export async function POST(request: NextRequest) {
 
     const { error } = await supabase.from('profiles').update({
       status: status,
-      last_active_at: new Date().toISOString(),
+      // Closing a tab does not add study time. Keep a paused session's real
+      // endpoint for another device to restore, including an automatic pause.
+      ...(status === 'offline' ? {} : { last_active_at: new Date().toISOString() }),
     }).eq('id', user_id);
 
     if (error) {

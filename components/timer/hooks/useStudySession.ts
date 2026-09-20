@@ -338,7 +338,7 @@ export const useStudySession = ({
     subjectId: string | null;
   }>());
 
-  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
+  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0, activityTime?: number) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -352,7 +352,7 @@ export const useStudySession = ({
       const updateData: ProfileStatusUpdate = {
         status,
         current_task: isPublic ? taskTitle : null,
-        last_active_at: new Date().toISOString(),
+        last_active_at: new Date(activityTime ?? Date.now()).toISOString(),
         study_start_time: startTime || null,
         timer_type: timerType,
         timer_mode: timerMode,

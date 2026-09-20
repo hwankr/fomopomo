@@ -8,6 +8,7 @@ import TimerApp from '../TimerApp';
 const mocks = vi.hoisted(() => ({
   displayProps: [] as Record<string, unknown>[],
   stopwatchProps: [] as Record<string, unknown>[],
+  profileUpdates: [] as Record<string, unknown>[],
   from: vi.fn(),
   rpc: vi.fn(),
   getUser: vi.fn(),
@@ -126,6 +127,22 @@ const seedLocal = (elapsed: number, loggedSeconds: number, lastUpdated: number, 
   }));
 };
 
+// Jump the wall clock like a suspended browser, then allow one polling tick.
+// Advancing every 200ms interval for several hours hides delayed-tick bugs.
+const jumpStopwatch = async (milliseconds: number) => {
+  await act(async () => {
+    vi.setSystemTime(Date.now() + milliseconds - 200);
+    vi.advanceTimersByTime(200);
+  });
+};
+const startFreshStopwatch = async () => {
+  profile = null;
+  const view = await mount();
+  await act(async () => view.getByRole('button', { name: /^스톱워치$/ }).click());
+  await act(async () => clickStopwatch('onToggleStopwatch'));
+  return view;
+};
+
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date('2026-09-06T12:00:00') });
   vi.clearAllMocks();
@@ -133,6 +150,7 @@ beforeEach(() => {
   window.localStorage.clear();
   mocks.displayProps.length = 0;
   mocks.stopwatchProps.length = 0;
+  mocks.profileUpdates.length = 0;
   heldProfileRead = null;
   profile = pausedProfile();
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://handoff.supabase.co');
@@ -150,7 +168,7 @@ beforeEach(() => {
     const filters: ((row: Profile) => boolean)[] = [];
     const query = {
       select: vi.fn((value: string) => { columns = value; return query; }),
-      update: vi.fn((value: Partial<Profile>) => { patch = value; return query; }),
+      update: vi.fn((value: Partial<Profile>) => { patch = value; mocks.profileUpdates.push(value); return query; }),
       eq: vi.fn((key: keyof Profile, value: unknown) => { filters.push(row => row[key] === value); return query; }),
       in: vi.fn((key: keyof Profile, values: unknown[]) => { filters.push(row => values.includes(row[key])); return query; }),
       is: vi.fn((key: keyof Profile, value: unknown) => { filters.push(row => row[key] === value); return query; }),
@@ -175,6 +193,255 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllEnvs();
+});
+
+describe('TimerApp stopwatch continuous-run auto-pause', () => {
+  const maxRunSeconds = 4 * 60 * 60;
+  const maxRunMilliseconds = maxRunSeconds * 1000;
+  const overdueMilliseconds = maxRunMilliseconds + 3_600_000;
+
+  it('pauses exactly at four hours and saves only through the deadline', async () => {
+    const startedAt = Date.now();
+    await startFreshStopwatch();
+
+    await jumpStopwatch(maxRunMilliseconds - 1000);
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds - 1);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(true);
+    await jumpStopwatch(1000);
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(startedAt + maxRunMilliseconds).toISOString());
+  });
+
+  it('allows more than four accumulated hours when a manual pause resets the continuous run', async () => {
+    const startedAt = Date.now();
+    await startFreshStopwatch();
+    await jumpStopwatch(3_600_000);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    await jumpStopwatch(1_800_000);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    await jumpStopwatch(3_600_000);
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(7200);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(true);
+    await jumpStopwatch(7_200_000);
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(true);
+    await jumpStopwatch(3_600_000);
+    expect(lastStopwatchProps().stopwatchTime).toBe(3600 + maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+
+    expect(savedSeconds()).toBe(3600 + maxRunSeconds);
+    expect(lastRpc().p_segments).toEqual([
+      expect.objectContaining({ duration: 3600, ended_at: new Date(startedAt + 3_600_000).toISOString() }),
+      expect.objectContaining({ duration: maxRunSeconds, ended_at: new Date(startedAt + 5_400_000 + maxRunMilliseconds).toISOString() }),
+    ]);
+  });
+
+  it('clips an overdue manual pause before the browser gets another polling tick', async () => {
+    const startedAt = Date.now();
+    await startFreshStopwatch();
+    vi.setSystemTime(startedAt + overdueMilliseconds);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(startedAt + maxRunMilliseconds).toISOString());
+  });
+
+  it('settles an overdue run once when browser visibility and focus return before a polling tick', async () => {
+    const startedAt = Date.now();
+    await startFreshStopwatch();
+    vi.setSystemTime(startedAt + overdueMilliseconds);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(mocks.profileUpdates.filter(update => update.status === 'paused')).toHaveLength(1);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments).toEqual([
+      expect.objectContaining({ duration: maxRunSeconds, ended_at: new Date(startedAt + maxRunMilliseconds).toISOString() }),
+    ]);
+  });
+
+  it('can resume and save after a delayed automatic pause without counting the inactive gap', async () => {
+    const startedAt = Date.now();
+    await startFreshStopwatch();
+    await jumpStopwatch(overdueMilliseconds);
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await jumpStopwatch(1_800_000);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    await jumpStopwatch(60_000);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+
+    expect(savedSeconds()).toBe(maxRunSeconds + 60);
+    expect(lastRpc().p_segments).toEqual([
+      expect.objectContaining({ duration: maxRunSeconds, ended_at: new Date(startedAt + maxRunMilliseconds).toISOString() }),
+      expect.objectContaining({ duration: 60, ended_at: new Date(startedAt + overdueMilliseconds + 1_860_000).toISOString() }),
+    ]);
+  });
+
+  it('recovers an abandoned local run after more than a day and settles it only once across reloads', async () => {
+    const startedAt = Date.now();
+    const firstView = await startFreshStopwatch();
+    firstView.unmount();
+    vi.setSystemTime(startedAt + 30 * 3_600_000);
+    const restoredView = await mount();
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(persisted().stopwatch.isRunning).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    restoredView.unmount();
+    await mount();
+    await jumpStopwatch(60_000);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments).toEqual([
+      expect.objectContaining({ duration: maxRunSeconds, ended_at: new Date(startedAt + maxRunMilliseconds).toISOString() }),
+    ]);
+  });
+
+  it('keeps the original continuous-run deadline when a running local session reloads', async () => {
+    const startedAt = Date.now();
+    const view = await startFreshStopwatch();
+    await jumpStopwatch(maxRunMilliseconds - 1_800_000);
+    view.unmount();
+    await mount();
+    await jumpStopwatch(1_800_000);
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(startedAt + maxRunMilliseconds).toISOString());
+  });
+
+  it.each([
+    { ledgerOrigin: 'present', continuousSeconds: maxRunSeconds - 1800 },
+    { ledgerOrigin: 'missing', continuousSeconds: maxRunSeconds + 3600 },
+    { ledgerOrigin: 'null', continuousSeconds: maxRunSeconds + 3600 },
+  ])('restores a legacy resumed snapshot with $ledgerOrigin ledger origin after $continuousSeconds seconds', async ({ ledgerOrigin, continuousSeconds }) => {
+    profile = null;
+    const runStartedAt = Date.now() - continuousSeconds * 1000;
+    window.localStorage.setItem(STATE_KEY, JSON.stringify({
+      ownerUserId: 'user-1', activeTab: 'stopwatch',
+      timer: { mode: 'focus', duration: 1500, isRunning: false, timeLeft: 1500, targetTime: null, cycleCount: 0, loggedSeconds: 0 },
+      stopwatch: { isRunning: true, elapsed: 3600, startTime: runStartedAt - 3_600_000 },
+      intervals: [{ start: runStartedAt - 5_400_000, end: runStartedAt - 1_800_000 }],
+      ...(ledgerOrigin === 'missing' ? {} : { currentIntervalStart: ledgerOrigin === 'null' ? null : runStartedAt }),
+      configuredDurations: { focus: 1500, shortBreak: 300, longBreak: 900 },
+      lastUpdated: runStartedAt,
+    }));
+    await mount();
+    expect(lastStopwatchProps().stopwatchTime).toBe(3600 + Math.min(continuousSeconds, maxRunSeconds));
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(continuousSeconds < maxRunSeconds);
+    if (continuousSeconds < maxRunSeconds) await jumpStopwatch((maxRunSeconds - continuousSeconds) * 1000);
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(3600 + maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(3600 + maxRunSeconds);
+    expect(lastRpc().p_segments).toEqual([
+      expect.objectContaining({ duration: 3600, ended_at: new Date(runStartedAt - 1_800_000).toISOString() }),
+      expect.objectContaining({ duration: maxRunSeconds, ended_at: new Date(runStartedAt + maxRunMilliseconds).toISOString() }),
+    ]);
+  });
+
+  it('imports a resumed remote run using its baseline and preserves the source deadline', async () => {
+    const importedAt = Date.now();
+    profile = pausedProfile({
+      timer_type: 'stopwatch', timer_duration: 0, status: 'studying',
+      // One previous hour, followed by a run that is 30 minutes from its limit.
+      study_start_time: new Date(importedAt - (3_600_000 + maxRunMilliseconds - 1_800_000)).toISOString(),
+      total_stopwatch_time: 3600,
+    });
+    await mount();
+    expect(lastStopwatchProps().stopwatchTime).toBe(3600 + maxRunSeconds - 1800);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(true);
+    await jumpStopwatch(1_800_000);
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(3600 + maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(3600 + maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(importedAt + 1_800_000).toISOString());
+  });
+
+  it('preserves the automatic pause deadline when another device imports the delayed paused profile', async () => {
+    const startedAt = Date.now();
+    profile = pausedProfile({ timer_type: 'stopwatch', timer_duration: 0, total_stopwatch_time: 0 });
+    const sourceView = await mount();
+    await act(async () => sourceView.getByRole('button', { name: /^스톱워치$/ }).click());
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    await jumpStopwatch(overdueMilliseconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+
+    sourceView.unmount();
+    window.localStorage.removeItem(STATE_KEY);
+    await mount();
+    expect(lastStopwatchProps().stopwatchTime).toBe(maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+
+    expect(savedSeconds()).toBe(maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(startedAt + maxRunMilliseconds).toISOString());
+  });
+
+  it('publishes the accumulated baseline and virtual origin on manual resume for another device', async () => {
+    profile = pausedProfile({ timer_type: 'stopwatch', timer_duration: 0 });
+    await mount();
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    await jumpStopwatch(3_600_000);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    expect(profile.total_stopwatch_time).toBe(4200);
+    await jumpStopwatch(1_800_000);
+    const resumedAt = Date.now();
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+
+    expect(mocks.profileUpdates.filter(update => update.status === 'studying').at(-1)).toEqual(expect.objectContaining({
+      total_stopwatch_time: 4200,
+      study_start_time: new Date(resumedAt - 4_200_000).toISOString(),
+    }));
+    expect(profile.total_stopwatch_time).toBe(4200);
+    expect(new Date(profile.study_start_time!).getTime() + profile.total_stopwatch_time * 1000).toBe(resumedAt);
+  });
+
+  it.each([
+    { previousSeconds: 3600, continuousHours: 5 },
+    { previousSeconds: 0, continuousHours: 30 },
+  ])('caps an overdue remote run with $previousSeconds previous seconds after $continuousHours hours', async ({ previousSeconds, continuousHours }) => {
+    const importedAt = Date.now();
+    const runStartedAt = importedAt - continuousHours * 3_600_000;
+    profile = pausedProfile({
+      timer_type: 'stopwatch', timer_duration: 0, status: 'offline',
+      study_start_time: new Date(runStartedAt - previousSeconds * 1000).toISOString(),
+      total_stopwatch_time: previousSeconds,
+    });
+    await mount();
+
+    expect(lastStopwatchProps().stopwatchTime).toBe(previousSeconds + maxRunSeconds);
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    expect(savedSeconds()).toBe(previousSeconds + maxRunSeconds);
+    expect(lastRpc().p_segments.at(-1)?.ended_at).toBe(new Date(runStartedAt + maxRunMilliseconds).toISOString());
+  });
 });
 
 describe('TimerApp cross-device stopwatch handoff', () => {

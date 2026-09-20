@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   savePendingRecord: vi.fn(),
   currentIntervalStartRef: { current: null as number | null },
   stopwatchStartTimeRef: { current: null as number | null },
+  stopwatchRunStartTimeRef: { current: null as number | null },
   settings: {
     pomoTime: 25,
     shortBreak: 5,
@@ -97,6 +98,7 @@ mocks.useStopwatchLogicResult = {
   toggleStopwatch: vi.fn(),
   resetStopwatch: vi.fn(),
   stopwatchStartTimeRef: mocks.stopwatchStartTimeRef,
+  stopwatchRunStartTimeRef: mocks.stopwatchRunStartTimeRef,
 };
 
 vi.mock('@/components/timer/hooks/useSettings', () => ({
