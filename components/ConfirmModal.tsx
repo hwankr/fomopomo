@@ -26,7 +26,7 @@ export default function ConfirmModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden transform transition-all animate-scale-in">
                 <div className="p-6">
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
@@ -53,7 +53,7 @@ export default function ConfirmModal({
                                 onConfirm();
                                 onClose();
                             }}
-                            className={`px-4 py-2 text-white rounded-xl font-bold shadow-lg transition-all transform active:scale-95 ${isDangerous
+                            className={`ui-press px-4 py-2 text-white rounded-xl font-bold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 ${isDangerous
                                     ? 'bg-rose-500 hover:bg-rose-600'
                                     : 'bg-blue-500 hover:bg-blue-600'
                                 }`}

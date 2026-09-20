@@ -11,6 +11,11 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+async function chooseSubject(name: string) {
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({
     subjects: [
@@ -228,12 +233,12 @@ describe('LongTermTasks', () => {
     await screen.findByText('빅데이터분석기사');
     fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
     fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '블록체인 강의' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 강의');
     expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-blockchain');
     fireEvent.click(screen.getByRole('button', { name: '블록체인 강의 수정' }));
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-db' } });
+    await chooseSubject('데이터베이스');
     fireEvent.click(screen.getByRole('button', { name: '장기 과제 저장' }));
     await waitFor(() => expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-db'));
     expect(within(getRowForTitle('블록체인 강의')).getByText('데이터베이스')).toBeInTheDocument();

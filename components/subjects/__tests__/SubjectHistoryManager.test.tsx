@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 type Row = { id: number; task: string; duration: number; created_at: string; subject_id: string | null; session_batch_id: string | null; group_id: string | null; user_id: string };
 const mock = vi.hoisted(() => ({ rows: [] as Row[], rpc: vi.fn(), eq: vi.fn(), range: vi.fn(), rename: vi.fn() }));
 
+// The primitive suites cover popover keyboard/calendar behavior. These boundaries
+// keep this suite focused on filtering, complete batches and mutation ownership.
+vi.mock('@/components/ui/AppSelect', () => ({ default: ({ value, onValueChange, options, label, disabled }: {
+  value: string; onValueChange: (value: string) => void; options: { value: string; label: string }[]; label?: string; disabled?: boolean;
+}) => <label>{label}<select value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> }));
+vi.mock('@/components/ui/DatePicker', () => ({ default: ({ value, onChange, label, min, max, disabled }: {
+  value: string; onChange: (value: string) => void; label: string; min?: string; max?: string; disabled?: boolean;
+}) => <label>{label}<input value={value} min={min} max={max} disabled={disabled} onChange={event => onChange(event.target.value)} /></label> }));
+vi.mock('@/components/subjects/SubjectManager', () => ({ default: () => <p>공통 과목 관리</p> }));
+
 vi.mock('@/lib/supabase', () => ({ supabase: {
   rpc: mock.rpc,
   from: vi.fn(() => {
@@ -93,5 +103,22 @@ describe('기존 기록 과목 일괄 분류', () => {
     await screen.findByText('다른 계정의 기록');
     expect(screen.queryByText('2개 기록의 과목을 해제했습니다.')).not.toBeInTheDocument();
     expect(screen.getByText('검색 결과 1개 · 표시 1개 · 선택 0개')).toBeInTheDocument();
+  });
+
+  it('날짜 필터를 지울 수 있고 시작일보다 이른 종료일을 허용하지 않는다', async () => {
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
+    fireEvent.change(screen.getByLabelText('시작 공부일'), { target: { value: '2026-09-20' } });
+    fireEvent.change(screen.getByLabelText('종료 공부일'), { target: { value: '2026-09-19' } });
+    expect(screen.getByLabelText('종료 공부일')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('종료 공부일'), { target: { value: '2026-09-21' } });
+    fireEvent.change(screen.getByLabelText('시작 공부일'), { target: { value: '2026-09-22' } });
+    expect(screen.getByLabelText('시작 공부일')).toHaveValue('2026-09-20');
+    fireEvent.change(screen.getByLabelText('시작 공부일'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('종료 공부일'), { target: { value: '' } });
+    expect(screen.getByLabelText('시작 공부일')).toHaveValue('');
+    expect(screen.getByLabelText('종료 공부일')).toHaveValue('');
+    expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
+    expect(screen.getByText('공통 과목 관리')).toBeInTheDocument();
   });
 });

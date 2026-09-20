@@ -2,6 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SubjectSelect from '../SubjectSelect';
 
+// Business semantics are independent of AppSelect's separately tested keyboard UI.
+vi.mock('@/components/ui/AppSelect', () => ({ default: ({ value, onValueChange, options, label, disabled }: {
+  value: string; onValueChange: (value: string) => void; options: { value: string; label: string }[]; label?: string; disabled?: boolean;
+}) => <label>{label}<select value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> }));
+
 afterEach(cleanup);
 const subject = { id: 'blockchain', user_id: 'user', name: '블록체인' };
 
@@ -9,7 +14,7 @@ describe('SubjectSelect', () => {
   it('uses stable IDs and allows clearing a subject', () => {
     const onChange = vi.fn();
     render(<SubjectSelect subjects={[subject]} value={subject.id} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText('과목'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('과목'), { target: { value: '__unclassified__' } });
     expect(onChange).toHaveBeenCalledWith(null);
     fireEvent.change(screen.getByLabelText('과목'), { target: { value: subject.id } });
     expect(onChange).toHaveBeenLastCalledWith(subject.id);

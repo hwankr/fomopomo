@@ -62,9 +62,8 @@ describe('UserTable', () => {
   it('switches to joined date sorting', () => {
     render(<UserTable users={users} onUserClick={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: /정렬/i }), {
-      target: { value: 'joined' },
-    });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /정렬/i }), { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('option', { name: '최근 가입' }));
 
     expect(getRenderedNames()).toEqual([
       expect.stringContaining('Charlie'),

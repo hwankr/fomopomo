@@ -437,7 +437,7 @@ describe('settingsStore', () => {
     });
   });
 
-  it('preserves remote -> local -> default precedence for task options', async () => {
+  it('keeps an explicitly emptied remote legacy archive empty', async () => {
     signInLocally(TEST_USER_A);
     setAuthenticatedUser(TEST_USER_A);
     setStoredSettings(TEST_USER_A, {
@@ -455,10 +455,52 @@ describe('settingsStore', () => {
       data: { settings: { tasks: [] } },
       error: null,
     };
-    await expect(loadTaskOptions()).resolves.toEqual(['local work']);
+    await expect(loadTaskOptions()).resolves.toEqual([]);
 
     window.localStorage.removeItem(getSettingsStorageKey(TEST_USER_A));
     await expect(loadTaskOptions()).resolves.toEqual(DEFAULT_TASK_OPTIONS);
+  });
+
+  it('does not create subject-like legacy defaults and preserves malformed archive entries', () => {
+    expect(DEFAULT_TASK_OPTIONS).toEqual([]);
+    expect(normalizeSettings({}).tasks).toEqual([]);
+    const legacy = ['  SQL ', '', null, { old: 'value' }] as unknown as string[];
+    expect(normalizeSettings({ tasks: legacy }).tasks).toEqual(legacy);
+    expect(normalizeSettings({ tasks: legacy }).tasks).not.toBe(legacy);
+  });
+
+  it('does not load guest legacy names into an authenticated account with no saved settings', async () => {
+    setStoredSettings('guest', { tasks: ['guest private'] });
+    signInLocally(TEST_USER_A);
+    setAuthenticatedUser(TEST_USER_A);
+    expect((await loadPersistedSettings()).tasks).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? '{}').tasks).toEqual(['guest private']);
+  });
+
+  it('ignores a prior account remote load after the storage owner changes', async () => {
+    let finish!: (value: UserSettingsResult) => void;
+    signInLocally(TEST_USER_A);
+    setAuthenticatedUser(TEST_USER_A);
+    singleMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const loading = loadPersistedSettings();
+    await vi.waitFor(() => expect(singleMock).toHaveBeenCalled());
+    signInLocally(TEST_USER_B);
+    setStoredSettings(TEST_USER_B, { tasks: ['B subject'] });
+    finish({ data: { settings: { tasks: ['A subject'] } }, error: null });
+    expect((await loading).tasks).toEqual(['B subject']);
+    expect(readSettingsSnapshot().tasks).toEqual(['B subject']);
+  });
+
+  it('does not persist a prior account form into the next authenticated account', async () => {
+    let finish!: (value: { data: { user: { id: string } } }) => void;
+    signInLocally(TEST_USER_A);
+    supabaseMock.auth.getUser.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const saving = persistSettings({ ...DEFAULT_FOMOPOMO_SETTINGS, tasks: ['A subject'] });
+    signInLocally(TEST_USER_B);
+    finish({ data: { user: { id: TEST_USER_B } } });
+    expect(await saving).toBe(false);
+    expect(upsertMock).not.toHaveBeenCalled();
+    expect(readSettingsSnapshot().tasks).toEqual([]);
   });
 
   describe('account-scoped storage', () => {

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
@@ -19,6 +19,7 @@ import {
   DEFAULT_FOMOPOMO_SETTINGS,
   SETTINGS_CHANGED_EVENT,
   SETTINGS_KEY,
+  getSettingsStorageKey,
 } from '../settingsStore';
 
 const DEFAULT_SETTINGS: Settings = DEFAULT_FOMOPOMO_SETTINGS;
@@ -28,6 +29,7 @@ describe('useSettings', () => {
   let dispatchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://testproj.supabase.co');
     window.localStorage.clear();
 
     supabaseMock.auth.getUser.mockReset();
@@ -42,6 +44,11 @@ describe('useSettings', () => {
     });
 
     dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('returns a stable snapshot reference when settings have not changed', () => {
@@ -130,12 +137,13 @@ describe('useSettings', () => {
   });
 
   it('persistSettings writes locally before remote upsert when a user exists', async () => {
+    window.localStorage.setItem('sb-testproj-auth-token', JSON.stringify({ access_token: 'token', user: { id: 'user-1' } }));
     supabaseMock.auth.getUser.mockResolvedValue({
       data: { user: { id: 'user-1' } },
     });
     upsertMock.mockImplementation(async () => {
       const currentSettings = JSON.parse(
-        window.localStorage.getItem(SETTINGS_KEY) ?? '{}'
+        window.localStorage.getItem(getSettingsStorageKey('user-1')) ?? '{}'
       ) as Settings;
 
       expect(currentSettings.pomoTime).toBe(45);
@@ -185,6 +193,7 @@ describe('useSettings', () => {
   });
 
   it('persistSettings forwards false when remote persistence fails', async () => {
+    window.localStorage.setItem('sb-testproj-auth-token', JSON.stringify({ access_token: 'token', user: { id: 'user-1' } }));
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);

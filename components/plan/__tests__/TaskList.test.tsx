@@ -3,6 +3,11 @@ import toast from 'react-hot-toast';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+async function chooseSubject(name: string) {
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({
     subjects: [
@@ -129,7 +134,7 @@ describe('TaskList request ownership', () => {
     await screen.findByText('9월 6일 작업');
     fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
     fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/12 복습' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 9/12 복습');
     expect(rows.tasks.find((row) => row.title === '블록체인 9/12 복습')).toMatchObject({ subject_id: 'subject-blockchain' });
@@ -146,7 +151,7 @@ describe('TaskList request ownership', () => {
     fireEvent.click(screen.getByTitle('작업 고정'));
     await waitFor(() => expect(rows.pinned_tasks[0]).toMatchObject({ subject_id: 'subject-db' }));
     fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(rows.pinned_tasks[0]).toMatchObject({ subject_id: 'subject-blockchain' }));
     expect(rows.tasks[0].subject_id).toBe('subject-blockchain');
@@ -183,7 +188,7 @@ describe('TaskList request ownership', () => {
     intercept = query => query.table === 'tasks' && query.action === 'update'
       ? Promise.resolve({ data: null, error: { message: 'save failed' } }) : undefined;
     fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(within(taskRow('9월 6일 작업')).getByText('데이터베이스')).toBeInTheDocument());
     expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(0);
@@ -200,7 +205,7 @@ describe('TaskList request ownership', () => {
     intercept = query => query.table === 'pinned_tasks' && query.action === 'update'
       ? Promise.resolve({ data: null, error: { message: 'pin save failed' } }) : undefined;
     fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(
       '할 일은 저장했지만 고정 작업은 저장하지 못했습니다. 이후 자동 추가에는 이전 설정이 적용됩니다.'
@@ -219,7 +224,7 @@ describe('TaskList request ownership', () => {
     mount();
     await screen.findByText('9월 6일 작업');
     fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
-    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: '' } });
+    await chooseSubject('미분류');
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(rows.tasks[0].subject_id).toBeNull());
     expect(within(taskRow('9월 6일 작업')).getByText('미분류')).toBeInTheDocument();

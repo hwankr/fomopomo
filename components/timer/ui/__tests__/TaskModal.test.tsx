@@ -72,13 +72,12 @@ describe('TaskModal', () => {
     expect(screen.getByRole('button', { name: '저장' })).toBeEnabled();
   });
 
-  it('lets a freeform completion record choose a subject without changing its task title', () => {
+  it('lets a freeform completion record choose a subject without changing its task title', async () => {
     const onSelectSubject = vi.fn();
     render(<TaskModal {...baseProps} selectedTask="블록체인 9/12 복습" onSelectSubject={onSelectSubject} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: '공부 과목' }), {
-      target: { value: 'blockchain' },
-    });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: '공부 과목' }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: '블록체인' }));
 
     expect(onSelectSubject).toHaveBeenCalledWith('blockchain');
     expect(baseProps.onSelectTask).not.toHaveBeenCalled();

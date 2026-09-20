@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import { Session } from '@supabase/supabase-js';
-import { loadTaskOptions as loadPersistedTaskOptions } from './timer/hooks/settingsStore';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { notifyStudySubjectsChanged, STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 
 type StudySession = {
   id: number;
@@ -12,6 +13,7 @@ type StudySession = {
   duration: number;
   created_at: string;
   task?: string | null;
+  subject_id?: string | null;
   // 저장 배치 ID: 새 행은 session_batch_id, 마이그레이션 이전 행은 group_id에 있다.
   session_batch_id?: string | null;
   group_id?: string | null;
@@ -21,23 +23,26 @@ type StudySession = {
 const getBatchId = (item: StudySession) =>
   item.session_batch_id ?? item.group_id ?? null;
 
-// ✨ [추가] updateTrigger를 선택적 prop으로 정의
 interface HistoryListProps {
   updateTrigger?: number;
   session?: Session | null;
   onOpenLogin?: () => void;
 }
 
-// ✨ props 구조 분해 할당 (기본값 0)
 export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }: HistoryListProps) {
   const [history, setHistory] = useState<StudySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [taskDraft, setTaskDraft] = useState('');
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
-  const [taskOptions, setTaskOptions] = useState<string[]>([]);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const userId = session?.user?.id ?? null;
+  const { subjects } = useStudySubjects(userId);
+  const accountRef = useRef({ userId, generation: 0 });
+  if (accountRef.current.userId !== userId) {
+    accountRef.current = { userId, generation: accountRef.current.generation + 1 };
+  }
 
   // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 조회의 응답은 폐기된다.
   const fetchGenerationRef = useRef(0);
@@ -50,30 +55,27 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
     setEditingId(null);
     setTaskDraft('');
     setUpdatingTaskId(null);
+    setDeletingId(null);
     setLoading(userId !== null);
   }
 
-  const loadTaskOptions = async () => {
-    try {
-      const tasks = await loadPersistedTaskOptions();
-
-      setTaskOptions(tasks ?? ['국어', '수학', '영어']);
-    } catch (error) {
-      console.error('작업 목록 로드 실패:', error);
-      setTaskOptions(['국어', '수학', '영어']);
-    }
-  };
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     const generation = ++fetchGenerationRef.current;
+    const account = accountRef.current;
+    const isCurrent = () => account === accountRef.current && generation === fetchGenerationRef.current;
+    if (!userId) {
+      setHistory([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (generation !== fetchGenerationRef.current) return;
+      if (!isCurrent()) return;
 
-      if (!user) {
+      if (!user || user.id !== userId) {
         // 로그아웃 상태라면 이전 계정의 기록을 남기지 않는다.
         setHistory([]);
         return;
@@ -81,15 +83,14 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
 
       const { data, error } = await supabase
         .from('study_sessions')
-        .select('id, mode, duration, created_at, task, session_batch_id, group_id')
-        .eq('user_id', user.id)
+        .select('id, mode, duration, created_at, task, subject_id, session_batch_id, group_id')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false, nullsFirst: false })
-        .limit(20); // ✨ Increase limit to handle split sessions
-      if (generation !== fetchGenerationRef.current) return;
+        .limit(20);
+      if (!isCurrent()) return;
 
       if (error) throw error;
 
-      // ✨ [New] Grouping Logic
       const groupedHistory: StudySession[] = [];
       const processedBatchIds = new Set<string>();
 
@@ -117,6 +118,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
 
       setHistory(groupedHistory.slice(0, 5)); // Show top 5 grouped sessions
     } catch (error) {
+      if (!isCurrent()) return;
       const message =
         error instanceof Error && error.message.includes('permission denied')
           ? 'Supabase RLS 정책에서 study_sessions 조회 권한을 확인해주세요. (예: user_id = auth.uid())'
@@ -124,14 +126,17 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
       toast.error(message);
       console.error(error);
     } finally {
-      if (generation === fetchGenerationRef.current) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
-  };
+  }, [userId]);
 
   const handleDelete = async (id: number) => {
+    if (!userId || updatingTaskId !== null || deletingId !== null) return;
     if (!confirm('이 기록을 삭제하시겠습니까?')) return;
+    const account = accountRef.current;
+    setDeletingId(id);
 
     try {
       // 분할 저장된 세션은 배치 단위로 전 조각을 삭제한다. 배치 키가 어느
@@ -144,16 +149,19 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
         const { error: delError } = await supabase
           .from('study_sessions')
           .delete()
+          .eq('user_id', userId)
           .or(`session_batch_id.eq.${batchId},group_id.eq.${batchId}`);
         error = delError;
       } else {
         const { error: delError } = await supabase
           .from('study_sessions')
           .delete()
+          .eq('user_id', userId)
           .eq('id', id);
         error = delError;
       }
 
+      if (account !== accountRef.current) return;
       if (error) throw error;
 
       setHistory((prev) => prev.filter((item) => item.id !== id));
@@ -162,18 +170,19 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
         setTaskDraft('');
       }
       toast.success('기록이 삭제되었습니다.');
+      notifyStudySubjectsChanged();
     } catch (error) {
+      if (account !== accountRef.current) return;
       toast.error('삭제 실패');
       console.error(error);
+    } finally {
+      if (account === accountRef.current) setDeletingId(null);
     }
   };
 
   const startEditing = (item: StudySession) => {
     setEditingId(item.id);
     setTaskDraft(item.task ?? '');
-    if (item.task && !taskOptions.includes(item.task)) {
-      setTaskOptions((prev) => [...prev, item.task as string]);
-    }
   };
 
   const cancelEditing = () => {
@@ -183,6 +192,9 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
   };
 
   const handleUpdateTask = async (id: number) => {
+    if (!userId || updatingTaskId !== null || deletingId !== null) return;
+    const account = accountRef.current;
+    const task = taskDraft.trim() || null;
     setUpdatingTaskId(id);
     try {
       const targetItem = history.find(h => h.id === id);
@@ -193,27 +205,32 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
       if (batchId) {
         const { error: upError } = await supabase
           .from('study_sessions')
-          .update({ task: taskDraft.trim() || null })
+          .update({ task })
+          .eq('user_id', userId)
           .or(`session_batch_id.eq.${batchId},group_id.eq.${batchId}`);
         error = upError;
       } else {
         const { error: upError } = await supabase
           .from('study_sessions')
-          .update({ task: taskDraft.trim() || null })
+          .update({ task })
+          .eq('user_id', userId)
           .eq('id', id);
         error = upError;
       }
 
+      if (account !== accountRef.current) return;
       if (error) throw error;
 
       setHistory((prev) =>
         prev.map((item) =>
-          item.id === id ? { ...item, task: taskDraft.trim() || null } : item
+          item.id === id ? { ...item, task } : item
         )
       );
       toast.success('작업 메모를 업데이트했어요.');
       cancelEditing();
+      notifyStudySubjectsChanged();
     } catch (error) {
+      if (account !== accountRef.current) return;
       const missingColumnMessage =
         error instanceof Error && error.message.includes('column "task"')
           ? 'Supabase study_sessions 테이블에 task(TEXT) 컬럼이 필요해요.'
@@ -221,17 +238,24 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
       toast.error(missingColumnMessage);
       console.error(error);
     } finally {
-      setUpdatingTaskId(null);
+      if (account === accountRef.current) setUpdatingTaskId(null);
     }
   };
 
   // updateTrigger 또는 로그인 사용자가 변경될 때마다 다시 로드
   useEffect(() => {
-    const load = async () => {
-      await Promise.all([loadTaskOptions(), fetchHistory()]);
+    void fetchHistory();
+    const refresh = () => { void fetchHistory(); };
+    window.addEventListener(STUDY_SUBJECTS_CHANGED_EVENT, refresh);
+    return () => {
+      fetchGenerationRef.current += 1;
+      window.removeEventListener(STUDY_SUBJECTS_CHANGED_EVENT, refresh);
     };
-    void load();
-  }, [updateTrigger, userId]);
+  }, [updateTrigger, fetchHistory]);
+
+  useEffect(() => () => {
+    accountRef.current = { ...accountRef.current, generation: accountRef.current.generation + 1 };
+  }, []);
 
   const formatDuration = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -256,20 +280,21 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
   };
 
   return (
-    <div className="w-full max-w-md mt-4">
+    <section aria-label="최근 활동" className="ui-panel-enter w-full max-w-md mt-4">
       <div className="flex justify-between items-center mb-3 px-2">
         <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           최근 활동
         </h3>
         <button
           onClick={fetchHistory}
-          className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+          disabled={loading || updatingTaskId !== null || deletingId !== null}
+          className="ui-press rounded-lg px-2 py-1 text-xs text-gray-500 hover:text-rose-600 disabled:opacity-50 dark:text-gray-400"
         >
           새로고침
         </button>
       </div>
 
-      <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-rose-100/70 dark:border-slate-700 overflow-hidden">
         {loading ? (
           <div className="text-center text-gray-400 py-8 text-sm">
             로딩 중...
@@ -279,7 +304,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
             <p className="text-gray-400 text-sm mb-3">로그인하고 학습 기록을 확인해보세요!</p>
             <button
               onClick={onOpenLogin}
-              className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+              className="ui-button-primary ui-press px-4 py-2 text-sm"
             >
               로그인하기
             </button>
@@ -293,83 +318,31 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
             {history.map((item) => (
               <li
                 key={item.id}
-                className="flex justify-between items-center p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors group"
+                className="p-4 transition-colors hover:bg-rose-50/40 dark:hover:bg-slate-700/30"
               >
-                <div className="flex items-start gap-3 flex-1 min-w-0">
+                <div className="flex items-center gap-3">
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${item.mode === 'pomo'
-                      ? 'bg-rose-100 text-rose-500 dark:bg-rose-900/30'
-                      : 'bg-indigo-100 text-indigo-500 dark:bg-indigo-900/30'
-                      }`}
+                    aria-hidden="true"
+                    className="w-9 h-9 shrink-0 rounded-2xl flex items-center justify-center text-base bg-rose-50 text-rose-500 dark:bg-rose-900/20"
                   >
                     {item.mode === 'pomo' ? '🍅' : '⏱️'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                      <div>
-                        <div className="font-bold text-gray-700 dark:text-gray-200 text-sm">
-                          {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          {formatDate(item.created_at)}
-                        </div>
-                      </div>
-
-                      {editingId === item.id ? (
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0 text-xs text-gray-500">
-                          <select
-                            value={taskDraft}
-                            onChange={(e) => setTaskDraft(e.target.value)}
-                            className="flex-1 min-w-0 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-rose-300 dark:focus:ring-rose-500"
-                          >
-                            <option value="">작업 없음</option>
-                            {taskOptions.map((task) => (
-                              <option key={task} value={task}>
-                                {task}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="flex gap-1 shrink-0">
-                            <button
-                              onClick={() => handleUpdateTask(item.id)}
-                              disabled={updatingTaskId === item.id}
-                              className="px-3 py-2 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600 disabled:opacity-60"
-                            >
-                              저장
-                            </button>
-                            <button
-                              onClick={cancelEditing}
-                              className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-slate-600"
-                            >
-                              취소
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 flex-1 min-w-0 text-xs text-gray-500">
-                          <span className="truncate text-gray-600 dark:text-gray-300">
-                            {item.task?.trim() ? item.task : '작업 메모 없음'}
-                          </span>
-                          <button
-                            onClick={() => startEditing(item)}
-                            className="text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 text-[11px] font-semibold"
-                          >
-                            수정
-                          </button>
-                        </div>
-                      )}
+                    <div className="font-semibold text-gray-700 dark:text-gray-200 text-sm">
+                      {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
                     </div>
+                    <time dateTime={item.created_at} className="text-xs text-gray-400">
+                      {formatDate(item.created_at)}
+                    </time>
                   </div>
-                </div>
-
-                <div className="flex items-center gap-4 ml-3">
-                  <div className="font-mono font-bold text-gray-800 dark:text-white text-right">
+                  <div className="font-mono text-sm font-semibold text-gray-700 dark:text-gray-100 text-right">
                     {formatDuration(item.duration)}
                   </div>
-
                   <button
                     onClick={() => handleDelete(item.id)}
-                    className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                    disabled={updatingTaskId !== null || deletingId !== null}
+                    className="ui-press shrink-0 rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/30"
+                    aria-label="기록 삭제"
                     title="삭제"
                   >
                     <svg
@@ -388,11 +361,58 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
                     </svg>
                   </button>
                 </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="max-w-full truncate rounded-md bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-300">
+                    {item.subject_id ? subjects.find(subject => subject.id === item.subject_id)?.name ?? '지정된 과목' : '미분류'}
+                  </span>
+                </div>
+                {editingId === item.id ? (
+                  <form
+                    className="mt-3 space-y-2"
+                    onSubmit={event => { event.preventDefault(); void handleUpdateTask(item.id); }}
+                  >
+                    <label htmlFor={`history-task-${item.id}`} className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                      작업 메모
+                    </label>
+                    <input
+                      id={`history-task-${item.id}`}
+                      type="text"
+                      maxLength={200}
+                      value={taskDraft}
+                      onChange={event => setTaskDraft(event.target.value)}
+                      disabled={updatingTaskId === item.id}
+                      placeholder="예: 블록체인 9/12 복습"
+                      className="ui-input w-full min-w-0 px-3 py-2 text-sm"
+                    />
+                    <div className="flex justify-end gap-2 text-xs">
+                      <button type="button" onClick={cancelEditing} disabled={updatingTaskId === item.id} className="ui-button-secondary ui-press px-3 py-2">
+                        취소
+                      </button>
+                      <button type="submit" disabled={updatingTaskId === item.id} className="ui-button-primary ui-press px-3 py-2">
+                        {updatingTaskId === item.id ? '저장 중...' : '저장'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="mt-2 flex items-start gap-2 text-sm">
+                    <p className="flex-1 min-w-0 break-words text-gray-600 dark:text-gray-300">
+                      {item.task?.trim() ? item.task : '작업 메모 없음'}
+                    </p>
+                    <button
+                      onClick={() => startEditing(item)}
+                      disabled={updatingTaskId !== null || deletingId !== null}
+                      aria-label="작업 메모 수정"
+                      className="ui-press shrink-0 rounded-md px-2 py-1 text-xs text-gray-400 hover:text-rose-600 disabled:opacity-40"
+                    >
+                      수정
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
-    </div>
+    </section>
   );
 }

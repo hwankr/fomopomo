@@ -50,35 +50,40 @@ export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) 
     end: endDate,
   });
 
-  const weekDays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+        <h2 aria-live="polite" className="text-lg font-bold text-gray-900 dark:text-white">
           {format(currentMonth, 'yyyy년 M월', { locale: ko })}
         </h2>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => {
               const today = new Date();
               setCurrentMonth(today);
               onSelectDate(today);
             }}
-            className="text-xs font-medium px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+            className="ui-press min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
           >
-            Today
+            오늘
           </button>
           <div className="flex gap-1">
             <button
+              type="button"
+              aria-label="이전 달"
               onClick={prevMonth}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+              className="ui-press rounded-lg p-2 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:hover:bg-slate-700"
             >
               <ChevronLeft className="w-5 h-5 text-gray-500" />
             </button>
             <button
+              type="button"
+              aria-label="다음 달"
               onClick={nextMonth}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+              className="ui-press rounded-lg p-2 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:hover:bg-slate-700"
             >
               <ChevronRight className="w-5 h-5 text-gray-500" />
             </button>
@@ -106,16 +111,20 @@ export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) 
           return (
             <button
               key={day.toString()}
+              type="button"
+              aria-label={format(day, 'yyyy년 M월 d일 EEEE', { locale: ko })}
+              aria-pressed={isSelected}
+              aria-current={isDayToday ? 'date' : undefined}
               onClick={() => onSelectDate(day)}
               className={cn(
-                'aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all duration-200',
+                'ui-press aspect-square rounded-xl flex flex-col items-center justify-center relative transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800',
                 !isCurrentMonth && 'text-gray-300 dark:text-gray-600',
                 isCurrentMonth && 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50',
                 // Weekend colors
                 ((day.getDay() === 0 || holidayDates.includes(parseInt(format(day, 'yyyyMMdd')))) && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-500/20 text-red-700 dark:text-red-200',
                 (day.getDay() === 6 && isCurrentMonth && !isSelected) && 'bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200',
-                isSelected && 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 shadow-md scale-105 z-10',
-                isDayToday && !isSelected && 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100 font-bold'
+                isSelected && 'bg-rose-500 text-white hover:bg-rose-600 dark:bg-rose-500 dark:text-white dark:hover:bg-rose-400',
+                isDayToday && !isSelected && 'ring-1 ring-inset ring-rose-300 font-semibold dark:ring-rose-500/60'
               )}
             >
               <span className="text-sm">{format(day, 'd')}</span>
@@ -123,7 +132,7 @@ export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) 
               {isDayToday && (
                 <span className={cn(
                   "absolute bottom-2 w-1 h-1 rounded-full",
-                  isSelected ? "bg-white dark:bg-gray-900" : "bg-rose-500"
+                  isSelected ? "bg-white" : "bg-rose-500"
                 )} />
               )}
             </button>
