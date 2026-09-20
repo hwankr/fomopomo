@@ -64,7 +64,6 @@ export default function SettingsModal({
   const [taskPopupEnabled, setTaskPopupEnabled] = useState(
     DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled
   );
-  const [seasonalEffectEnabled, setSeasonalEffectEnabled] = useState(DEFAULT_FOMOPOMO_SETTINGS.seasonalEffectEnabled);
   const [tasks, setTasks] = useState<string[]>(DEFAULT_FOMOPOMO_SETTINGS.tasks);
   const [presets, setPresets] = useState<PresetFormEntry[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
   // The settings the form was last hydrated from (load, save, or reset).
@@ -89,7 +88,6 @@ export default function SettingsModal({
     setVolume(settings.volume);
     setIsMuted(settings.isMuted);
     setTaskPopupEnabled(settings.taskPopupEnabled);
-    setSeasonalEffectEnabled(settings.seasonalEffectEnabled);
     setTasks(settings.tasks);
     setPresets(settings.presets);
   }, []);
@@ -111,7 +109,6 @@ export default function SettingsModal({
       volume,
       isMuted,
       taskPopupEnabled,
-      seasonalEffectEnabled,
       tasks,
       presets: presets.map((preset) => ({
         ...preset,
@@ -674,33 +671,6 @@ export default function SettingsModal({
                 🔔 알림 설정
               </h3>
               <NotificationManager mode="inline" />
-            </section>
-
-            {/* 🌸 계절 효과 (관리자: 이 섹션 삭제 가능) */}
-            <hr className="border-gray-100" />
-            <section className="space-y-3">
-              {/* 벚꽃 효과 토글 */}
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="text-gray-600 text-sm font-medium flex items-center gap-2">
-                    🌸 벚꽃 효과
-                  </span>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    화면에 벚꽃이 흩날려요
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSeasonalEffectEnabled(!seasonalEffectEnabled)}
-                  className={`${toggleBase} ${seasonalEffectEnabled ? 'bg-pink-400' : 'bg-gray-300'
-                    }`}
-                >
-                  <span
-                    className={`${toggleDot} ${seasonalEffectEnabled ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  ></span>
-                </button>
-              </div>
-
             </section>
 
             <hr className="border-gray-100" />

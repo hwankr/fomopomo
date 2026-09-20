@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
     pomoTime: 25, shortBreak: 5, longBreak: 15, longBreakInterval: 4,
     autoStartPomos: false, autoStartBreaks: false,
     volume: 0.5, isMuted: true, taskPopupEnabled: false,
-    seasonalEffectEnabled: false, tasks: [], presets: [],
+    tasks: [], presets: [],
   },
   playAlarm: vi.fn(),
   playClickSound: vi.fn(),

@@ -114,7 +114,7 @@ describe('settingsStore', () => {
     );
   });
 
-  it('normalizes missing seasonal effect, tasks, and presets from canonical defaults', () => {
+  it('normalizes missing settings, tasks, and presets from canonical defaults', () => {
     expect(
       normalizeSettings({
         pomoTime: 40,
@@ -128,6 +128,43 @@ describe('settingsStore', () => {
       shortBreak: 8,
     });
   });
+
+  it.each([true, false])(
+    'removes retired effect preferences on read and save when enabled is %s',
+    async (enabled) => {
+      signInLocally(TEST_USER_A);
+      setAuthenticatedUser(TEST_USER_A);
+      upsertMock.mockResolvedValue({ error: null });
+
+      const legacySettings = {
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 45,
+        seasonalEffectEnabled: enabled,
+        snowEnabled: enabled,
+        seasonalTheme: 'spring',
+      };
+      const expectedSettings = {
+        ...DEFAULT_FOMOPOMO_SETTINGS,
+        pomoTime: 45,
+        seasonalTheme: 'spring',
+      };
+      setStoredSettings(TEST_USER_A, legacySettings);
+
+      expect(readSettingsSnapshot()).toEqual(expectedSettings);
+      await expect(persistSettings(legacySettings)).resolves.toBe(true);
+      expect(
+        JSON.parse(
+          window.localStorage.getItem(getSettingsStorageKey(TEST_USER_A)) ?? '{}'
+        )
+      ).toEqual({ ...expectedSettings, ownerUserId: TEST_USER_A });
+      expect(upsertMock).toHaveBeenCalledWith({
+        user_id: TEST_USER_A,
+        settings: expectedSettings,
+      });
+      expect(legacySettings.seasonalEffectEnabled).toBe(enabled);
+      expect(legacySettings.snowEnabled).toBe(enabled);
+    }
+  );
 
   describe('numeric validation', () => {
     it('clamps zero and negative values up to their minimums', () => {
@@ -299,7 +336,6 @@ describe('settingsStore', () => {
     expect(
       writeSettingsSnapshot({
         ...DEFAULT_FOMOPOMO_SETTINGS,
-        seasonalEffectEnabled: false,
         tasks: [],
         presets: [],
       })
@@ -307,7 +343,6 @@ describe('settingsStore', () => {
 
     expect(JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? '{}')).toEqual({
       ...DEFAULT_FOMOPOMO_SETTINGS,
-      seasonalEffectEnabled: false,
     });
     expect(
       dispatchSpy.mock.calls.some((call: unknown[]) => {
@@ -327,7 +362,6 @@ describe('settingsStore', () => {
         settings: {
           ...DEFAULT_FOMOPOMO_SETTINGS,
           pomoTime: 77,
-          seasonalEffectEnabled: false,
           tasks: ['work'],
         },
       },
@@ -343,7 +377,6 @@ describe('settingsStore', () => {
     await expect(loadPersistedSettings()).resolves.toEqual({
       ...DEFAULT_FOMOPOMO_SETTINGS,
       pomoTime: 77,
-      seasonalEffectEnabled: false,
       tasks: ['work'],
     });
     expect(
@@ -353,7 +386,6 @@ describe('settingsStore', () => {
     ).toEqual({
       ...DEFAULT_FOMOPOMO_SETTINGS,
       pomoTime: 77,
-      seasonalEffectEnabled: false,
       tasks: ['work'],
       ownerUserId: TEST_USER_A,
     });
@@ -493,7 +525,6 @@ describe('settingsStore', () => {
       ).toEqual(
         expect.objectContaining({
           pomoTime: 45,
-          seasonalEffectEnabled: false,
           ownerUserId: TEST_USER_A,
         })
       );
@@ -505,7 +536,6 @@ describe('settingsStore', () => {
       persistSettings({
         ...DEFAULT_FOMOPOMO_SETTINGS,
         pomoTime: 45,
-        seasonalEffectEnabled: false,
       })
     ).resolves.toBe(true);
 
@@ -513,7 +543,6 @@ describe('settingsStore', () => {
       user_id: TEST_USER_A,
       settings: expect.objectContaining({
         pomoTime: 45,
-        seasonalEffectEnabled: false,
       }),
     });
   });

@@ -32,7 +32,6 @@ const mocks = vi.hoisted(() => ({
     volume: 0.5,
     isMuted: true,
     taskPopupEnabled: false,
-    seasonalEffectEnabled: false,
     tasks: [] as string[],
     presets: [],
   },

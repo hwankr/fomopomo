@@ -21,7 +21,6 @@ export type FomopomoSettings = {
   volume: number;
   isMuted: boolean;
   taskPopupEnabled: boolean;
-  seasonalEffectEnabled: boolean;
   tasks: string[];
   presets: Preset[];
 };
@@ -54,7 +53,6 @@ export const DEFAULT_FOMOPOMO_SETTINGS: FomopomoSettings = {
   volume: 50,
   isMuted: false,
   taskPopupEnabled: true,
-  seasonalEffectEnabled: true,
   tasks: DEFAULT_TASK_OPTIONS,
   presets: [
     { id: '1', label: '집중', minutes: 25 },
@@ -145,14 +143,17 @@ const getValidPresets = (
 export function normalizeSettings(
   rawSettings: PartialFomopomoSettings | null | undefined
 ): FomopomoSettings {
-  const raw = rawSettings as
-    | (PartialFomopomoSettings & { snowEnabled?: boolean })
-    | null
-    | undefined;
+  const raw = { ...rawSettings } as PartialFomopomoSettings & {
+    seasonalEffectEnabled?: unknown;
+    snowEnabled?: unknown;
+  };
+  // Discard retired effect preferences without losing unrelated stored fields.
+  delete raw.seasonalEffectEnabled;
+  delete raw.snowEnabled;
 
   return {
     ...DEFAULT_FOMOPOMO_SETTINGS,
-    ...rawSettings,
+    ...raw,
     pomoTime: clampIntSetting(
       rawSettings?.pomoTime,
       DEFAULT_FOMOPOMO_SETTINGS.pomoTime,
@@ -185,10 +186,6 @@ export function normalizeSettings(
     ),
     taskPopupEnabled:
       raw?.taskPopupEnabled ?? DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled,
-    seasonalEffectEnabled:
-      raw?.seasonalEffectEnabled ??
-      raw?.snowEnabled ??
-      DEFAULT_FOMOPOMO_SETTINGS.seasonalEffectEnabled,
     tasks: getValidTasks(rawSettings?.tasks, DEFAULT_FOMOPOMO_SETTINGS.tasks),
     presets: getValidPresets(
       rawSettings?.presets,
