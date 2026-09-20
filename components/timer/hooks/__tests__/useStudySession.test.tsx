@@ -50,6 +50,7 @@ type OutboxDraftV2 = {
   mode: string;
   task: string | null;
   taskId: string | null;
+  subjectId?: string | null;
   segments: OutboxSegment[];
   failedAt: number;
   state?: 'conflict' | 'invalid';
@@ -62,6 +63,7 @@ type RpcParams = {
   p_mode: string;
   p_task: string | null;
   p_task_id: string | null;
+  p_subject_id?: string | null;
   p_segments: OutboxSegment[];
 };
 
@@ -226,6 +228,82 @@ describe('useStudySession study records', () => {
     expect(readOutbox()).toEqual({});
   });
 
+  it('keeps the captured subject after a task is renamed, reclassified, or deleted before saving', async () => {
+    const { result, rerender } = renderHook(
+      ({ title, subjectId }) => useStudySession({
+        isLoggedIn: true, onRecordSaved, selectedTaskTitle: title, selectedSubjectId: subjectId,
+      }),
+      { initialProps: { title: '블록체인 9/12 복습', subjectId: 'subject-blockchain' as string | null } }
+    );
+    const record = createRecord(result, 'pomo', 60, Date.now());
+    expect(readOutbox()[record.sessionId].subjectId).toBe('subject-blockchain');
+
+    rerender({ title: '다른 이름', subjectId: 'subject-coding' });
+    rerender({ title: '', subjectId: null });
+    await act(async () => {
+      await result.current.savePendingRecord(record, '블록체인 9/12 복습', 'deleted-task');
+    });
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith('record_study_session_batch', expect.objectContaining({
+      p_task: '블록체인 9/12 복습', p_task_id: 'deleted-task', p_subject_id: 'subject-blockchain',
+    }));
+  });
+
+  it('freezes a modal subject before the RPC and preserves it across offline retry and the next session', async () => {
+    supabaseMock.rpcResult.mockResolvedValueOnce(rpcNetworkError());
+    const { result, rerender } = renderHook(
+      ({ subjectId }) => useStudySession({
+        isLoggedIn: true, onRecordSaved, selectedTaskTitle: '', selectedSubjectId: subjectId,
+      }),
+      { initialProps: { subjectId: null as string | null } }
+    );
+    const record = createRecord(result, 'pomo', 60, Date.now());
+    rerender({ subjectId: 'subject-next-session' });
+    result.current.currentIntervalStartRef.current = Date.now() + 1000;
+    await act(async () => {
+      await result.current.savePendingRecord(record, '코딩테스트 XX문제', 'task-coding', 'subject-coding');
+    });
+    const firstParams = supabaseMock.rpc.mock.calls[0][1];
+    expect(firstParams.p_subject_id).toBe('subject-coding');
+    expect(readOutbox()[record.sessionId].subjectId).toBe('subject-coding');
+
+    await act(async () => {
+      await result.current.savePendingRecord(record, '변경된 입력', 'different-task', 'different-subject');
+    });
+    expect(supabaseMock.rpc.mock.calls[1][1]).toEqual(firstParams);
+    expect(result.current.currentIntervalStartRef.current).toBe(Date.now() + 1000);
+  });
+
+  it('captures the restored snapshot subject instead of the current selection', () => {
+    const { result } = renderHook(() => useStudySession({
+      isLoggedIn: true, onRecordSaved, selectedTaskTitle: '', selectedSubjectId: 'live-subject',
+    }));
+    let record: PendingStudyRecord | null = null;
+    act(() => {
+      record = result.current.createPendingRecord('pomo', 60, Date.now(), {
+        intervals: [], currentStart: Date.now() - 60_000, subjectId: 'restored-subject',
+      });
+    });
+    expect(record).toMatchObject({ subjectId: 'restored-subject' });
+    expect(Object.values(readOutbox())[0].subjectId).toBe('restored-subject');
+  });
+
+  it.each([null, 'subject-before-clear'])('preserves an unclassified choice instead of taking a later live subject (%s)', async (initialSubject) => {
+    const { result, rerender } = renderHook(
+      ({ subjectId }) => useStudySession({
+        isLoggedIn: true, onRecordSaved, selectedTaskTitle: '', selectedSubjectId: subjectId,
+      }),
+      { initialProps: { subjectId: initialSubject as string | null } }
+    );
+    const record = createRecord(result, 'pomo', 60, Date.now());
+    rerender({ subjectId: 'next-session-subject' });
+    await act(async () => {
+      if (initialSubject) await result.current.savePendingRecord(record, '미분류 복습', 'task-1', null);
+      else await result.current.savePendingRecord(record, '미분류 복습', 'task-1');
+    });
+    expect(supabaseMock.rpc.mock.calls[0][1]).not.toHaveProperty('p_subject_id');
+  });
+
   it('retries the same record with a byte-identical payload, and treats already_processed as saved', async () => {
     // First attempt: the server committed the batch but the response was lost.
     supabaseMock.rpcResult
@@ -360,6 +438,24 @@ describe('useStudySession study records', () => {
       );
       return draft;
     };
+
+    it('recovers the original subject after reload and leaves another account subject untouched', async () => {
+      const own = seedDraftV2('subject-recovery', 'user-1');
+      const foreign = { ...own, sessionId: 'foreign-subject', ownerId: 'user-2', subjectId: 'private-subject' };
+      window.localStorage.setItem(PENDING_SESSIONS_KEY, JSON.stringify({
+        [own.sessionId]: { ...own, subjectId: 'saved-subject' },
+        [foreign.sessionId]: foreign,
+      }));
+
+      renderStudySession();
+      await act(async () => {});
+
+      expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.rpc).toHaveBeenCalledWith('record_study_session_batch', expect.objectContaining({
+        p_batch_id: own.sessionId, p_subject_id: 'saved-subject',
+      }));
+      expect(readOutbox()).toEqual({ [foreign.sessionId]: foreign });
+    });
 
     // v1 drafts predate the RPC migration and carry full study_sessions rows;
     // drafts from before the session_batch_id migration only carry group_id.

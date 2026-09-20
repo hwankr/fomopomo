@@ -2,6 +2,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({
+    subjects: [
+      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
+      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' },
+    ],
+    createSubject: vi.fn(async () => null),
+    loading: false, error: null,
+  }),
+}));
+
+
 const { pending, callbacks, supabaseMock } = vi.hoisted(() => {
   const pending: Array<{ resolve: (value: unknown) => void }> = [];
   const callbacks: Array<() => void> = [];
@@ -83,7 +95,7 @@ describe.each([
     rerender(<Component userId="B" />);
     expect(screen.queryByDisplayValue('A private draft')).not.toBeInTheDocument();
     await reply(1, [plan('B goal')]);
-    const card = screen.getByText('B goal').parentElement!;
+    const card = screen.getByText('B goal').closest('.group') as HTMLElement;
     fireEvent.click(within(card).getAllByRole('button')[2]);
     expect(screen.getByRole('button', { name: '삭제' })).toBeInTheDocument();
     rerender(<Component userId="" />);
@@ -104,7 +116,7 @@ describe.each([
   it('clears an edit draft before rendering another account', async () => {
     const { rerender } = render(<Component userId="A" />);
     await reply(0, [plan('A goal')]);
-    const card = screen.getByText('A goal').parentElement!;
+    const card = screen.getByText('A goal').closest('.group') as HTMLElement;
     fireEvent.click(within(card).getAllByRole('button')[1]);
     fireEvent.change(screen.getByDisplayValue('A goal'), { target: { value: 'A edit draft' } });
     rerender(<Component userId="B" />);
@@ -135,7 +147,7 @@ describe.each([
     const { rerender } = render(<Component userId="A" />);
     await reply(0, [plan('A goal')]);
     const oldRefresh = callbacks[0];
-    fireEvent.click(within(screen.getByText('A goal').parentElement!).getAllByRole('button')[0]);
+    fireEvent.click(within(screen.getByText('A goal').closest('.group') as HTMLElement).getAllByRole('button')[0]);
     await waitFor(() => expect(pending).toHaveLength(2));
     rerender(<Component userId="B" />);
     await reply(2, [plan('B goal')]);

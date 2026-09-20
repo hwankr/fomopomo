@@ -24,6 +24,7 @@ export type LongTermSubtaskItem = Omit<
 export type LongTermTaskRow = {
   id: string;
   title: string;
+  subject_id: string | null;
   position: number | null;
   long_term_subtasks: LongTermSubtaskSelectRow[] | null;
 };
@@ -31,6 +32,7 @@ export type LongTermTaskRow = {
 export type LongTermTaskItem = {
   id: string;
   title: string;
+  subject_id: string | null;
   position: number;
   subtasks: LongTermSubtaskItem[];
 };
@@ -38,6 +40,7 @@ export type LongTermTaskItem = {
 export type MaterializedTaskRow = {
   id: string;
   title: string;
+  subject_id: string | null;
   status: 'todo' | 'in_progress' | 'done';
   estimated_pomodoros: number | null;
   position: number | null;
@@ -48,11 +51,12 @@ type MaterializableSubtask = Pick<LongTermSubtaskItem, 'id' | 'title'>;
 type CompletableSubtask = Pick<LongTermSubtaskItem, 'id' | 'completed_at'>;
 
 const MATERIALIZED_TASK_SELECT =
-  'id, title, status, estimated_pomodoros, position, source_subtask_id';
+  'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id';
 
 export async function materializeSubtaskForToday(
   userId: string,
-  subtask: MaterializableSubtask
+  subtask: MaterializableSubtask,
+  subjectId: string | null = null
 ): Promise<MaterializedTaskRow | null> {
   // tasks.due_date follows the calendar date used by TaskList/useTasks, not
   // the 05:00 study-day boundary used for study-session reporting.
@@ -83,6 +87,7 @@ export async function materializeSubtaskForToday(
         status: 'todo',
         position,
         source_subtask_id: subtask.id,
+        subject_id: subjectId,
       },
       {
         onConflict: 'source_subtask_id,due_date',

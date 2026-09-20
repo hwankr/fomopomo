@@ -71,8 +71,11 @@ mocks.useTasksResult = {
   monthlyPlans: [],
   selectedTask: '',
   selectedTaskId: null,
+  selectedSubjectId: null,
   setSelectedTask: vi.fn(),
   setSelectedTaskId: vi.fn(),
+  setSelectedSubjectId: vi.fn(),
+  getSelectedTaskSubjectId: () => null,
   getSelectedTaskTitle: () => '',
 };
 
@@ -236,6 +239,10 @@ describe('TimerApp completion persistence', () => {
     mocks.settings.pomoTime = 25;
     mocks.settings.shortBreak = 5;
     mocks.settings.longBreak = 15;
+    mocks.settings.autoStartBreaks = false;
+    Object.assign(mocks.useTasksResult!, {
+      dbTasks: [], selectedTask: '', selectedTaskId: null, selectedSubjectId: null,
+    });
     window.localStorage.clear();
   });
 
@@ -313,6 +320,34 @@ describe('TimerApp completion persistence', () => {
     expect(saved.timer.mode).toBe('shortBreak');
     expect(saved.timer.isRunning).toBe(false);
     expect(saved.timer.targetTime).toBeNull();
+  });
+
+  it('saves a modal-selected task subject against the completed record after the next phase auto-starts', async () => {
+    mocks.settings.taskPopupEnabled = true;
+    mocks.settings.autoStartBreaks = true;
+    const selected = { id: 'blockchain-task', title: '블록체인 9/12 복습', subjectId: 'subject-blockchain' };
+    mocks.useTasksResult!.dbTasks = [selected];
+    seedRunningFocusTimer(3);
+    const view = render(<TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />);
+    await act(async () => { vi.advanceTimersByTime(3400); });
+    await act(async () => { vi.advanceTimersByTime(1100); });
+    expect(mocks.timerDisplayProps.at(-1)!.isRunning).toBe(true);
+
+    const modal = mocks.taskModalProps.at(-1)!;
+    act(() => { (modal.onSelectTask as (title: string, id: string) => void)(selected.title, selected.id); });
+    expect(mocks.useTasksResult!.setSelectedSubjectId).toHaveBeenLastCalledWith('subject-blockchain');
+    // The mocked state setters do not re-render; supply their committed values.
+    Object.assign(mocks.useTasksResult!, {
+      selectedTask: selected.title, selectedTaskId: selected.id, selectedSubjectId: selected.subjectId,
+    });
+    view.rerender(<TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />);
+    await act(async () => { await (mocks.taskModalProps.at(-1)!.onSave as () => Promise<void>)(); });
+
+    expect(mocks.savePendingRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'record-1', mode: 'pomo', duration: 25 * 60 }),
+      selected.title, selected.id, selected.subjectId,
+    );
+    expect(mocks.timerDisplayProps.at(-1)!.isRunning).toBe(true);
   });
 
   describe('late manual save responses', () => {
@@ -653,6 +688,7 @@ describe('TimerApp completion persistence', () => {
           intervals: [closedInterval],
           currentStart: openStart,
           sessionId: expiredBatchId(targetTime),
+          subjectId: null,
         }
       );
       expect(mocks.savePendingRecord).toHaveBeenCalledWith(

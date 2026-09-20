@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 import {
   Check,
   CheckCircle2,
@@ -31,12 +32,16 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import ConfirmModal from '@/components/ConfirmModal';
+import SubjectSelect from '@/components/subjects/SubjectSelect';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { notifyStudySubjectsChanged, type StudySubject } from '@/lib/studySubjects';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
 interface Task {
   id: string;
   title: string;
+  subject_id: string | null;
   status: 'todo' | 'in_progress' | 'done';
   estimated_pomodoros: number;
   duration?: number;
@@ -48,12 +53,14 @@ interface Task {
 interface PinnedTask {
   id: string;
   title: string;
+  subject_id: string | null;
   position: number;
 }
 
 type TaskRow = {
   id: string;
   title: string;
+  subject_id: string | null;
   status: Task['status'];
   estimated_pomodoros: number | null;
   position: number | null;
@@ -68,6 +75,7 @@ type SubtaskParentRow = {
 type PinnedTaskRow = {
   id: string;
   title: string;
+  subject_id: string | null;
   position: number | null;
 };
 
@@ -91,6 +99,7 @@ const normalizeTaskRows = (rows: TaskRow[] | null | undefined): Task[] =>
     estimated_pomodoros: row.estimated_pomodoros ?? 0,
     position: row.position ?? 0,
     source_subtask_id: row.source_subtask_id ?? null,
+    subject_id: row.subject_id ?? null,
   }));
 
 const normalizePinnedTaskRows = (
@@ -100,15 +109,18 @@ const normalizePinnedTaskRows = (
     id: row.id,
     title: row.title,
     position: row.position ?? 0,
+    subject_id: row.subject_id ?? null,
   }));
 
 interface SortableTaskItemProps {
   task: Task;
   toggleTaskStatus: (task: Task) => void;
   deleteTask: (id: string) => void;
-  updateTask: (id: string, title: string) => void;
+  updateTask: (id: string, title: string, subjectId: string | null) => void;
   pinTask: (task: Task) => void;
   isPinned: boolean;
+  subjects: StudySubject[];
+  createSubject: (name: string) => Promise<StudySubject | null>;
 }
 
 function SortableTaskItem({
@@ -118,9 +130,12 @@ function SortableTaskItem({
   updateTask,
   pinTask,
   isPinned,
+  subjects,
+  createSubject,
 }: SortableTaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.title);
+  const [editedSubjectId, setEditedSubjectId] = useState(task.subject_id);
 
   const {
     attributes,
@@ -139,14 +154,15 @@ function SortableTaskItem({
   };
 
   const handleSave = () => {
-    if (editedTitle.trim() && editedTitle !== task.title) {
-      updateTask(task.id, editedTitle.trim());
+    if (editedTitle.trim() && (editedTitle.trim() !== task.title || editedSubjectId !== task.subject_id)) {
+      updateTask(task.id, editedTitle.trim(), editedSubjectId);
     }
     setIsEditing(false);
   };
 
   const handleCancel = () => {
     setEditedTitle(task.title);
+    setEditedSubjectId(task.subject_id);
     setIsEditing(false);
   };
 
@@ -193,23 +209,33 @@ function SortableTaskItem({
       </button>
 
       {isEditing ? (
-        <div className="flex flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <input
             type="text"
+            aria-label="작업 제목"
             value={editedTitle}
             onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
             className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
             autoFocus
           />
+          <SubjectSelect
+            subjects={subjects}
+            value={editedSubjectId}
+            onChange={setEditedSubjectId}
+            onCreate={createSubject}
+            compact
+          />
           <button
             onClick={handleSave}
+            aria-label="작업 저장"
             className="rounded-lg p-1.5 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
           >
             <Check className="h-4 w-4" />
           </button>
           <button
             onClick={handleCancel}
+            aria-label="작업 수정 취소"
             className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             <X className="h-4 w-4" />
@@ -240,6 +266,9 @@ function SortableTaskItem({
             >
               {task.title}
             </span>
+            <span className="block text-xs text-gray-500 dark:text-gray-400">
+              {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
+            </span>
             {task.parentTitle ? (
               <span className="block truncate text-xs font-normal text-gray-400 dark:text-gray-500">
                 {task.parentTitle}
@@ -257,7 +286,12 @@ function SortableTaskItem({
 
       {!isEditing && (
         <button
-          onClick={() => setIsEditing(true)}
+          onClick={() => {
+            setEditedTitle(task.title);
+            setEditedSubjectId(task.subject_id);
+            setIsEditing(true);
+          }}
+          aria-label={`${task.title} 수정`}
           className="p-2 text-gray-400 transition-all hover:text-rose-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
         >
           <Pencil className="h-4 w-4" />
@@ -310,6 +344,8 @@ function ScopedTaskList({ selectedDateKey, userId }: {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
+  const { subjects, createSubject } = useStudySubjects(userId);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [pinnedTasks, setPinnedTasks] = useState<PinnedTask[]>([]);
@@ -346,7 +382,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
     const { data, error } = await supabase
       .from('pinned_tasks')
-      .select('id, title, position')
+      .select('id, title, position, subject_id')
       .eq('user_id', userId)
       .order('position', { ascending: true });
 
@@ -379,7 +415,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
     const { data: pinnedData, error: pinnedError } = await supabase
       .from('pinned_tasks')
-      .select('id, title, position')
+      .select('id, title, position, subject_id')
       .eq('user_id', userId)
       .order('position', { ascending: true });
 
@@ -393,7 +429,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
       .select(
-        'id, title, status, estimated_pomodoros, position, source_subtask_id'
+        'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
       )
       .eq('user_id', userId)
       .eq('due_date', selectedDateKey)
@@ -424,6 +460,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       const newTaskPayload = pinnedToCreate.map((pinnedTask, index) => ({
         user_id: userId,
         title: pinnedTask.title,
+        subject_id: pinnedTask.subject_id,
         due_date: selectedDateKey,
         status: 'todo' as const,
         position: maxPosition + 1 + index,
@@ -433,7 +470,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         .from('tasks')
         .insert(newTaskPayload)
         .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id'
+          'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
         );
 
       if (!isCurrent()) return;
@@ -444,6 +481,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           ...taskRows,
           ...normalizeTaskRows(insertedTasks as TaskRow[]),
         ];
+        if (pinnedToCreate.some((task) => task.subject_id)) notifyStudySubjectsChanged();
       }
     }
 
@@ -640,9 +678,10 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         .insert({
           user_id: userId,
           title: task.title,
+          subject_id: task.subject_id,
           position: maxPosition + 1,
         })
-        .select('id, title, position')
+        .select('id, title, position, subject_id')
         .single();
 
       if (!scope.active) return;
@@ -718,12 +757,13 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         .insert({
           user_id: userId,
           title: newTaskTitle.trim(),
+          subject_id: newSubjectId,
           due_date: selectedDateKey,
           status: 'todo',
           position: maxPosition + 1,
         })
         .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id'
+          'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
         )
         .single();
 
@@ -732,7 +772,9 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
       const createdTask = normalizeTaskRows([data as TaskRow])[0];
       setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0 }]);
+      if (createdTask.subject_id) notifyStudySubjectsChanged();
       setNewTaskTitle('');
+      setNewSubjectId(null);
       setIsAdding(false);
     } catch (error) {
       if (scope.active) console.error('Error adding task:', error);
@@ -769,25 +811,45 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     }
   };
 
-  const updateTask = async (taskId: string, title: string) => {
-    const scope = beginMutation();
+  const updateTask = async (taskId: string, title: string, subjectId: string | null) => {
+    const originalTask = tasks.find((task) => task.id === taskId);
+    const pinnedTask = originalTask && pinnedTasks.find((pinned) => pinned.title === originalTask.title);
+    const scope = beginMutation(!!pinnedTask);
     if (!scope) return;
     setTasks((currentTasks) =>
       currentTasks.map((task) =>
-        task.id === taskId ? { ...task, title } : task
+        task.id === taskId ? { ...task, title, subject_id: subjectId } : task
       )
     );
 
+    let taskSaved = false;
     try {
       const { error } = await supabase
         .from('tasks')
-        .update({ title })
+        .update({ title, subject_id: subjectId })
         .eq('id', taskId);
       if (!scope.active) return;
       if (error) throw error;
+      taskSaved = true;
+      // Keep the reusable pinned template aligned with this task's edits.
+      if ((originalTask?.subject_id ?? null) !== subjectId) notifyStudySubjectsChanged();
+      if (pinnedTask) {
+        const { error: pinError } = await supabase
+          .from('pinned_tasks')
+          .update({ title, subject_id: subjectId })
+          .eq('id', pinnedTask.id);
+        if (!scope.active) return;
+        if (pinError) throw pinError;
+        setPinnedTasks((current) => current.map((pinned) =>
+          pinned.id === pinnedTask.id ? { ...pinned, title, subject_id: subjectId } : pinned
+        ));
+      }
     } catch (error) {
       if (!scope.active) return;
       console.error('Error updating task:', error);
+      toast.error(taskSaved
+        ? '할 일은 저장했지만 고정 작업은 저장하지 못했습니다. 이후 자동 추가에는 이전 설정이 적용됩니다.'
+        : '할 일을 저장하지 못했습니다. 다시 시도해주세요.');
       scope.refreshTasks = true;
     } finally {
       finishMutation(scope);
@@ -856,6 +918,8 @@ function ScopedTaskList({ selectedDateKey, userId }: {
                   deleteTask={(taskId) => setDeletingTaskId(taskId)}
                   updateTask={updateTask}
                   pinTask={pinTaskFromTask}
+                  subjects={subjects}
+                  createSubject={createSubject}
                   isPinned={pinnedTasks.some(
                     (pinnedTask) => pinnedTask.title === task.title
                   )}
@@ -876,6 +940,12 @@ function ScopedTaskList({ selectedDateKey, userId }: {
               placeholder="작업 제목을 입력하세요"
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               autoFocus
+            />
+            <SubjectSelect
+              subjects={subjects}
+              value={newSubjectId}
+              onChange={setNewSubjectId}
+              onCreate={createSubject}
             />
             <div className="flex justify-end gap-2">
               <button

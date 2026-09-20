@@ -15,6 +15,10 @@ import {
   X,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import toast from 'react-hot-toast';
+import SubjectSelect from '@/components/subjects/SubjectSelect';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
@@ -23,6 +27,7 @@ import { usePlanRequestScope } from './usePlanRequestScope';
 interface WeeklyPlan {
   id: string;
   title: string;
+  subject_id: string | null;
   status: 'todo' | 'in_progress' | 'done';
   start_date: string;
   end_date: string;
@@ -32,6 +37,7 @@ interface WeeklyPlan {
 type WeeklyPlanRow = {
   id: string;
   title: string;
+  subject_id: string | null;
   status: WeeklyPlan['status'];
   start_date: string;
   end_date: string;
@@ -70,6 +76,8 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const [plans, setPlans] = useState<WeeklyPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [newPlanTitle, setNewPlanTitle] = useState('');
+  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
+  const { subjects, createSubject } = useStudySubjects(userId);
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = usePersistedState(
     'weekly_plan_expanded',
@@ -78,6 +86,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
+  const [editedSubjectId, setEditedSubjectId] = useState<string | null>(null);
 
   const fetchPlans = useCallback(async () => {
     const scope = scopeRef.current;
@@ -98,7 +107,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
     const { data, error } = await supabase
       .from('weekly_plans')
-      .select('id, title, status, start_date, end_date')
+      .select('id, title, status, start_date, end_date, subject_id')
       .eq('user_id', userId)
       .gte('start_date', startDate)
       .lte('end_date', endDate)
@@ -215,22 +224,26 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
       .insert({
         user_id: userId,
         title: newPlanTitle.trim(),
+        subject_id: newSubjectId,
         start_date: format(start, 'yyyy-MM-dd'),
         end_date: format(end, 'yyyy-MM-dd'),
         status: 'todo',
       })
-      .select('id, title, status, start_date, end_date')
+      .select('id, title, status, start_date, end_date, subject_id')
       .single();
 
     if (!scope.active) return;
     if (error) {
       console.error('Error adding plan:', error);
+      toast.error('주간 목표를 추가하지 못했습니다. 다시 시도해주세요.');
       return;
     }
 
     const createdPlan = data as WeeklyPlanRow;
     setPlans((currentPlans) => [...currentPlans, { ...createdPlan, duration: 0 }]);
+    if (createdPlan.subject_id) notifyStudySubjectsChanged();
     setNewPlanTitle('');
+    setNewSubjectId(null);
     setIsAdding(false);
   };
 
@@ -261,11 +274,13 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const startEditing = (plan: WeeklyPlan) => {
     setEditingPlanId(plan.id);
     setEditedTitle(plan.title);
+    setEditedSubjectId(plan.subject_id ?? null);
   };
 
   const cancelEditing = () => {
     setEditingPlanId(null);
     setEditedTitle('');
+    setEditedSubjectId(null);
   };
 
   const updatePlan = async () => {
@@ -278,28 +293,32 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
     const nextTitle = editedTitle.trim();
     const originalPlan = plans.find((plan) => plan.id === editingPlanId);
-    if (originalPlan?.title === nextTitle) {
+    if (originalPlan?.title === nextTitle && (originalPlan.subject_id ?? null) === editedSubjectId) {
       cancelEditing();
       return;
     }
 
     const planId = editingPlanId;
+    const nextSubjectId = editedSubjectId;
     setPlans((currentPlans) =>
       currentPlans.map((plan) =>
-        plan.id === planId ? { ...plan, title: nextTitle } : plan
+        plan.id === planId ? { ...plan, title: nextTitle, subject_id: nextSubjectId } : plan
       )
     );
     cancelEditing();
 
     const { error } = await supabase
       .from('weekly_plans')
-      .update({ title: nextTitle })
+      .update({ title: nextTitle, subject_id: nextSubjectId })
       .eq('id', planId);
 
     if (!scope.active) return;
     if (error) {
       console.error('Error updating plan:', error);
+      toast.error('주간 목표를 저장하지 못했습니다. 다시 시도해주세요.');
       void fetchPlans();
+    } else if ((originalPlan?.subject_id ?? null) !== nextSubjectId) {
+      notifyStudySubjectsChanged();
     }
   };
 
@@ -403,16 +422,19 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                 </button>
 
                 {editingPlanId === plan.id ? (
-                  <div className="flex flex-1 items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     <input
                       type="text"
+                      aria-label="목표 제목"
                       value={editedTitle}
                       onChange={(event) => setEditedTitle(event.target.value)}
                       onKeyDown={handleEditKeyDown}
                       className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                       autoFocus
                     />
+                    <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
                     <button
+                      aria-label="목표 저장"
                       onClick={() => void updatePlan()}
                       className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
                     >
@@ -434,7 +456,10 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                         : 'text-gray-700 dark:text-gray-200'
                     )}
                   >
-                    {plan.title}
+                    <span className="block">{plan.title}</span>
+                    <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                      {subjects.find((subject) => subject.id === plan.subject_id)?.name ?? '미분류'}
+                    </span>
                   </span>
                 )}
 
@@ -446,6 +471,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
                 {editingPlanId !== plan.id && (
                   <button
+                    aria-label={`${plan.title} 수정`}
                     onClick={() => startEditing(plan)}
                     className="p-1.5 text-gray-400 transition-all hover:text-indigo-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
@@ -475,6 +501,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
+              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"

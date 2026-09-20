@@ -46,6 +46,7 @@ const makeSubtask = (
 const makeLongTermTask = (
   over: Partial<LongTermTaskItem> & { id: string; title: string }
 ): LongTermTaskItem => ({
+  subject_id: null,
   position: 0,
   subtasks: [],
   ...over,

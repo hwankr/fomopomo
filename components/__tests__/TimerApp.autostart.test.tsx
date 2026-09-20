@@ -56,8 +56,11 @@ mocks.useTasksResult = {
   monthlyPlans: [],
   selectedTask: '',
   selectedTaskId: null,
+  selectedSubjectId: null,
   setSelectedTask: vi.fn(),
   setSelectedTaskId: vi.fn(),
+  setSelectedSubjectId: vi.fn(),
+  getSelectedTaskSubjectId: () => null,
   getSelectedTaskTitle: () => '',
 };
 

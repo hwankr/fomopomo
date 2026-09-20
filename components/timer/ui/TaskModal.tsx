@@ -1,10 +1,17 @@
 import { TaskItem } from '../hooks/useTasks';
+import SubjectSelect from '@/components/subjects/SubjectSelect';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
 
 interface TaskModalProps {
   isOpen: boolean;
   dbTasks: TaskItem[];
   selectedTask: string;
   selectedTaskId: string | null;
+  selectedSubjectId?: string | null;
+  userId?: string | null;
+  onSelectSubject?: (subjectId: string | null) => void;
+  isSaving?: boolean;
+  labelsLocked?: boolean;
   onSelectTask: (taskTitle: string, taskId: string | null) => void;
   onSave: () => void;
   onSkip: () => void;
@@ -19,11 +26,17 @@ export const TaskModal = ({
   dbTasks,
   selectedTask,
   selectedTaskId,
+  selectedSubjectId = null,
+  userId,
+  onSelectSubject,
+  isSaving = false,
+  labelsLocked = false,
   onSelectTask,
   onSave,
   onSkip,
   onDisablePopup,
 }: TaskModalProps) => {
+  const { subjects, loading, error, createSubject } = useStudySubjects(isOpen ? userId : null);
   if (!isOpen) return null;
 
   return (
@@ -46,6 +59,7 @@ export const TaskModal = ({
                     <button
                       key={task.id}
                       onClick={() => onSelectTask(task.title, task.id)}
+                      disabled={labelsLocked || isSaving}
                       className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
                         ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
                         : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -65,32 +79,54 @@ export const TaskModal = ({
               <input
                 type="text"
                 value={selectedTask}
+                disabled={labelsLocked || isSaving}
                 onChange={(e) => onSelectTask(e.target.value, null)}
                 placeholder="예: 독서, 코딩..."
                 className="w-full bg-gray-50 dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-700 rounded-xl px-4 py-3 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
                 autoFocus
               />
             </div>
+            {onSelectSubject && (
+              <div>
+                <SubjectSelect
+                  subjects={subjects}
+                  value={selectedSubjectId}
+                  onChange={onSelectSubject}
+                  onCreate={createSubject}
+                  disabled={loading || labelsLocked || isSaving}
+                  label="공부 과목"
+                />
+                {error && <p role="alert" className="mt-2 text-xs text-red-500">{error}</p>}
+              </div>
+            )}
           </div>
+
+          {labelsLocked && !isSaving && (
+            <p role="status" className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+              기록은 임시 보관 중입니다. 같은 내용으로 다시 저장해주세요.
+            </p>
+          )}
 
           <div className="flex gap-3 mt-8">
             <button
               onClick={onSkip}
+              disabled={labelsLocked || isSaving}
               className="flex-1 px-4 py-3 rounded-xl font-bold text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 transition-colors"
             >
               건너뛰기
             </button>
             <button
               onClick={onSave}
-              disabled={!selectedTask.trim()}
+              disabled={isSaving || (!labelsLocked && !selectedTask.trim())}
               className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-500/30 transition-all"
             >
-              저장
+              {isSaving ? '저장 중...' : labelsLocked ? '다시 저장' : '저장'}
             </button>
           </div>
 
           <button
             onClick={onDisablePopup}
+            disabled={isSaving}
             className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline decoration-gray-300 underline-offset-2 transition-colors"
           >
             다시 보지 않기

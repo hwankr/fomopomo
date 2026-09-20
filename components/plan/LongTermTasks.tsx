@@ -33,6 +33,10 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import ConfirmModal from '@/components/ConfirmModal';
+import toast from 'react-hot-toast';
+import SubjectSelect from '@/components/subjects/SubjectSelect';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
 import {
@@ -47,7 +51,7 @@ interface LongTermTasksProps {
   userId: string;
 }
 
-const TASK_SELECT = 'id, title, position';
+const TASK_SELECT = 'id, title, position, subject_id';
 const SUBTASK_SELECT = 'id, title, position, completed_at';
 
 const normalizeTaskRows = (
@@ -56,6 +60,7 @@ const normalizeTaskRows = (
   (rows ?? []).map((row) => ({
     id: row.id,
     title: row.title,
+    subject_id: row.subject_id ?? null,
     position: row.position ?? 0,
     subtasks: (row.long_term_subtasks ?? [])
       .map((subtask) => ({ ...subtask, position: subtask.position ?? 0 }))
@@ -262,9 +267,11 @@ function SortableSubtaskItem({
 }
 
 export default function LongTermTasks({ userId }: LongTermTasksProps) {
+  const { subjects, createSubject } = useStudySubjects(userId);
   const [tasks, setTasks] = useState<LongTermTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = usePersistedState(
     'long_term_expanded',
@@ -276,6 +283,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   );
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
+  const [editedSubjectId, setEditedSubjectId] = useState<string | null>(null);
   const [addingSubtaskTaskId, setAddingSubtaskTaskId] = useState<string | null>(
     null
   );
@@ -307,11 +315,13 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     setTasks([]);
     setLoading(true);
     setNewTaskTitle('');
+    setNewSubjectId(null);
     setIsAdding(false);
     setDeletingTaskId(null);
     setDeletingSubtaskId(null);
     setEditingTaskId(null);
     setEditedTitle('');
+    setEditedSubjectId(null);
     setAddingSubtaskTaskId(null);
     setNewSubtaskTitle('');
     pendingSubtaskIdsRef.current = new Set();
@@ -439,6 +449,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
       .insert({
         user_id: userId,
         title: newTaskTitle.trim(),
+        subject_id: newSubjectId,
         position: maxPosition + 1,
       })
       .select(TASK_SELECT)
@@ -448,14 +459,16 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     if (error) {
       console.error('Error adding long term task:', error);
+      toast.error('장기 과제를 추가하지 못했습니다. 다시 시도해주세요.');
       return;
     }
 
     const createdRow = data as Pick<
       LongTermTaskRow,
-      'id' | 'title' | 'position'
+      'id' | 'title' | 'position' | 'subject_id'
     >;
-    const createdTask = { ...createdRow, position: createdRow.position ?? 0 };
+    const createdTask = { ...createdRow, subject_id: createdRow.subject_id ?? null, position: createdRow.position ?? 0 };
+    if (createdTask.subject_id) notifyStudySubjectsChanged();
     // 진행 중인 이전 refetch가 방금 만든 과제를 지우지 못하게 세대를 올리고,
     // 실시간 refetch가 이미 반영했을 수 있으니 id 기준으로 업서트한다.
     fetchEpochRef.current += 1;
@@ -468,17 +481,20 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     );
     setLoading(false);
     setNewTaskTitle('');
+    setNewSubjectId(null);
     setIsAdding(false);
   };
 
   const startEditing = (task: LongTermTaskItem) => {
     setEditingTaskId(task.id);
     setEditedTitle(task.title);
+    setEditedSubjectId(task.subject_id);
   };
 
   const cancelEditing = () => {
     setEditingTaskId(null);
     setEditedTitle('');
+    setEditedSubjectId(null);
   };
 
   const updateTask = async () => {
@@ -491,18 +507,19 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     const nextTitle = editedTitle.trim();
     const originalTask = tasks.find((task) => task.id === editingTaskId);
-    if (originalTask?.title === nextTitle) {
+    if (originalTask?.title === nextTitle && originalTask.subject_id === editedSubjectId) {
       cancelEditing();
       return;
     }
 
     const taskId = editingTaskId;
+    const nextSubjectId = editedSubjectId;
     // 이름 변경 전에 시작된 refetch가 커밋한 제목을 덮어쓰지 못하게 한다.
     // 세대가 오르면 그 refetch는 로딩도 못 끝내므로 여기서 로딩을 해제한다.
     fetchEpochRef.current += 1;
     setTasks((currentTasks) =>
       currentTasks.map((task) =>
-        task.id === taskId ? { ...task, title: nextTitle } : task
+        task.id === taskId ? { ...task, title: nextTitle, subject_id: nextSubjectId } : task
       )
     );
     setLoading(false);
@@ -510,14 +527,17 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     const { error } = await supabase
       .from('long_term_tasks')
-      .update({ title: nextTitle })
+      .update({ title: nextTitle, subject_id: nextSubjectId })
       .eq('id', taskId);
 
     if (!isCurrentScope(generation)) return;
 
     if (error) {
       console.error('Error updating long term task:', error);
+      toast.error('장기 과제를 저장하지 못했습니다. 다시 시도해주세요.');
       void fetchTasks(generation);
+    } else if (originalTask?.subject_id !== nextSubjectId) {
+      notifyStudySubjectsChanged();
     }
   };
 
@@ -836,9 +856,10 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                 >
                   <div className="group flex items-center gap-3">
                     {editingTaskId === task.id ? (
-                      <div className="flex flex-1 items-center gap-2">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                         <input
                           type="text"
+                          aria-label="장기 과제 제목"
                           value={editedTitle}
                           onChange={(event) =>
                             setEditedTitle(event.target.value)
@@ -847,8 +868,10 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                           className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                           autoFocus
                         />
+                        <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
                         <button
                           onClick={() => void updateTask()}
+                          aria-label="장기 과제 저장"
                           className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
                         >
                           <Check className="h-4 w-4" />
@@ -862,7 +885,10 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                       </div>
                     ) : (
                       <span className="flex-1 text-sm font-bold text-gray-700 dark:text-gray-200">
-                        {task.title}
+                        <span className="block">{task.title}</span>
+                        <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                          {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
+                        </span>
                       </span>
                     )}
 
@@ -875,6 +901,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                     {editingTaskId !== task.id && (
                       <button
                         onClick={() => startEditing(task)}
+                        aria-label={`${task.title} 수정`}
                         className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                       >
                         <Pencil className="h-4 w-4" />
@@ -997,6 +1024,8 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
+              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />
+              <p className="text-xs text-gray-500">세부 할 일을 공부할 때 이 과목으로 기록됩니다.</p>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"

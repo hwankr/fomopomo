@@ -142,6 +142,7 @@ export default function TimerApp({
   const [pendingRecord, setPendingRecord] = useState<{
     record: PendingStudyRecord;
     onAfterSave?: () => void;
+    labelsLocked?: boolean;
   } | null>(null);
 
   // 1. Settings Hook
@@ -161,9 +162,12 @@ export default function TimerApp({
     longTermTasks,
     selectedTask,
     selectedTaskId,
+    selectedSubjectId,
     setSelectedTask,
     setSelectedTaskId,
+    setSelectedSubjectId,
     getSelectedTaskTitle,
+    getSelectedTaskSubjectId,
     fetchDbTasks,
     toggleTaskStatus,
     selectSubtaskForTimer,
@@ -191,6 +195,7 @@ export default function TimerApp({
     isLoggedIn,
     onRecordSaved,
     selectedTaskTitle: getSelectedTaskTitle() || selectedTask,
+    selectedSubjectId: getSelectedTaskSubjectId(),
   });
 
   // 4.5. Callback Ref for Timer Completion (Must be defined before useTimerLogic)
@@ -271,6 +276,7 @@ export default function TimerApp({
     setIntervals([]);
     setSelectedTask('');
     setSelectedTaskId(null);
+    setSelectedSubjectId(null);
     // The task popup must not survive the owner switch: savePendingRecord
     // refuses records whose owner no longer matches, but the stale modal
     // would still be dead UI — close it. The record's parked draft stays in
@@ -405,9 +411,9 @@ export default function TimerApp({
       setPendingRecord({ record, onAfterSave });
       setTaskModalOpen(true);
     } else {
-      await attemptRecordSave(record, selectedTask, selectedTaskId, onAfterSave);
+      await attemptRecordSave(record, getSelectedTaskTitle() || selectedTask, selectedTaskId, onAfterSave);
     }
-  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, createPendingRecord, attemptRecordSave, pendingRecord]);
+  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, getSelectedTaskTitle, createPendingRecord, attemptRecordSave, pendingRecord]);
 
   // Auto-start must go through the same atomic start transition as a manual
   // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
@@ -690,7 +696,8 @@ export default function TimerApp({
     // contradict a failed save.
     toast.success('자동 팝업을 껐어요. 설정에서 다시 켤 수 있어요.');
     if (pendingRecord) {
-      const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId);
+      setPendingRecord(current => current?.record === pendingRecord.record ? { ...current, labelsLocked: true } : current);
+      const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId, selectedSubjectId);
       // Keep the modal and pending record only on retryable failure; 'rejected'
       // is terminal (the draft is parked in the outbox) so clean up as well.
       if (result !== 'saved' && result !== 'rejected') {
@@ -701,13 +708,15 @@ export default function TimerApp({
       setPendingRecord(null);
       setSelectedTask('');
       setSelectedTaskId(null);
+      setSelectedSubjectId(null);
     }
     setTaskModalOpen(false);
   };
 
   const handleTaskSubmit = async () => {
     if (!pendingRecord) return;
-    const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId);
+    setPendingRecord(current => current?.record === pendingRecord.record ? { ...current, labelsLocked: true } : current);
+    const result = await savePendingRecord(pendingRecord.record, selectedTask, selectedTaskId, selectedSubjectId);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
     if (result !== 'saved' && result !== 'rejected') {
@@ -719,14 +728,19 @@ export default function TimerApp({
     setPendingRecord(null);
     setSelectedTask('');
     setSelectedTaskId(null);
+    setSelectedSubjectId(null);
   };
 
   const handleTaskSkip = async () => {
     if (!pendingRecord) return;
+    setPendingRecord(current => current?.record === pendingRecord.record ? { ...current, labelsLocked: true } : current);
+    setSelectedTask('');
+    setSelectedTaskId(null);
+    setSelectedSubjectId(null);
     // Skipping means "record this session without a task": pass an explicit
     // null taskId so a db-task chip clicked (then abandoned) inside the modal
     // cannot attribute the session to that task.
-    const result = await savePendingRecord(pendingRecord.record, '', null);
+    const result = await savePendingRecord(pendingRecord.record, '', null, null);
     // Keep the modal and pending record only on retryable failure; 'rejected'
     // is terminal (the draft is parked in the outbox) so clean up as well.
     if (result !== 'saved' && result !== 'rejected') {
@@ -738,6 +752,7 @@ export default function TimerApp({
     setPendingRecord(null);
     setSelectedTask('');
     setSelectedTaskId(null);
+    setSelectedSubjectId(null);
   };
 
 
@@ -802,10 +817,14 @@ export default function TimerApp({
       );
 
       if (remaining >= MIN_SAVABLE_SECONDS && isLoggedIn) {
+        // Capture the persisted classification before async task hydration or
+        // an auto-started phase can change the current selection.
+        const savedTask = readOwnedJson<SavedTaskState>(TASK_STATE_KEY, storageOwner);
         const record = createPendingRecord('pomo', remaining, targetTime, {
           intervals: savedIntervals,
           currentStart,
           sessionId: expiredSessionBatchId(targetTime),
+          subjectId: savedTask?.subjectId ?? null,
         });
         if (!record) {
           // isLoggedIn is stale-true but no auth owner is resolvable: leave
@@ -815,7 +834,6 @@ export default function TimerApp({
         }
         // The task selection is restored asynchronously elsewhere; read the
         // persisted selection directly so the record keeps its label.
-        const savedTask = readOwnedJson<SavedTaskState>(TASK_STATE_KEY, storageOwner);
         if (currentSettings.taskPopupEnabled && !savedTask?.taskId) {
           // Same labeling policy as a live completion: the user labels the
           // finished session in the popup. The record is already parked, so
@@ -1176,14 +1194,15 @@ export default function TimerApp({
   // been seen for this storage owner.
   useEffect(() => {
     if (!taskStateDirtyRef.current) {
-      if (selectedTaskId === null && selectedTask === '') return;
+      if (selectedTaskId === null && selectedTask === '' && selectedSubjectId === null) return;
       taskStateDirtyRef.current = true;
     }
     writeOwnedJson(TASK_STATE_KEY, storageOwner, {
       taskId: selectedTaskId,
       taskTitle: selectedTask,
+      subjectId: getSelectedTaskSubjectId(),
     });
-  }, [selectedTaskId, selectedTask, storageOwner]);
+  }, [selectedTaskId, selectedTask, selectedSubjectId, getSelectedTaskSubjectId, storageOwner]);
 
   const handleSpaceToggle = useEffectEvent((event: KeyboardEvent) => {
     if (event.code !== 'Space' && event.key !== ' ') return;
@@ -1244,7 +1263,16 @@ export default function TimerApp({
         dbTasks={dbTasks}
         selectedTask={selectedTask}
         selectedTaskId={selectedTaskId}
-        onSelectTask={(task, id) => { setSelectedTask(task); setSelectedTaskId(id); }}
+        selectedSubjectId={selectedSubjectId}
+        isSaving={isSaving}
+        labelsLocked={pendingRecord?.labelsLocked ?? false}
+        userId={isLoggedIn ? getCurrentUserId() : null}
+        onSelectSubject={setSelectedSubjectId}
+        onSelectTask={(task, id) => {
+          setSelectedTask(task);
+          setSelectedTaskId(id);
+          if (id) setSelectedSubjectId(dbTasks.find(item => item.id === id)?.subjectId ?? null);
+        }}
         onSave={handleTaskSubmit}
         onSkip={handleTaskSkip}
         onDisablePopup={handleDisableTaskPopup}
@@ -1270,7 +1298,7 @@ export default function TimerApp({
             </button>
           </div>
 
-          <TaskSidebar isOpen={isTaskSidebarOpen} onClose={() => setIsTaskSidebarOpen(false)} tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} longTermTasks={longTermTasks} pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId} onSelectTask={(task) => { if (task) { setSelectedTask(task.title); setSelectedTaskId(task.id); } else { setSelectedTask(''); setSelectedTaskId(null); } }} onToggleTask={(task) => { void toggleTaskStatus(task); }} onSelectSubtask={(subtask) => selectSubtaskForTimer(subtask).then((row) => { if (row) { setSelectedTask(row.title); setSelectedTaskId(row.id); } return row; })} onToggleSubtask={(subtask) => { void toggleSubtask(subtask); }} />
+          <TaskSidebar isOpen={isTaskSidebarOpen} onClose={() => setIsTaskSidebarOpen(false)} tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} longTermTasks={longTermTasks} pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId} onSelectTask={(task) => { if (task) { setSelectedTask(task.title); setSelectedTaskId(task.id); setSelectedSubjectId(task.subjectId ?? null); } else { setSelectedTask(''); setSelectedTaskId(null); setSelectedSubjectId(null); } }} onToggleTask={(task) => { void toggleTaskStatus(task); }} onSelectSubtask={(subtask) => selectSubtaskForTimer(subtask).then((row) => { if (row) { setSelectedTask(row.title); setSelectedTaskId(row.id); setSelectedSubjectId(row.subjectId ?? null); } return row; })} onToggleSubtask={(subtask) => { void toggleSubtask(subtask); }} />
 
           <div className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${tab === 'stopwatch' ? 'bg-indigo-50 dark:bg-indigo-950/30' : (timerMode === 'focus' ? 'bg-rose-50 dark:bg-rose-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30')}`}>
             {tab === 'timer' ? (
@@ -1286,10 +1314,10 @@ export default function TimerApp({
                   updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
                 }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
-                selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }}
+                selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); setSelectedSubjectId(null); }}
               />
             ) : (
-              <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); }} />
+              <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); setSelectedSubjectId(null); }} />
             )}
           </div>
         </div>

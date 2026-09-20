@@ -44,11 +44,13 @@ type Row = {
   title: string;
   status: string;
   source_subtask_id?: string | null;
+  subject_id?: string | null;
 };
 type SessionRow = { task_id: string | null; duration: number | null };
 type LongTermRow = {
   id: string;
   title: string;
+  subject_id?: string | null;
   position: number | null;
   long_term_subtasks: Array<{
     id: string;
@@ -270,7 +272,7 @@ describe('useTasks', () => {
       parentTitle: '자격증 공부',
     });
     expect(taskSelectCalls[0]).toBe(
-      'id, title, status, source_subtask_id'
+      'id, title, status, source_subtask_id, subject_id'
     );
     expect(doneTask).toMatchObject({ id: 't2', status: 'done' });
 
@@ -289,6 +291,7 @@ describe('useTasks', () => {
       {
         id: 'lt1',
         title: '자격증 공부',
+        subject_id: null,
         position: 0,
         subtasks: [
           {
@@ -310,7 +313,7 @@ describe('useTasks', () => {
       {
         method: 'select',
         columns:
-          'id, title, position, long_term_subtasks(id, title, position, completed_at)',
+          'id, title, position, subject_id, long_term_subtasks(id, title, position, completed_at)',
       },
       { method: 'eq', field: 'user_id', value: 'user-1' },
       { method: 'is', field: 'archived_at', value: null },
@@ -346,6 +349,7 @@ describe('useTasks', () => {
         {
           id: 'lt-null',
           title: '위치 없는 과제',
+          subject_id: null,
           position: 0,
           subtasks: [
             {
@@ -358,6 +362,55 @@ describe('useTasks', () => {
         },
       ]);
     });
+  });
+
+  it('uses each selected daily, weekly and monthly task subject and refreshes it for future records', async () => {
+    taskRows[0].subject_id = 'subject-database';
+    weeklyRows[0].subject_id = 'subject-blockchain';
+    monthlyRows[0].subject_id = 'subject-coding';
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.monthlyPlans).toHaveLength(1));
+
+    for (const [id, subject] of [['t1', 'subject-database'], ['w1', 'subject-blockchain'], ['m1', 'subject-coding']]) {
+      act(() => result.current.setSelectedTaskId(id));
+      expect(result.current.getSelectedTaskSubjectId()).toBe(subject);
+    }
+    monthlyRows[0].subject_id = 'reclassified';
+    act(() => { window.dispatchEvent(new Event('study-subjects-changed')); });
+    await waitFor(() => expect(result.current.getSelectedTaskSubjectId()).toBe('reclassified'));
+  });
+
+  it('restores the current task subject and isolates a freeform subject when the account changes', async () => {
+    taskRows[0].subject_id = 'current-subject';
+    readOwnedJsonMock.mockReturnValue({ taskId: 't1', taskTitle: '오래된 제목', subjectId: 'old-subject' });
+    const { result, rerender } = renderHook(({ loggedIn }) => useTasks(loggedIn), {
+      initialProps: { loggedIn: true },
+    });
+    await waitFor(() => expect(result.current.selectedTaskId).toBe('t1'));
+    expect(result.current.selectedSubjectId).toBe('current-subject');
+    expect(result.current.selectedTask).toBe('남은 작업');
+
+    act(() => {
+      result.current.setSelectedTaskId(null);
+      result.current.setSelectedSubjectId('private-subject');
+    });
+    rerender({ loggedIn: false });
+    expect(result.current.selectedSubjectId).toBeNull();
+    expect(result.current.getSelectedTaskSubjectId()).toBeNull();
+  });
+
+  it('inherits the parent subject when materializing a long-term subtask', async () => {
+    longTermRows[0].subject_id = 'subject-parent';
+    materializeSubtaskForTodayMock.mockResolvedValueOnce({
+      id: 'materialized', title: '2장', status: 'todo', subject_id: 'subject-parent', source_subtask_id: 's2',
+    });
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    const subtask = result.current.longTermTasks[0].subtasks.find(item => item.id === 's2')!;
+    await act(async () => { await result.current.selectSubtaskForTimer(subtask); });
+
+    expect(materializeSubtaskForTodayMock).toHaveBeenCalledWith('user-1', subtask, 'subject-parent');
+    expect(result.current.selectedSubjectId).toBe('subject-parent');
   });
 
   it('reuses today\'s materialized task when selecting a subtask', async () => {
@@ -410,7 +463,7 @@ describe('useTasks', () => {
       selected = await result.current.selectSubtaskForTimer(subtask);
     });
 
-    expect(materializeSubtaskForTodayMock).toHaveBeenCalledWith('user-1', subtask);
+    expect(materializeSubtaskForTodayMock).toHaveBeenCalledWith('user-1', subtask, null);
     expect(selected).toMatchObject({
       id: 't3',
       title: '2장',
