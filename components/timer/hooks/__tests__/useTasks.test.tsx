@@ -66,6 +66,7 @@ let monthlyRows: Row[];
 let longTermRows: LongTermRow[];
 let sessionRows: SessionRow[];
 let updateError: { message: string } | null;
+let updateMatched: boolean;
 let updateCalls: Array<{ table: string; patch: Record<string, unknown>; id: string }>;
 let taskSelectCalls: string[];
 let longTermQueryCalls: Array<
@@ -88,12 +89,19 @@ function createDeferred<T>() {
 }
 
 function updateMockFor(table: string) {
-  return vi.fn((patch: Record<string, unknown>) => ({
-    eq: vi.fn(async (_field: string, id: string) => {
-      updateCalls.push({ table, patch, id });
-      return { error: updateError };
-    }),
-  }));
+  return vi.fn((patch: Record<string, unknown>) => {
+    let updatedId = '';
+    const query = {
+      eq: vi.fn((field: string, id: string) => {
+        if (field === 'id') { updatedId = id; updateCalls.push({ table, patch, id }); }
+        return query;
+      }),
+      select: vi.fn(() => query),
+      single: vi.fn(async () => ({ data: updateError || !updateMatched ? null : { id: updatedId }, error: updateError })),
+      then: (resolve: (value: { error: typeof updateError }) => void) => resolve({ error: updateError }),
+    };
+    return query;
+  });
 }
 
 describe('useTasks', () => {
@@ -143,6 +151,7 @@ describe('useTasks', () => {
       { task_id: 'w1', duration: 1200 },
     ];
     updateError = null;
+    updateMatched = true;
     updateCalls = [];
     taskSelectCalls = [];
     longTermQueryCalls = [];
@@ -849,5 +858,47 @@ describe('useTasks', () => {
         result.current.dbTasks.find((task) => task.id === 't1')?.status
       ).toBe('todo');
     });
+  });
+
+  it.each([
+    ['daily', 'tasks', 't1'], ['weekly', 'weekly_plans', 'w1'], ['monthly', 'monthly_plans', 'm1'],
+  ] as const)('completes %s tasks explicitly and keeps retries idempotent', async (kind, table, id) => {
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.monthlyPlans).toHaveLength(1));
+    const task = [...result.current.dbTasks, ...result.current.weeklyPlans, ...result.current.monthlyPlans]
+      .find(item => item.id === id)!;
+    await act(async () => {
+      expect(await result.current.completeTask(task)).toBe(true);
+      expect(await result.current.completeTask({ ...task, status: 'done' })).toBe(true);
+    });
+    expect(updateCalls).toEqual([
+      { table, patch: { status: 'done' }, id }, { table, patch: { status: 'done' }, id },
+    ]);
+    expect([...result.current.dbTasks, ...result.current.weeklyPlans, ...result.current.monthlyPlans]
+      .find(item => item.id === id)?.status).toBe('done');
+    if (kind === 'daily') {
+      expect(toggleSubtaskCompletionMock).toHaveBeenCalledWith('user-1',
+        { id: 's1', completed_at: null }, expect.any(String));
+      expect(result.current.longTermTasks[0].subtasks.find(item => item.id === 's1')?.completed_at)
+        .toEqual(expect.any(String));
+    }
+  });
+
+  it('keeps the task incomplete when its durable completion fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.weeklyPlans).toHaveLength(1));
+    updateError = { message: 'offline' };
+    await act(async () => expect(await result.current.completeTask(result.current.weeklyPlans[0])).toBe(false));
+    expect(result.current.weeklyPlans[0].status).toBe('todo');
+  });
+
+  it('refuses completion when an update returns no matching task', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.weeklyPlans).toHaveLength(1));
+    updateMatched = false;
+    await act(async () => expect(await result.current.completeTask(result.current.weeklyPlans[0])).toBe(false));
+    expect(result.current.weeklyPlans[0].status).toBe('todo');
   });
 });

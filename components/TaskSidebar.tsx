@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, ChevronDown, Circle } from 'lucide-react';
 import type {
@@ -25,6 +25,9 @@ interface TaskSidebarProps {
   onToggleSubtask: (subtask: LongTermSubtaskItem) => void;
   pendingToggleSubtaskIds?: ReadonlySet<string>;
   selectedTaskId: string | null;
+  choosingNextTask?: boolean;
+  selectionDisabled?: boolean;
+  excludedTaskId?: string | null;
 }
 
 type SectionColor = 'rose' | 'indigo' | 'purple' | 'emerald';
@@ -312,20 +315,32 @@ export default function TaskSidebar({
   onToggleSubtask,
   pendingToggleSubtaskIds = EMPTY_SUBTASK_IDS,
   selectedTaskId,
+  choosingNextTask = false,
+  selectionDisabled = false,
+  excludedTaskId = null,
 }: TaskSidebarProps) {
   const [pendingSubtaskId, setPendingSubtaskId] = useState<string | null>(null);
+  const selectionRequestRef = useRef(0);
 
   if (!isOpen) return null;
 
-  const selectAndClose = (task: TaskItem | null) => {
-    onSelectTask(task);
+  const closeSidebar = () => {
+    selectionRequestRef.current += 1;
+    setPendingSubtaskId(null);
     onClose();
+  };
+
+  const selectAndClose = (task: TaskItem | null) => {
+    if (selectionDisabled || (task && task.id === excludedTaskId)) return;
+    onSelectTask(task);
+    closeSidebar();
   };
 
   // 구체화가 끝나 tasks 행이 실제로 선택된 뒤에만 드로어를 닫는다.
   // 실패하면 드로어를 열어둔 채 에러 토스트를 띄운다.
   const selectSubtaskAndClose = async (subtask: LongTermSubtaskItem) => {
-    if (pendingSubtaskId !== null) return;
+    if (selectionDisabled || pendingSubtaskId !== null) return;
+    const request = ++selectionRequestRef.current;
     setPendingSubtaskId(subtask.id);
     try {
       let selected: TaskItem | null = null;
@@ -334,10 +349,11 @@ export default function TaskSidebar({
       } catch (error) {
         console.error('Error selecting long-term subtask:', error);
       }
-      if (selected) onClose();
+      if (request !== selectionRequestRef.current) return;
+      if (selected) closeSidebar();
       else toast.error('챕터를 오늘 할 일로 가져오지 못했어요. 다시 시도해주세요.');
     } finally {
-      setPendingSubtaskId(null);
+      if (request === selectionRequestRef.current) setPendingSubtaskId(null);
     }
   };
 
@@ -345,22 +361,32 @@ export default function TaskSidebar({
   const materializedSubtaskIds = new Set(
     tasks.flatMap((task) => (task.sourceSubtaskId ? [task.sourceSubtaskId] : []))
   );
+  const excludedSubtaskId = tasks.find((task) => task.id === excludedTaskId)?.sourceSubtaskId;
+  const availableTasks = (items: TaskItem[]) => items.filter((task) =>
+    task.id !== excludedTaskId && (!choosingNextTask || task.status !== 'done'));
+  const availableLongTermTasks = longTermTasks.map((task) => ({
+    ...task,
+    subtasks: task.subtasks.filter((subtask) => subtask.id !== excludedSubtaskId &&
+      (!choosingNextTask || subtask.completed_at === null)),
+  })).filter((task) => !choosingNextTask || task.subtasks.length > 0);
+  const hasNextTask = availableTasks(tasks).length + availableTasks(weeklyPlans).length +
+    availableTasks(monthlyPlans).length + availableLongTermTasks.length > 0;
 
   return (
     <>
       <div
         className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={closeSidebar}
       />
 
       <div role="dialog" aria-modal="true" aria-labelledby="task-sidebar-title" className="fixed right-0 top-0 z-50 h-dvh w-80 max-w-full bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
         <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
           <div className="mb-6 flex shrink-0 items-center justify-between sm:mb-8">
             <h2 id="task-sidebar-title" className="text-xl font-bold text-gray-800 dark:text-white">
-              Task list
+              {choosingNextTask ? '다음 작업 선택' : 'Task list'}
             </h2>
             <button
-              onClick={onClose}
+              onClick={closeSidebar}
               aria-label="작업 목록 닫기"
               className="rounded-full p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
             >
@@ -381,8 +407,15 @@ export default function TaskSidebar({
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain">
-            <button
+          {choosingNextTask && (
+            <p role="status" className="mb-4 text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+              {selectionDisabled
+                ? '현재 작업을 마무리하고 있어요. 남은 시간은 멈춰 있어요.'
+                : '타이머가 잠시 멈췄어요. 다음 작업을 고르면 남은 시간부터 자동으로 시작해요.'}
+            </p>
+          )}
+          <fieldset disabled={selectionDisabled} className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain disabled:opacity-60">
+            {!choosingNextTask && <button
               onClick={() => selectAndClose(null)}
               className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all ${
                 selectedTaskId === null
@@ -391,11 +424,16 @@ export default function TaskSidebar({
               }`}
             >
               Start without a task
-            </button>
+            </button>}
+            {choosingNextTask && !hasNextTask && (
+              <p className="rounded-xl bg-gray-50 p-4 text-sm leading-relaxed text-gray-500 dark:bg-slate-800 dark:text-gray-400">
+                이어서 할 작업이 없어요. 목록을 닫고 할 일을 추가한 뒤 다시 선택해주세요. 남은 시간은 유지돼요.
+              </p>
+            )}
 
             <TaskSection
               title="Today"
-              items={tasks}
+              items={availableTasks(tasks)}
               color="rose"
               selectedTaskId={selectedTaskId}
               onSelectTask={selectAndClose}
@@ -403,7 +441,7 @@ export default function TaskSidebar({
             />
             <TaskSection
               title="This week"
-              items={weeklyPlans}
+              items={availableTasks(weeklyPlans)}
               color="indigo"
               selectedTaskId={selectedTaskId}
               onSelectTask={selectAndClose}
@@ -411,14 +449,14 @@ export default function TaskSidebar({
             />
             <TaskSection
               title="This month"
-              items={monthlyPlans}
+              items={availableTasks(monthlyPlans)}
               color="purple"
               selectedTaskId={selectedTaskId}
               onSelectTask={selectAndClose}
               onToggleTask={onToggleTask}
             />
             <LongTermTaskSection
-              items={longTermTasks}
+              items={availableLongTermTasks}
               materializedSubtaskIds={materializedSubtaskIds}
               pendingSubtaskId={pendingSubtaskId}
               pendingToggleSubtaskIds={pendingToggleSubtaskIds}
@@ -427,7 +465,7 @@ export default function TaskSidebar({
               }}
               onToggleSubtask={onToggleSubtask}
             />
-          </div>
+          </fieldset>
         </div>
       </div>
     </>

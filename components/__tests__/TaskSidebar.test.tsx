@@ -167,6 +167,43 @@ describe('TaskSidebar', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('offers the next task and excludes the task just completed', () => {
+    const onSelectTask = vi.fn();
+    const onClose = vi.fn();
+    const next = makeTask({ id: 'b', title: '작업 B' });
+    renderSidebar({
+      tasks: [makeTask({ id: 'a', title: '작업 A', status: 'done' }), next],
+      choosingNextTask: true, excludedTaskId: 'a', onSelectTask, onClose,
+    });
+    expect(screen.getByRole('dialog', { name: '다음 작업 선택' })).toBeInTheDocument();
+    expect(screen.queryByText('작업 A')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('타이머가 잠시 멈췄어요');
+    fireEvent.click(screen.getByText('작업 B'));
+    expect(onSelectTask).toHaveBeenCalledWith(next);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('closing the next-task picker does not choose or resume a task', () => {
+    const onSelectTask = vi.fn();
+    const onClose = vi.fn();
+    renderSidebar({ choosingNextTask: true, onSelectTask, onClose });
+    fireEvent.click(screen.getByRole('button', { name: '작업 목록 닫기' }));
+    expect(onSelectTask).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('disables next-task actions while completion is being prepared', () => {
+    const onSelectTask = vi.fn();
+    renderSidebar({
+      tasks: [makeTask({ id: 'b', title: '작업 B' })],
+      choosingNextTask: true, selectionDisabled: true, onSelectTask,
+    });
+    expect(screen.getByRole('button', { name: '작업 B' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Start without a task' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('작업 B'));
+    expect(onSelectTask).not.toHaveBeenCalled();
+  });
+
   it('shows the parent title as a subtitle for materialized Today items', () => {
     renderSidebar({
       tasks: [
@@ -257,6 +294,19 @@ describe('TaskSidebar', () => {
       });
 
       expect(onClose).toHaveBeenCalledTimes(1);
+      expect(toastMock.error).not.toHaveBeenCalled();
+    });
+
+    it('does not show a failure or close again when a cancelled selection settles', async () => {
+      let resolveSelect!: (value: TaskItem | null) => void;
+      const onSelectSubtask = vi.fn(() => new Promise<TaskItem | null>((resolve) => { resolveSelect = resolve; }));
+      const onClose = vi.fn();
+      renderSidebar({ longTermTasks: [exam], choosingNextTask: true, onSelectSubtask, onClose });
+      fireEvent.click(screen.getByText('빅데이터분석기사'));
+      fireEvent.click(screen.getByText('챕터1'));
+      fireEvent.click(screen.getByRole('button', { name: '작업 목록 닫기' }));
+      await act(async () => { resolveSelect(null); });
+      expect(onClose).toHaveBeenCalledOnce();
       expect(toastMock.error).not.toHaveBeenCalled();
     });
 

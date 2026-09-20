@@ -35,6 +35,10 @@ interface TimerDisplayProps {
   selectedTaskTitle: string;
   onOpenTaskSidebar: () => void;
   onClearTask: (e: React.MouseEvent) => void;
+  onCompleteTask?: () => void;
+  canCompleteTask?: boolean;
+  isCompletingTask?: boolean;
+  isChoosingNextTask?: boolean;
 }
 
 export const TimerDisplay = ({
@@ -56,6 +60,10 @@ export const TimerDisplay = ({
   selectedTaskTitle,
   onOpenTaskSidebar,
   onClearTask,
+  onCompleteTask,
+  canCompleteTask = false,
+  isCompletingTask = false,
+  isChoosingNextTask = false,
 }: TimerDisplayProps) => {
   const themeColors = getThemeColors('timer', timerMode);
   
@@ -108,6 +116,22 @@ export const TimerDisplay = ({
         </div>
       </div>
 
+      {timerMode === 'focus' && selectedTaskId && onCompleteTask && !isChoosingNextTask && (
+        <button
+          type="button"
+          onClick={onCompleteTask}
+          disabled={!canCompleteTask || isCompletingTask}
+          className="mb-5 inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-800 dark:bg-slate-800 dark:text-rose-300 dark:hover:bg-rose-950"
+        >
+          {isCompletingTask ? '작업 완료 처리 중…' : '작업 완료 · 다음 작업'}
+        </button>
+      )}
+      {isChoosingNextTask && (
+        <p role="status" className="mb-5 text-sm text-gray-500 dark:text-gray-400">
+          다음 작업을 고르면 남은 시간부터 이어서 시작해요.
+        </p>
+      )}
+
       <div className={`${timeLeft >= 3600 ? 'text-5xl min-[400px]:text-6xl sm:text-7xl' : 'text-7xl sm:text-8xl'} font-bold mb-4 font-mono tabular-nums tracking-tighter transition-colors ${themeColors.textMain}`}>
         {formatTime(timeLeft)}
       </div>
@@ -139,9 +163,10 @@ export const TimerDisplay = ({
       <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
         <button
           onClick={onToggleTimer}
+          disabled={isCompletingTask}
           className={`h-14 sm:h-auto px-4 sm:px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${themeColors.btnMain} dark:shadow-none min-w-24 sm:min-w-[140px]`}
         >
-          {isRunning ? '일시정지' : '시작'}
+          {isChoosingNextTask ? '다음 작업 선택' : isRunning ? '일시정지' : '시작'}
         </button>
 
         {showSaveButton && (

@@ -384,16 +384,53 @@ export const useTasks = (isLoggedIn: boolean) => {
     [fetchDbTasks]
   );
 
+  // Handoffs may retry after a network failure or a reload. Set an explicit
+  // terminal status instead of toggling, which could reopen a finished task.
+  const completeTask = useCallback(async (item: TaskItem): Promise<boolean> => {
+    const owner = taskOwner;
+    if (owner === GUEST_OWNER || currentOwnerRef.current !== owner) return false;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || user.id !== owner || currentOwnerRef.current !== owner) return false;
+      const completedAt = new Date().toISOString();
+      if (item.sourceSubtaskId) {
+        await toggleSubtaskCompletion(owner, { id: item.sourceSubtaskId, completed_at: null }, completedAt);
+      }
+      const { data, error } = await supabase.from(TABLE_BY_KIND[item.kind])
+        .update({ status: 'done' }).eq('id', item.id).eq('user_id', owner).select('id').single();
+      if (error) throw error;
+      if (data?.id !== item.id) throw new Error('Task completion was not confirmed');
+      if (currentOwnerRef.current !== owner) return false;
+      fetchGenerationRef.current += 1;
+      const markDone = (items: TaskItem[]) => items.map(task =>
+        task.id === item.id ? { ...task, status: 'done' as const } : task);
+      if (item.kind === 'daily') setDbTasks(markDone);
+      else if (item.kind === 'weekly') setWeeklyPlans(markDone);
+      else setMonthlyPlans(markDone);
+      if (item.sourceSubtaskId) setLongTermTasks(tasks => tasks.map(task => ({
+        ...task,
+        subtasks: task.subtasks.map(subtask => subtask.id === item.sourceSubtaskId
+          ? { ...subtask, completed_at: completedAt } : subtask),
+      })));
+      return true;
+    } catch (error) {
+      console.error('Error completing timer task:', error);
+      return false;
+    }
+  }, [taskOwner]);
+
   const selectSubtaskForTimer = useCallback(
-    async (subtask: LongTermSubtaskItem): Promise<TaskItem | null> => {
+    async (subtask: LongTermSubtaskItem, applySelection = true): Promise<TaskItem | null> => {
       const existingTask = dbTasks.find(
         (task) => task.sourceSubtaskId === subtask.id
       );
 
       if (existingTask) {
-        setSelectedTask(existingTask.title);
-        setSelectedTaskId(existingTask.id);
-        setSelectedSubjectId(existingTask.subjectId ?? null);
+        if (applySelection) {
+          setSelectedTask(existingTask.title);
+          setSelectedTaskId(existingTask.id);
+          setSelectedSubjectId(existingTask.subjectId ?? null);
+        }
         return existingTask;
       }
 
@@ -438,9 +475,11 @@ export const useTasks = (isLoggedIn: boolean) => {
             ? currentTasks
             : [...currentTasks, task]
         );
-        setSelectedTask(task.title);
-        setSelectedTaskId(task.id);
-        setSelectedSubjectId(task.subjectId ?? null);
+        if (applySelection) {
+          setSelectedTask(task.title);
+          setSelectedTaskId(task.id);
+          setSelectedSubjectId(task.subjectId ?? null);
+        }
         void fetchDbTasks();
         return task;
       } catch (error) {
@@ -547,6 +586,7 @@ export const useTasks = (isLoggedIn: boolean) => {
     getSelectedTaskSubjectId,
     fetchDbTasks,
     toggleTaskStatus,
+    completeTask,
     selectSubtaskForTimer,
     toggleSubtask,
     pendingSubtaskIds,

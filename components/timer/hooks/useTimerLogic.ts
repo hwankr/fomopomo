@@ -21,12 +21,28 @@ export const useTimerLogic = ({
   // The active session may have been started on a device with different
   // settings. Its elapsed time must use its own original duration.
   const [timerDuration, setTimerDuration] = useState(settings.pomoTime * 60);
-  const [isRunning, setIsRunning] = useState(false);
+  const [isRunning, setIsRunningState] = useState(false);
+  // Restart polling even if a pause/resume is batched back to isRunning=true.
+  const [runVersion, setRunVersion] = useState(0);
   const [cycleCount, setCycleCount] = useState(0);
   const [focusLoggedSeconds, setFocusLoggedSeconds] = useState(0);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const endTimeRef = useRef<number>(0);
+  const runningRef = useRef(false);
+
+  // Browser wakeup events can arrive before React commits a pause/reset.
+  // Keep the guard synchronous, including the setter used by session restore.
+  const setIsRunning = useCallback((next: React.SetStateAction<boolean>) => {
+    const running = typeof next === 'function' ? next(runningRef.current) : next;
+    if (running && !runningRef.current) setRunVersion(version => version + 1);
+    runningRef.current = running;
+    if (!running && timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsRunningState(running);
+  }, []);
 
   // Re-sync an idle timer when the configured durations change (e.g. the
   // settings modal saves pomoTime 25 -> 50), adjusting state during render —
@@ -61,44 +77,45 @@ export const useTimerLogic = ({
     }
   }
 
-  // Timer interval
+  // Reconcile against the deadline both during normal polling and as soon as
+  // a suspended/throttled page returns. This cannot run while the browser is
+  // suspended, but it avoids waiting for its next throttled interval on return.
   useEffect(() => {
-    if (isRunning) {
-      if (!timerRef.current) {
-        timerRef.current = setInterval(() => {
-          const now = Date.now();
-          const diff = Math.ceil((endTimeRef.current - now) / 1000);
-          if (diff <= 0) {
-            // Stop the interval synchronously: waiting for the isRunning
-            // effect cleanup would let queued ticks (e.g. after background
-            // tab throttling) re-fire completion multiple times.
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            setTimeLeft(0);
-            setIsRunning(false);
-            onTimerCompleteRef.current();
-          } else {
-            setTimeLeft(diff);
-          }
-        }, 200);
+    if (!isRunning) return;
+    let active = true;
+    const syncTimer = () => {
+      if (!active || !runningRef.current) return;
+      const diff = Math.ceil((endTimeRef.current - Date.now()) / 1000);
+      if (diff <= 0) {
+        // Claim completion before notifying TimerApp: focus, visibility and
+        // an already queued interval can all arrive in the same event burst.
+        setIsRunning(false);
+        setTimeLeft(0);
+        onTimerCompleteRef.current();
+      } else {
+        setTimeLeft(diff);
       }
-    } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
+    };
+    const onWake = () => {
+      if (document.visibilityState === 'visible') syncTimer();
+    };
+
+    timerRef.current = setInterval(syncTimer, 200);
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    window.addEventListener('pageshow', onWake);
+
     return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+      window.removeEventListener('pageshow', onWake);
       if (timerRef.current) {
         clearInterval(timerRef.current);
-        // Reset so a re-run of this effect can start a new interval instead
-        // of mistaking the cleared id for a live one.
         timerRef.current = null;
       }
     };
-  }, [isRunning, onTimerCompleteRef]);
+  }, [isRunning, runVersion, onTimerCompleteRef, setIsRunning]);
 
   // Atomic start transition shared by manual toggles and auto-starts.
   // The fresh deadline MUST be computed before isRunning flips to true:
@@ -106,7 +123,7 @@ export const useTimerLogic = ({
   // first interval tick see diff <= 0 and complete the timer instantly.
   // Callers firing from stale closures (e.g. delayed auto-start) pass the
   // intended mode/remaining explicitly instead of relying on current state.
-  const startTimer = useCallback((options?: { mode?: TimerMode; remainingSeconds?: number; durationSeconds?: number }) => {
+  const startTimer = useCallback((options?: { mode?: TimerMode; remainingSeconds?: number; durationSeconds?: number; task?: string }) => {
     const mode = options?.mode ?? timerMode;
     const duration = options?.durationSeconds ?? (options?.mode === undefined
       ? timerDuration
@@ -130,26 +147,40 @@ export const useTimerLogic = ({
     // If we want the client to calc elapsed: Date.now() - startTime.
     // So logical startTime = Date.now() - (elapsed).
     // elapsed = duration - timeLeft.
-    const elapsed = duration - remaining;
+    const logged = mode === 'focus' ? focusLoggedSeconds : 0;
+    const elapsed = Math.max(0, duration - remaining - logged);
     const logicalStart = Date.now() - (elapsed * 1000);
 
     // Only set status to 'studying' for focus mode (triggers friend notification)
     // Break modes should use 'online' to avoid sending "study started" notification
     const statusForMode = mode === 'focus' ? 'studying' : 'online';
-    updateStatus(statusForMode, undefined, new Date(logicalStart).toISOString(), undefined, 'timer', mode, duration);
-  }, [timerMode, timeLeft, timerDuration, settings, updateStatus]);
+    updateStatus(statusForMode, options?.task, new Date(logicalStart).toISOString(), undefined, 'timer', mode, duration - logged);
+  }, [timerMode, timeLeft, timerDuration, focusLoggedSeconds, settings, updateStatus, setIsRunning]);
+
+  // Read the deadline at the interaction itself, not the last 200ms tick.
+  // Clear the interval synchronously so a queued completion cannot race a
+  // task handoff before React commits its paused state.
+  const pauseTimer = useCallback((now = Date.now()) => {
+    const remaining = runningRef.current
+      ? Math.max(0, Math.ceil((endTimeRef.current - now) / 1000))
+      : timeLeft;
+    setIsRunning(false);
+    setTimeLeft(remaining);
+    return remaining;
+  }, [timeLeft, setIsRunning]);
 
   const toggleTimer = useCallback((forceStart = false) => {
     playClickSound();
 
     if (!forceStart && isRunning) {
       // Pause
-      setIsRunning(false);
-      updateStatus('paused', undefined, undefined, timerDuration - timeLeft, 'timer', timerMode, timerDuration);
+      const remaining = pauseTimer();
+      const logged = timerMode === 'focus' ? focusLoggedSeconds : 0;
+      updateStatus('paused', undefined, undefined, Math.max(0, timerDuration - remaining - logged), 'timer', timerMode, timerDuration - logged);
     } else {
       startTimer();
     }
-  }, [isRunning, timeLeft, timerMode, timerDuration, playClickSound, updateStatus, startTimer]);
+  }, [isRunning, timerMode, timerDuration, focusLoggedSeconds, playClickSound, updateStatus, startTimer, pauseTimer]);
 
   const resetTimerManual = useCallback(() => {
     setIsRunning(false);
@@ -162,10 +193,10 @@ export const useTimerLogic = ({
     setTimerDuration(resetTime);
     if (timerMode === 'focus') setFocusLoggedSeconds(0);
     return resetTime;
-  }, [timerMode, settings]);
+  }, [timerMode, settings, setIsRunning]);
 
   const changeTimerMode = useCallback((mode: TimerMode) => {
-    if (isRunning) setIsRunning(false);
+    setIsRunning(false);
     setTimerMode(mode);
 
     let newTime = 0;
@@ -177,7 +208,7 @@ export const useTimerLogic = ({
     setTimerDuration(newTime);
     if (mode === 'focus') setFocusLoggedSeconds(0);
     return newTime;
-  }, [isRunning, settings]);
+  }, [settings, setIsRunning]);
 
   return {
     timerMode,
@@ -193,6 +224,7 @@ export const useTimerLogic = ({
     setCycleCount,
     setFocusLoggedSeconds,
     startTimer,
+    pauseTimer,
     toggleTimer,
     resetTimerManual,
     changeTimerMode,

@@ -9,7 +9,7 @@ const presets = [
   { id: 'preset-90', label: '집중', minutes: 90 },
 ];
 
-const renderTimerDisplay = (onPresetClick = vi.fn()) =>
+const renderTimerDisplay = (onPresetClick = vi.fn(), overrides: Partial<Parameters<typeof TimerDisplay>[0]> = {}) =>
   render(
     <TimerDisplay
       timerMode="focus"
@@ -30,6 +30,7 @@ const renderTimerDisplay = (onPresetClick = vi.fn()) =>
       selectedTaskTitle=""
       onOpenTaskSidebar={vi.fn()}
       onClearTask={vi.fn()}
+      {...overrides}
     />
   );
 
@@ -54,5 +55,44 @@ describe('TimerDisplay preset buttons', () => {
 
     expect(onPresetClick).toHaveBeenCalledWith(50);
     expect(onPresetClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TimerDisplay task handoff', () => {
+  it('completes the selected task without also toggling the timer', () => {
+    const onCompleteTask = vi.fn();
+    const onToggleTimer = vi.fn();
+    renderTimerDisplay(vi.fn(), {
+      selectedTaskId: 'task-a', selectedTaskTitle: '작업 A',
+      isRunning: true, timeLeft: 300, canCompleteTask: true,
+      onCompleteTask, onToggleTimer,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '작업 완료 · 다음 작업' }));
+
+    expect(onCompleteTask).toHaveBeenCalledOnce();
+    expect(onToggleTimer).not.toHaveBeenCalled();
+    expect(screen.getByText('05:00')).toBeInTheDocument();
+  });
+
+  it('prevents repeat completion while the task is being finalized', () => {
+    const onCompleteTask = vi.fn();
+    renderTimerDisplay(vi.fn(), {
+      selectedTaskId: 'task-a', selectedTaskTitle: '작업 A',
+      canCompleteTask: true, isCompletingTask: true, onCompleteTask,
+    });
+    const button = screen.getByRole('button', { name: '작업 완료 처리 중…' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onCompleteTask).not.toHaveBeenCalled();
+  });
+
+  it('offers reopening the next-task picker while the remainder is paused', () => {
+    const onToggleTimer = vi.fn();
+    renderTimerDisplay(vi.fn(), { timeLeft: 300, isChoosingNextTask: true, onToggleTimer });
+    fireEvent.click(screen.getByRole('button', { name: '다음 작업 선택' }));
+    expect(onToggleTimer).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('남은 시간부터');
+    expect(screen.getByText('05:00')).toBeInTheDocument();
   });
 });

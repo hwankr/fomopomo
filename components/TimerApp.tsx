@@ -7,7 +7,7 @@ import TaskSidebar from './TaskSidebar';
 // Hooks
 import { useSettings, type Settings } from '@/components/timer/hooks/useSettings';
 import { useSound } from '@/components/timer/hooks/useSound';
-import { useTasks } from './timer/hooks/useTasks';
+import { useTasks, type TaskItem, type LongTermSubtaskItem } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
 import { getStopwatchSnapshot, type StopwatchSnapshot } from './timer/hooks/stopwatchUtils';
@@ -74,6 +74,7 @@ type SavedAppState = {
   stopwatch: SavedStopwatchState;
   intervals?: SavedInterval[];
   currentIntervalStart?: number | null;
+  taskHandoff?: TaskHandoff | null;
   // Full durations (seconds) configured when this snapshot was written. Lets
   // the restore effect tell an untouched idle timer (timeLeft === the full
   // duration of ITS OWN settings era) apart from partial progress, so a
@@ -82,6 +83,11 @@ type SavedAppState = {
   configuredDurations?: Record<TimerMode, number>;
   lastUpdated: number;
   ownerUserId?: string;
+};
+
+type TaskHandoff = {
+  task: TaskItem;
+  completionPending: boolean;
 };
 
 const normalizeTimerMode = (value: string | null | undefined): TimerMode => {
@@ -153,6 +159,21 @@ export default function TimerApp({
   const [tab, setTab] = useState<'timer' | 'stopwatch'>('timer');
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskHandoff, setTaskHandoffState] = useState<TaskHandoff | null>(null);
+  const [isCompletingTask, setIsCompletingTask] = useState(false);
+  const taskHandoffRef = useRef<TaskHandoff | null>(null);
+  const completingTaskRef = useRef(false);
+  const selectingTaskRef = useRef(false);
+  const taskSelectionRequestRef = useRef(0);
+  const closeTaskSidebar = () => {
+    taskSelectionRequestRef.current += 1;
+    selectingTaskRef.current = false;
+    setIsTaskSidebarOpen(false);
+  };
+  const setTaskHandoff = useCallback((handoff: TaskHandoff | null) => {
+    taskHandoffRef.current = handoff;
+    setTaskHandoffState(handoff);
+  }, []);
 
   // The record the task popup is waiting on. The record object carries its
   // own batch id, frozen segments and real end time, so answering the popup
@@ -189,6 +210,7 @@ export default function TimerApp({
     getSelectedTaskSubjectId,
     fetchDbTasks,
     toggleTaskStatus,
+    completeTask,
     selectSubtaskForTimer,
     toggleSubtask,
     pendingSubtaskIds,
@@ -237,6 +259,7 @@ export default function TimerApp({
     setCycleCount,
     setFocusLoggedSeconds,
     startTimer,
+    pauseTimer,
     toggleTimer,
     resetTimerManual,
     changeTimerMode,
@@ -305,6 +328,9 @@ export default function TimerApp({
     // the outbox until its owner signs back in.
     setTaskModalOpen(false);
     setPendingRecord(null);
+    setTaskHandoffState(null);
+    setIsCompletingTask(false);
+    setIsTaskSidebarOpen(false);
   }
 
   // --- Persistence Logic ---
@@ -350,6 +376,7 @@ export default function TimerApp({
       },
       intervals: currentIntervals,
       currentIntervalStart: currentStart, // SAVE IT
+      taskHandoff: tMode === 'focus' ? taskHandoffRef.current : null,
       configuredDurations: {
         focus: configuredSettings.pomoTime * 60,
         shortBreak: configuredSettings.shortBreak * 60,
@@ -416,7 +443,11 @@ export default function TimerApp({
       return;
     }
 
-    const record = createPendingRecord(recordMode, duration, forcedEndTime);
+    const record = selectedTaskId ? createPendingRecord(recordMode, duration, forcedEndTime, {
+      task: getSelectedTaskTitle() || selectedTask,
+      taskId: selectedTaskId,
+      subjectId: getSelectedTaskSubjectId(),
+    }) : createPendingRecord(recordMode, duration, forcedEndTime);
     if (!record) {
       toast.error('로그인이 필요한 기능입니다.');
       return;
@@ -436,7 +467,133 @@ export default function TimerApp({
     } else {
       await attemptRecordSave(record, getSelectedTaskTitle() || selectedTask, selectedTaskId, onAfterSave);
     }
-  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, getSelectedTaskTitle, createPendingRecord, attemptRecordSave, pendingRecord]);
+  }, [isLoggedIn, settings.taskPopupEnabled, selectedTaskId, selectedTask, getSelectedTaskTitle, getSelectedTaskSubjectId, createPendingRecord, attemptRecordSave, pendingRecord]);
+
+  const finishTaskHandoff = useCallback(async function finish(handoff: TaskHandoff) {
+    if (completingTaskRef.current || taskHandoffRef.current !== handoff) return;
+    completingTaskRef.current = true;
+    setIsCompletingTask(true);
+    const completed = await completeTask(handoff.task);
+    // An account change, reset or new timer owns the UI by now.
+    if (taskHandoffRef.current !== handoff || getStorageOwner() !== storageOwner) return;
+    completingTaskRef.current = false;
+    setIsCompletingTask(false);
+    if (!completed) {
+      toast((t) => (
+        <div className="flex items-center gap-3">
+          <span>시간은 보관했어요. 작업 완료 처리를 다시 시도해주세요.</span>
+          <button className="shrink-0 font-bold" onClick={() => {
+            toast.dismiss(t.id);
+            void finish(handoff);
+          }}>재시도</button>
+        </div>
+      ), { duration: 12000, icon: '⚠️' });
+      return;
+    }
+    const ready = { ...handoff, completionPending: false };
+    setTaskHandoff(ready);
+    // Completion can settle after the drawer closed; only update its durable
+    // phase, never reopen it or rewind the timer from an old closure.
+    const saved = readOwnedJson<SavedAppState>(FULL_STATE_KEY, storageOwner);
+    if (saved?.taskHandoff?.task.id === handoff.task.id) {
+      writeOwnedJson(FULL_STATE_KEY, storageOwner, { ...saved, taskHandoff: ready, lastUpdated: Date.now() });
+    }
+    void fetchDbTasks();
+  }, [completeTask, storageOwner, setTaskHandoff, fetchDbTasks]);
+
+  const restoreTaskHandoff = useEffectEvent((handoff: TaskHandoff) => {
+    setTaskHandoff(handoff);
+    if (handoff.completionPending) void finishTaskHandoff(handoff);
+  });
+
+  const selectedTaskItem = [...dbTasks, ...weeklyPlans, ...monthlyPlans]
+    .find(task => task.id === selectedTaskId);
+  const timerOwnsFocusProgress = tab === 'timer' && timerMode === 'focus' &&
+    !isStopwatchRunning && stopwatchTime === 0 && (isRunning || timeLeft < timerDuration || focusLoggedSeconds > 0);
+
+  const handleCompleteTask = () => {
+    if (taskHandoffRef.current) {
+      setIsTaskSidebarOpen(true);
+      if (taskHandoffRef.current.completionPending) void finishTaskHandoff(taskHandoffRef.current);
+      return;
+    }
+    if (!isLoggedIn || !timerOwnsFocusProgress || !selectedTaskItem || selectedTaskItem.status === 'done') return;
+    const now = Date.now();
+    const remaining = isRunning ? Math.max(0, Math.ceil((endTimeRef.current - now) / 1000)) : timeLeft;
+    if (remaining === 0) {
+      pauseTimer(now);
+      onTimerCompleteCallback.current();
+      return;
+    }
+    const elapsed = timerDuration - remaining;
+    const additional = Math.max(0, elapsed - focusLoggedSeconds);
+    if ((additional > 0 && additional < MIN_SAVABLE_SECONDS) || remaining < MIN_SAVABLE_SECONDS) {
+      toast.error('기록은 10초 이상부터 저장돼요. 현재 작업 시간과 남은 시간이 각각 10초 이상일 때 이어할 수 있어요.');
+      return;
+    }
+    const record = additional > 0 ? createPendingRecord('pomo', additional, now, {
+      task: selectedTaskItem.title,
+      taskId: selectedTaskItem.id,
+      subjectId: selectedTaskItem.subjectId ?? null,
+    }) : null;
+    if (additional > 0 && !record) {
+      toast.error('기록을 보관할 수 없어 작업을 전환하지 않았어요. 다시 시도해주세요.');
+      return;
+    }
+    pauseTimer(now);
+    const handoff: TaskHandoff = { task: { ...selectedTaskItem }, completionPending: true };
+    setTaskHandoff(handoff);
+    setFocusLoggedSeconds(elapsed);
+    setIntervals([]);
+    currentIntervalStartRef.current = null;
+    saveState('timer', 'focus', false, remaining, null, cycleCount, elapsed,
+      false, 0, null, [], null, timerDuration);
+    updateStatus('paused', selectedTaskItem.title, undefined, 0, 'timer', 'focus', remaining);
+    setIsTaskSidebarOpen(true);
+    if (record) void attemptRecordSave(record, selectedTaskItem.title, selectedTaskItem.id);
+    void finishTaskHandoff(handoff);
+  };
+
+  const selectTimerTask = (task: TaskItem | null) => {
+    const handoff = taskHandoffRef.current;
+    // Ignore a second choice dispatched from the same render after the first
+    // has already resumed the countdown.
+    if (taskHandoff && !handoff) return;
+    if (handoff?.completionPending || (handoff && (!task || task.status === 'done' || task.id === handoff.task.id))) return;
+    taskSelectionRequestRef.current += 1;
+    selectingTaskRef.current = false;
+    setSelectedTask(task?.title ?? '');
+    setSelectedTaskId(task?.id ?? null);
+    setSelectedSubjectId(task?.subjectId ?? null);
+    // Persist labels in the same interaction as resumption; a refresh before
+    // the selection effect commits must still recover B, never completed A.
+    taskStateDirtyRef.current = true;
+    writeOwnedJson(TASK_STATE_KEY, storageOwner, {
+      taskId: task?.id ?? null, taskTitle: task?.title ?? '', subjectId: task?.subjectId ?? null,
+    });
+    if (!handoff || !task) return;
+    setTaskHandoff(null);
+    setIsTaskSidebarOpen(false);
+    currentIntervalStartRef.current = Date.now();
+    startTimer({ mode: 'focus', remainingSeconds: timeLeft, durationSeconds: timerDuration, task: task.title });
+    saveState('timer', 'focus', true, timeLeft, endTimeRef.current, cycleCount, focusLoggedSeconds,
+      false, 0, null, [], currentIntervalStartRef.current, timerDuration);
+  };
+
+  const selectTimerSubtask = async (subtask: LongTermSubtaskItem) => {
+    if (selectingTaskRef.current || taskHandoffRef.current?.completionPending) return null;
+    selectingTaskRef.current = true;
+    const request = ++taskSelectionRequestRef.current;
+    const revision = sessionRevisionRef.current;
+    try {
+      const row = await selectSubtaskForTimer(subtask, false);
+      if (!row || request !== taskSelectionRequestRef.current || revision !== sessionRevisionRef.current || getStorageOwner() !== storageOwner) return null;
+      selectTimerTask(row);
+      return row;
+    } finally {
+      if (request === taskSelectionRequestRef.current) selectingTaskRef.current = false;
+    }
+  };
 
   // Auto-start must go through the same atomic start transition as a manual
   // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
@@ -448,7 +605,7 @@ export default function TimerApp({
   const autoStartTimer = useCallback((mode: TimerMode, seconds: number) => {
     // The user may have started something else during the delay; never
     // stomp an already-active session.
-    if (isRunning || isStopwatchRunning || stopwatchTime > 0) return;
+    if (isRunning || isStopwatchRunning || stopwatchTime > 0 || taskHandoffRef.current) return;
 
     startTimer({ mode, remainingSeconds: seconds, durationSeconds: seconds });
     currentIntervalStartRef.current = Date.now();
@@ -461,6 +618,7 @@ export default function TimerApp({
   }, [autoStartTimer]);
 
   const handleTimerComplete = useCallback(() => {
+    setTaskHandoff(null);
     // Play alarm (handled in useEffect/hook but let's make sure)
     playAlarm();
 
@@ -527,7 +685,7 @@ export default function TimerApp({
     // interval state; this covers the guest path, where no record is created.
     setIntervals([]);
     currentIntervalStartRef.current = null;
-  }, [timerMode, timerDuration, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setTimerDuration, setIntervals, endTimeRef, saveState, tab, isStopwatchRunning, stopwatchTime, currentIntervalStartRef]);
+  }, [timerMode, timerDuration, settings, focusLoggedSeconds, cycleCount, triggerSave, playAlarm, setFocusLoggedSeconds, setCycleCount, setTimerMode, setTimeLeft, setTimerDuration, setIntervals, endTimeRef, saveState, tab, isStopwatchRunning, stopwatchTime, currentIntervalStartRef, setTaskHandoff]);
 
   // Update the ref handler whenever `handleTimerComplete` changes
   useEffect(() => {
@@ -537,6 +695,10 @@ export default function TimerApp({
 
   // --- Wrappers for Toggle to handle persistence ---
   const handleToggleTimer = () => {
+    if (taskHandoffRef.current) {
+      handleCompleteTask();
+      return;
+    }
     if (isStopwatchRunning || stopwatchTime > 0) {
       toast.error('스톱워치 기록이 있습니다.\n먼저 스톱워치를 초기화하거나 저장해주세요.');
       return;
@@ -550,7 +712,8 @@ export default function TimerApp({
         setIntervals(newIntervals);
         currentIntervalStartRef.current = null;
       }
-      saveState(tab, timerMode, false, timeLeft, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, newIntervals, null, timerDuration);
+      const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+      saveState(tab, timerMode, false, remaining, null, cycleCount, focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, newIntervals, null, timerDuration);
     } else {
       // Starting
       const target = Date.now() + (timeLeft * 1000);
@@ -577,7 +740,7 @@ export default function TimerApp({
   const handleToggleStopwatch = () => {
     const hasTimerProgress = !isRunning && timeLeft < timerDuration && timeLeft > 0;
 
-    if (isRunning || (timerMode === 'focus' && focusLoggedSeconds > 0) || hasTimerProgress) {
+    if (taskHandoffRef.current || isRunning || (timerMode === 'focus' && focusLoggedSeconds > 0) || hasTimerProgress) {
       toast.error('타이머 기록이 있습니다.\n먼저 타이머를 초기화하거나 저장해주세요.');
       return;
     }
@@ -594,6 +757,9 @@ export default function TimerApp({
   };
 
   const handleChangeTimerMode = (mode: TimerMode) => {
+    setTaskHandoff(null);
+    completingTaskRef.current = false;
+    setIsCompletingTask(false);
     if (timerMode === 'focus' && isLoggedIn) {
       const elapsed = timerDuration - timeLeft;
       const additional = elapsed - focusLoggedSeconds;
@@ -611,6 +777,7 @@ export default function TimerApp({
     // Persist the duration applied by the hook, not this render's old timeLeft.
     const nextTimeLeft = changeTimerMode(mode);
     setIntervals([]);
+    currentIntervalStartRef.current = null;
     saveState(tab, mode, false, nextTimeLeft, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, nextTimeLeft);
   };
 
@@ -623,6 +790,9 @@ export default function TimerApp({
       toast.error("타이머가 작동 중입니다.\n먼저 정지해주세요.");
       return;
     }
+    setTaskHandoff(null);
+    completingTaskRef.current = false;
+    setIsCompletingTask(false);
     setTimerMode("focus");
     setTimeLeft(minutes * 60);
     setTimerDuration(minutes * 60);
@@ -634,6 +804,7 @@ export default function TimerApp({
   };
 
   const handleSaveTimer = () => {
+    if (taskHandoffRef.current) return;
     const configuredFullTime = timerMode === 'focus' ? settings.pomoTime * 60 : timerMode === 'shortBreak' ? settings.shortBreak * 60 : settings.longBreak * 60;
     const elapsed = timerDuration - timeLeft;
     const additional = elapsed - focusLoggedSeconds;
@@ -796,6 +967,9 @@ export default function TimerApp({
     stopwatchRunStartTimeRef.current = null;
     currentIntervalStartRef.current = null;
     taskStateDirtyRef.current = false;
+    taskHandoffRef.current = null;
+    completingTaskRef.current = false;
+    selectingTaskRef.current = false;
     return () => {
       // Invalidate callbacks on unmount and account changes, including an
       // eventual return to the original account before a save resolves.
@@ -855,6 +1029,7 @@ export default function TimerApp({
           currentStart,
           sessionId: expiredSessionBatchId(targetTime),
           subjectId: savedTask?.subjectId ?? null,
+          ...(savedTask?.taskId ? { task: savedTask.taskTitle || '', taskId: savedTask.taskId } : {}),
         });
         if (!record) {
           // isLoggedIn is stale-true but no auth owner is resolvable: leave
@@ -986,8 +1161,15 @@ export default function TimerApp({
               ? state.timer.targetTime
               : null;
 
-          if (now - state.lastUpdated < 24 * 60 * 60 * 1000 || state.stopwatch.elapsed > 0) {
+          if (now - state.lastUpdated < 24 * 60 * 60 * 1000 || state.stopwatch.elapsed > 0 || state.taskHandoff) {
             setTab(state.activeTab);
+            if (state.taskHandoff && state.timer.mode === 'focus' && !state.timer.isRunning && state.timer.timeLeft > 0) {
+              restoreTaskHandoff(state.taskHandoff);
+              setSelectedTask(state.taskHandoff.task.title);
+              setSelectedTaskId(state.taskHandoff.task.id);
+              setSelectedSubjectId(state.taskHandoff.task.subjectId ?? null);
+              hasSyncedRef.current = true;
+            }
 
             // For an expired timer, completeExpiredTimer (below) both applies
             // and persists the settled transition, and the snapshot's
@@ -1107,7 +1289,7 @@ export default function TimerApp({
       }
     };
     restoreState();
-  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setTimerDuration, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, stopwatchRunStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, isLoggedIn, currentIntervalStartRef, storageOwner]);
+  }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setTimerDuration, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, stopwatchRunStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, setSelectedSubjectId, setTaskHandoff, isLoggedIn, currentIntervalStartRef, storageOwner]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -1363,7 +1545,23 @@ export default function TimerApp({
         onDisablePopup={handleDisableTaskPopup}
       />
 
-      <TaskSidebar isOpen={isTaskSidebarOpen} onClose={() => setIsTaskSidebarOpen(false)} tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} longTermTasks={longTermTasks} pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId} onSelectTask={(task) => { if (task) { setSelectedTask(task.title); setSelectedTaskId(task.id); setSelectedSubjectId(task.subjectId ?? null); } else { setSelectedTask(''); setSelectedTaskId(null); setSelectedSubjectId(null); } }} onToggleTask={(task) => { void toggleTaskStatus(task); }} onSelectSubtask={(subtask) => selectSubtaskForTimer(subtask).then((row) => { if (row) { setSelectedTask(row.title); setSelectedTaskId(row.id); setSelectedSubjectId(row.subjectId ?? null); } return row; })} onToggleSubtask={(subtask) => { void toggleSubtask(subtask); }} />
+      <TaskSidebar
+        isOpen={isTaskSidebarOpen} onClose={closeTaskSidebar}
+        tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} longTermTasks={longTermTasks}
+        pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId}
+        choosingNextTask={Boolean(taskHandoff)} selectionDisabled={Boolean(taskHandoff?.completionPending)}
+        excludedTaskId={taskHandoff?.task.id ?? null}
+        onSelectTask={selectTimerTask}
+        onToggleTask={(task) => {
+          if (task.id === selectedTaskId && task.status !== 'done' && timerOwnsFocusProgress) handleCompleteTask();
+          else void toggleTaskStatus(task);
+        }}
+        onSelectSubtask={selectTimerSubtask}
+        onToggleSubtask={(subtask) => {
+          if (selectedTaskItem?.sourceSubtaskId === subtask.id && !subtask.completed_at && timerOwnsFocusProgress) handleCompleteTask();
+          else void toggleSubtask(subtask);
+        }}
+      />
 
       <div className="relative w-full max-w-md mx-auto">
         <ThemeBackground tab={tab} timerMode={timerMode} isRunning={isRunning} isStopwatchRunning={isStopwatchRunning} />
@@ -1392,14 +1590,22 @@ export default function TimerApp({
                 showSaveButton={timerMode === 'focus' && !isRunning && timerDuration - timeLeft - focusLoggedSeconds > 0}
                 showResetButton={!isRunning && timeLeft !== timerDuration}
                 onToggleTimer={handleToggleTimer}
+                onCompleteTask={handleCompleteTask}
+                canCompleteTask={isLoggedIn && timerOwnsFocusProgress && Boolean(selectedTaskItem && selectedTaskItem.status !== 'done')}
+                isCompletingTask={isCompletingTask}
+                isChoosingNextTask={Boolean(taskHandoff)}
                 onResetTimer={() => {
+                  setTaskHandoff(null);
+                  completingTaskRef.current = false;
+                  setIsCompletingTask(false);
                   const resetTime = resetTimerManual();
                   setIntervals([]);
+                  currentIntervalStartRef.current = null;
                   saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, resetTime);
                   updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
                 }}
                 onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
-                selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); setSelectedSubjectId(null); }}
+                selectedTaskId={selectedTaskId} selectedTaskTitle={taskHandoff?.task.title || getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); if (!taskHandoffRef.current) selectTimerTask(null); }}
               />
             ) : (
               <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); setSelectedSubjectId(null); }} />

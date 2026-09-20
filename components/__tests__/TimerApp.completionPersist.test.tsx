@@ -690,6 +690,8 @@ describe('TimerApp completion persistence', () => {
           currentStart: openStart,
           sessionId: expiredBatchId(targetTime),
           subjectId: null,
+          task: '독서',
+          taskId: 't1',
         }
       );
       expect(mocks.savePendingRecord).toHaveBeenCalledWith(

@@ -196,6 +196,18 @@ afterEach(() => {
 });
 
 describe('TimerApp stopwatch continuous-run auto-pause', () => {
+  it('imports only B remaining portion after A was already recorded by a source-device handoff', async () => {
+    // Source: a25min pomodoro saved A20min, then ran B1min. Its public
+    // duration/start now describe only B5min; A never enters this ledger.
+    profile = pausedProfile({ timer_duration: 300, total_stopwatch_time: 60 });
+    await mount();
+    expect(lastProps()).toMatchObject({ timeLeft: 240, isRunning: false });
+    await act(async () => clickTimer('onToggleTimer'));
+    await jumpStopwatch(240_000);
+    expect(savedSeconds()).toBe(300);
+    expect(persisted().timer).toMatchObject({ mode: 'shortBreak', cycleCount: 1 });
+  });
+
   const maxRunSeconds = 4 * 60 * 60;
   const maxRunMilliseconds = maxRunSeconds * 1000;
   const overdueMilliseconds = maxRunMilliseconds + 3_600_000;

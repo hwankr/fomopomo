@@ -32,6 +32,7 @@ describe('useTimerLogic', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -448,5 +449,168 @@ describe('useTimerLogic', () => {
     expect(result.current.isRunning).toBe(false);
     expect(result.current.timeLeft).toBe(25 * 60);
     expect(result.current.focusLoggedSeconds).toBe(0);
+  });
+
+  it('advertises only the unrecorded portion after a task handoff', () => {
+    const { result } = renderHook(() => useTimerLogic({
+      settings: defaultSettings, onTimerCompleteRef: { current: mockOnTimerComplete },
+      playClickSound: mockPlayClickSound, updateStatus: mockUpdateStatus,
+    }));
+    act(() => {
+      result.current.setFocusLoggedSeconds(1200);
+      result.current.setTimeLeft(300);
+    });
+    act(() => result.current.startTimer({ task: 'B' }));
+    expect(mockUpdateStatus).toHaveBeenLastCalledWith('studying', 'B', new Date().toISOString(), undefined, 'timer', 'focus', 300);
+    act(() => vi.advanceTimersByTime(60_000));
+    act(() => result.current.toggleTimer());
+    expect(mockUpdateStatus).toHaveBeenLastCalledWith('paused', undefined, undefined, 60, 'timer', 'focus', 300);
+    expect(result.current.timeLeft).toBe(240);
+    expect(result.current.timerDuration).toBe(1500);
+  });
+
+  it('pauses from the current deadline between polling ticks and prevents completion', () => {
+    const { result } = renderHook(() => useTimerLogic({
+      settings: defaultSettings, onTimerCompleteRef: { current: mockOnTimerComplete },
+      playClickSound: mockPlayClickSound, updateStatus: mockUpdateStatus,
+    }));
+    act(() => result.current.startTimer());
+    vi.setSystemTime(Date.now() + 1200_000);
+    act(() => expect(result.current.pauseTimer()).toBe(300));
+    act(() => vi.advanceTimersByTime(400_000));
+    expect(result.current.timeLeft).toBe(300);
+    expect(mockOnTimerComplete).not.toHaveBeenCalled();
+  });
+
+  describe('browser wakeup reconciliation', () => {
+    const renderTimer = () => {
+      const onTimerCompleteRef = { current: mockOnTimerComplete };
+      return renderHook(() => useTimerLogic({
+        settings: { ...defaultSettings, pomoTime: 0.1 },
+        onTimerCompleteRef,
+        playClickSound: mockPlayClickSound,
+        updateStatus: mockUpdateStatus,
+      }), { wrapper: StrictMode });
+    };
+
+    const dispatchWake = (event: string) => {
+      const target = event === 'visibilitychange' ? document : window;
+      target.dispatchEvent(new Event(event));
+    };
+
+    beforeEach(() => {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    });
+
+    it.each(['visibilitychange', 'focus', 'pageshow'])('completes immediately on %s without waiting for a throttled tick', event => {
+      const interval = vi.spyOn(globalThis, 'setInterval');
+      const { result } = renderTimer();
+      act(() => result.current.startTimer());
+      const queuedTick = interval.mock.calls.at(-1)![0] as () => void;
+
+      // Move wall time past the deadline without allowing the interval to run.
+      vi.setSystemTime(Date.now() + 6_500);
+      expect(result.current.timeLeft).toBe(6);
+      act(() => {
+        dispatchWake(event);
+        dispatchWake('focus');
+        dispatchWake('visibilitychange');
+        queuedTick();
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(result.current.isRunning).toBe(false);
+      expect(result.current.timeLeft).toBe(0);
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes remaining time before the deadline without completing', () => {
+      const { result } = renderTimer();
+      act(() => result.current.startTimer());
+      vi.setSystemTime(Date.now() + 2_500);
+      act(() => dispatchWake('focus'));
+      expect(result.current.timeLeft).toBe(4);
+      expect(result.current.isRunning).toBe(true);
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+    });
+
+    it('only reconciles visibility events when the page becomes visible', () => {
+      const visibility = vi.spyOn(document, 'visibilityState', 'get');
+      const { result } = renderTimer();
+      act(() => result.current.startTimer());
+      vi.setSystemTime(Date.now() + 6_500);
+      visibility.mockReturnValue('hidden');
+      act(() => dispatchWake('visibilitychange'));
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+
+      visibility.mockReturnValue('visible');
+      act(() => dispatchWake('visibilitychange'));
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['pause', 'reset', 'mode change', 'restored stop'])('does not complete after %s even before React commits', transition => {
+      const interval = vi.spyOn(globalThis, 'setInterval');
+      const { result } = renderTimer();
+      act(() => result.current.startTimer());
+      const queuedTick = interval.mock.calls.at(-1)![0] as () => void;
+      vi.setSystemTime(Date.now() + 6_500);
+      act(() => {
+        if (transition === 'pause') result.current.pauseTimer();
+        if (transition === 'reset') result.current.resetTimerManual();
+        if (transition === 'mode change') result.current.changeTimerMode('shortBreak');
+        if (transition === 'restored stop') result.current.setIsRunning(false);
+        dispatchWake('focus');
+        dispatchWake('visibilitychange');
+        dispatchWake('pageshow');
+        queuedTick();
+        vi.advanceTimersByTime(200);
+      });
+      expect(result.current.isRunning).toBe(false);
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+      if (transition === 'reset') expect(result.current.timeLeft).toBe(6);
+      if (transition === 'mode change') expect(result.current.timeLeft).toBe(300);
+    });
+
+    it('keeps polling when pause and resume are batched in one interaction', () => {
+      const { result } = renderTimer();
+      act(() => result.current.startTimer());
+      act(() => {
+        const remainingSeconds = result.current.pauseTimer();
+        result.current.startTimer({ remainingSeconds });
+      });
+      act(() => vi.advanceTimersByTime(6_500));
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1);
+      expect(result.current.isRunning).toBe(false);
+    });
+
+    it('uses the deadline supplied by session restore for wakeup', () => {
+      const { result } = renderTimer();
+      act(() => {
+        result.current.setTimeLeft(30);
+        result.current.setIsRunning(true);
+        result.current.endTimeRef.current = Date.now() + 30_000;
+      });
+      vi.setSystemTime(Date.now() + 10_000);
+      act(() => dispatchWake('focus'));
+      expect(result.current.timeLeft).toBe(20);
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+      vi.setSystemTime(Date.now() + 20_000);
+      act(() => dispatchWake('pageshow'));
+      expect(mockOnTimerComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes wakeup listeners and polling on unmount', () => {
+      const { result, unmount } = renderTimer();
+      act(() => result.current.startTimer());
+      unmount();
+      vi.setSystemTime(Date.now() + 6_500);
+      act(() => {
+        dispatchWake('focus');
+        dispatchWake('visibilitychange');
+        dispatchWake('pageshow');
+        vi.advanceTimersByTime(200);
+      });
+      expect(mockOnTimerComplete).not.toHaveBeenCalled();
+    });
   });
 });

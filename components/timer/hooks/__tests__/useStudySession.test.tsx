@@ -51,6 +51,7 @@ type OutboxDraftV2 = {
   task: string | null;
   taskId: string | null;
   subjectId?: string | null;
+  labelsLocked?: boolean;
   segments: OutboxSegment[];
   failedAt: number;
   state?: 'conflict' | 'invalid';
@@ -225,6 +226,90 @@ describe('useStudySession study records', () => {
 
     expect(saveResult).toBe('saved');
     expect(onRecordSaved).toHaveBeenCalledTimes(1);
+    expect(readOutbox()).toEqual({});
+  });
+
+  it('queues distinct task records with durable labels and deduplicates concurrent saves of one record', async () => {
+    const { result } = renderStudySession();
+    let resolveFirst!: (value: ReturnType<typeof rpcOk>) => void;
+    let resolveSecond!: (value: ReturnType<typeof rpcOk>) => void;
+    supabaseMock.rpcResult
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveSecond = resolve; }));
+    const first = createRecord(result, 'pomo', 1200);
+    const second = createRecord(result, 'pomo', 300);
+    let firstSave!: Promise<SaveRecordResult>;
+    let duplicateSave!: Promise<SaveRecordResult>;
+    let secondSave!: Promise<SaveRecordResult>;
+    act(() => {
+      firstSave = result.current.savePendingRecord(first, '작업 A', 'task-a', 'subject-a');
+      duplicateSave = result.current.savePendingRecord(first, '변경된 A', 'wrong-task');
+      secondSave = result.current.savePendingRecord(second, '작업 B', 'task-b', 'subject-b');
+    });
+    expect(duplicateSave).toBe(firstSave);
+    expect(readOutbox()[second.sessionId]).toMatchObject({ task: '작업 B', taskId: 'task-b', subjectId: 'subject-b' });
+    expect(result.current.isSaving).toBe(true);
+    await act(async () => {});
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveFirst(rpcOk('saved', 1200)); await firstSave; });
+    expect(result.current.isSaving).toBe(true);
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(2);
+    expect(supabaseMock.rpc.mock.calls[1][1]).toMatchObject({ p_task: '작업 B', p_task_id: 'task-b', p_subject_id: 'subject-b' });
+    await act(async () => { resolveSecond(rpcOk('saved', 300)); await secondSave; });
+    expect(result.current.isSaving).toBe(false);
+    expect(readOutbox()).toEqual({});
+    expect(onRecordSaved).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues queued saves after a network failure and keeps the first task immutable on retry', async () => {
+    const { result } = renderStudySession();
+    supabaseMock.rpcResult.mockResolvedValueOnce(rpcNetworkError());
+    const first = createRecord(result, 'pomo', 1200);
+    const second = createRecord(result, 'pomo', 300);
+    await act(async () => {
+      expect(await Promise.all([
+        result.current.savePendingRecord(first, '작업 A', 'task-a', 'subject-a'),
+        result.current.savePendingRecord(second, '작업 B', 'task-b', 'subject-b'),
+      ])).toEqual(['failed', 'saved']);
+    });
+    const firstParams = supabaseMock.rpc.mock.calls[0][1];
+    expect(readOutbox()[first.sessionId]).toMatchObject({ task: '작업 A', taskId: 'task-a', subjectId: 'subject-a' });
+    await act(async () => { await result.current.savePendingRecord(first, '작업 B', 'task-b', 'subject-b'); });
+    expect(supabaseMock.rpc.mock.calls[2][1]).toEqual(firstParams);
+    expect(readOutbox()).toEqual({});
+  });
+
+  it('leaves a queued record with its original labels when the account changes before sending', async () => {
+    const view = renderStudySession();
+    let resolveFirst!: (value: ReturnType<typeof rpcOk>) => void;
+    supabaseMock.rpcResult.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }));
+    const first = createRecord(view.result, 'pomo', 1200);
+    const second = createRecord(view.result, 'pomo', 300);
+    let firstSave!: Promise<SaveRecordResult>;
+    let secondSave!: Promise<SaveRecordResult>;
+    act(() => {
+      firstSave = view.result.current.savePendingRecord(first, '작업 A', 'task-a');
+      secondSave = view.result.current.savePendingRecord(second, '작업 B', 'task-b');
+    });
+    await act(async () => {});
+    window.localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ user: { id: 'user-2' } }));
+    view.rerender();
+    await act(async () => {
+      resolveFirst(rpcOk('saved', 1200));
+      expect(await firstSave).toBe('saved');
+      expect(await secondSave).toBe('skipped');
+    });
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(1);
+    expect(onRecordSaved).not.toHaveBeenCalled();
+    expect(view.result.current.isSaving).toBe(false);
+    expect(readOutbox()[second.sessionId]).toMatchObject({ ownerId: 'user-1', task: '작업 B', taskId: 'task-b' });
+
+    window.localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ user: { id: 'user-1' } }));
+    view.rerender();
+    await act(async () => {});
+    expect(supabaseMock.rpc).toHaveBeenCalledTimes(2);
+    expect(supabaseMock.rpc.mock.calls[1][1]).toMatchObject({ p_task: '작업 B', p_task_id: 'task-b' });
     expect(readOutbox()).toEqual({});
   });
 
@@ -716,6 +801,163 @@ describe('useStudySession study records', () => {
   });
 
   describe('createPendingRecord (atomic record creation)', () => {
+    it('retains short pause-separated fragments in the authoritative elapsed total', () => {
+      const { result } = renderStudySession();
+      const end = Date.now();
+      act(() => {
+        result.current.setIntervals([
+          { start: end - 120_000, end: end - 115_000 },
+          { start: end - 90_000, end: end - 30_000 },
+          { start: end - 4_000, end },
+        ]);
+      });
+      const record = createRecord(result, 'pomo', 69, end);
+      expect(record.segments).toEqual([{ index: 0, duration: 69, ended_at: new Date(end).toISOString() }]);
+    });
+
+    it('conserves elapsed seconds across fractional intervals instead of independently rounding each one', () => {
+      const { result } = renderStudySession();
+      const end = Date.now();
+      act(() => {
+        result.current.setIntervals([
+          { start: end - 90_400, end: end - 80_000 },
+          { start: end - 50_400, end: end - 40_000 },
+          { start: end - 10_400, end },
+        ]);
+      });
+      const record = createRecord(result, 'pomo', 31, end);
+      expect(record.segments.map(segment => segment.duration)).toEqual([10, 11, 10]);
+      expect(record.segments.reduce((sum, segment) => sum + segment.duration, 0)).toBe(31);
+      record.segments.slice(1).forEach((segment, index) => {
+        expect(Date.parse(segment.ended_at) - segment.duration * 1000).toBeGreaterThanOrEqual(Date.parse(record.segments[index].ended_at));
+      });
+    });
+
+    it('retains repeated subsecond resumes once their total is savable', () => {
+      const { result } = renderStudySession();
+      const end = Date.now();
+      act(() => {
+        result.current.setIntervals(Array.from({ length: 20 }, (_, index) => ({
+          start: end - (19 - index) * 2000 - 600,
+          end: end - (19 - index) * 2000,
+        })));
+      });
+      const record = createRecord(result, 'pomo', 12, end);
+      expect(record.segments).toEqual([{ index: 0, duration: 12, ended_at: new Date(end).toISOString() }]);
+    });
+
+    it('rechecks the preceding neighbor when rounding merges an overlapping slice', () => {
+      const { result } = renderStudySession();
+      const base = Date.now() - 64_000;
+      act(() => {
+        result.current.setIntervals([
+          [1007, 11399], [11701, 23517], [23528, 38276], [39452, 51205], [51739, 63132],
+        ].map(([start, end]) => ({ start: base + start, end: base + end })));
+      });
+      const record = createRecord(result, 'pomo', 60, base + 63132);
+      expect(record.segments.map(segment => segment.duration)).toEqual([37, 12, 11]);
+      record.segments.slice(1).forEach((segment, index) => {
+        expect(Date.parse(segment.ended_at) - segment.duration * 1000).toBeGreaterThanOrEqual(Date.parse(record.segments[index].ended_at));
+      });
+    });
+
+    it('preserves normal study-day splits and their exact total', () => {
+      const { result } = renderStudySession();
+      const start = new Date('2026-08-07T04:50:00').getTime();
+      const boundary = new Date('2026-08-07T05:00:00').getTime();
+      const end = new Date('2026-08-07T05:10:00').getTime();
+      act(() => { result.current.setIntervals([{ start, end }]); });
+      const record = createRecord(result, 'pomo', 1200, end);
+      expect(record.segments).toEqual([
+        { index: 0, duration: 600, ended_at: new Date(boundary - 1).toISOString() },
+        { index: 1, duration: 600, ended_at: new Date(end).toISOString() },
+      ]);
+    });
+
+    it('coalesces a short boundary fragment inside its own study day when possible', () => {
+      const { result } = renderStudySession();
+      const boundary = new Date('2026-08-07T05:00:00').getTime();
+      const end = boundary + 30_000;
+      act(() => {
+        result.current.setIntervals([
+          { start: boundary - 25_000, end: boundary - 5_000 },
+          { start: boundary - 4_000, end },
+        ]);
+      });
+      const record = createRecord(result, 'pomo', 54, end);
+      expect(record.segments).toEqual([
+        { index: 0, duration: 24, ended_at: new Date(boundary - 1).toISOString() },
+        { index: 1, duration: 30, ended_at: new Date(end).toISOString() },
+      ]);
+    });
+
+    it('keeps a subminimum study-day contribution by attaching it to the adjacent day', () => {
+      const { result } = renderStudySession();
+      const boundary = new Date('2026-08-07T05:00:00').getTime();
+      const end = boundary + 55_000;
+      act(() => { result.current.setIntervals([{ start: boundary - 5_000, end }]); });
+      const record = createRecord(result, 'pomo', 60, end);
+      expect(record.segments).toEqual([{ index: 0, duration: 60, ended_at: new Date(end).toISOString() }]);
+    });
+
+    it('keeps a full study day within RPC duration and ordering limits', () => {
+      const { result } = renderStudySession();
+      const start = new Date('2026-08-06T05:00:00').getTime();
+      const end = new Date('2026-08-07T05:00:00').getTime();
+      act(() => { result.current.setIntervals([{ start, end }]); });
+      const record = createRecord(result, 'stopwatch', 86400, end);
+      expect(record.segments.reduce((sum, segment) => sum + segment.duration, 0)).toBe(86400);
+      expect(record.segments).toHaveLength(2);
+      expect(record.segments.every(segment => segment.duration >= 10 && segment.duration < 86400)).toBe(true);
+      expect(Date.parse(record.segments[1].ended_at) - record.segments[1].duration * 1000).toBe(Date.parse(record.segments[0].ended_at));
+    });
+
+    it('freezes handoff labels in the first outbox draft and ignores later task changes on save', async () => {
+      const { result, rerender } = renderHook(
+        ({ subjectId }) => useStudySession({ isLoggedIn: true, onRecordSaved, selectedTaskTitle: '작업 A', selectedSubjectId: subjectId }),
+        { initialProps: { subjectId: 'subject-a' } }
+      );
+      const end = Date.now();
+      act(() => { result.current.setIntervals([{ start: end - 1200_000, end }]); });
+      let record!: PendingStudyRecord;
+      act(() => {
+        record = result.current.createPendingRecord('pomo', 1200, end, { task: '작업 A', taskId: 'task-a' })!;
+      });
+      expect(readOutbox()[record.sessionId]).toMatchObject({
+        task: '작업 A', taskId: 'task-a', subjectId: 'subject-a', labelsLocked: true,
+      });
+      expect(result.current.intervals).toEqual([]);
+      expect(supabaseMock.rpc).not.toHaveBeenCalled();
+      rerender({ subjectId: 'subject-b' });
+      await act(async () => { await result.current.savePendingRecord(record, '작업 B', 'task-b', 'subject-b'); });
+      expect(supabaseMock.rpc.mock.calls[0][1]).toMatchObject({
+        p_task: '작업 A', p_task_id: 'task-a', p_subject_id: 'subject-a',
+      });
+    });
+
+    it('leaves live intervals untouched when freezing a labeled restored snapshot', () => {
+      const { result } = renderStudySession();
+      const end = Date.now();
+      act(() => { result.current.setIntervals([{ start: end, end: end + 60_000 }]); });
+      act(() => {
+        result.current.createPendingRecord('pomo', 1200, end, {
+          intervals: [], currentStart: end - 1200_000, task: '작업 A', taskId: 'task-a', subjectId: 'subject-a',
+        });
+      });
+      expect(result.current.intervals).toEqual([{ start: end, end: end + 60_000 }]);
+      expect(Object.values(readOutbox())[0]).toMatchObject({ task: '작업 A', taskId: 'task-a', subjectId: 'subject-a' });
+    });
+
+    it('preserves a creation-labeled payload conflict for inspection instead of treating it as an unlabeled twin', async () => {
+      const { result } = renderStudySession();
+      supabaseMock.rpcResult.mockResolvedValueOnce(rpcConflictError());
+      let record!: PendingStudyRecord;
+      act(() => { record = result.current.createPendingRecord('pomo', 1200, Date.now(), { task: '작업 A', taskId: 'task-a' })!; });
+      await act(async () => { expect(await result.current.savePendingRecord(record)).toBe('rejected'); });
+      expect(readOutbox()[record.sessionId]).toMatchObject({ task: '작업 A', taskId: 'task-a', state: 'conflict', labelsLocked: true });
+      expect(onRecordSaved).not.toHaveBeenCalled();
+    });
+
     it('freezes the session\'s real segments and parks an unlabeled draft without calling the RPC', () => {
       const { result } = renderStudySession();
 
