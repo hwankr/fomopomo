@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { endOfMonth, addDays, format } from 'date-fns';
+import { STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import {
   getDayStart,
   getStudyDayRange,
@@ -11,6 +12,27 @@ import {
 } from '@/lib/dateUtils';
 
 export type ViewMode = 'week' | 'month' | 'year';
+
+export const UNCLASSIFIED_SUBJECT = '__unclassified__';
+export type StudyTotals = {
+  seconds: number;
+  taskTotals: Record<string, number>;
+  subjects: Record<string, { seconds: number; taskTotals: Record<string, number> }>;
+};
+
+export function summarizeStudySessions(rows: SessionRow[]): StudyTotals {
+  const totals: StudyTotals = { seconds: 0, taskTotals: Object.create(null), subjects: Object.create(null) };
+  for (const row of rows) {
+    const task = row.task?.trim() || '작업 지정 없음';
+    const subjectKey = row.subject_id ?? UNCLASSIFIED_SUBJECT;
+    const subject = totals.subjects[subjectKey] ??= { seconds: 0, taskTotals: Object.create(null) };
+    totals.seconds += row.duration;
+    totals.taskTotals[task] = (totals.taskTotals[task] ?? 0) + row.duration;
+    subject.seconds += row.duration;
+    subject.taskTotals[task] = (subject.taskTotals[task] ?? 0) + row.duration;
+  }
+  return totals;
+}
 
 export type ChartData = {
   name: string;
@@ -31,6 +53,7 @@ type SessionRow = {
   duration: number;
   created_at: string;
   task?: string | null;
+  subject_id?: string | null;
 };
 
 // PostgREST silently caps an unbounded select at max-rows (default 1000), so
@@ -44,7 +67,7 @@ type SessionRow = {
 // instead of showing zeros.
 const SESSION_PAGE_SIZE = 1000;
 
-type SessionColumns = 'duration, created_at, task' | 'duration, created_at';
+type SessionColumns = 'duration, created_at, task, subject_id' | 'duration, created_at';
 
 async function fetchSessionRows(
   userId: string,
@@ -66,7 +89,10 @@ async function fetchSessionRows(
         .lte('created_at', range.end.toISOString());
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.then(
+      result => result,
+      () => ({ data: null, error: { message: 'Network request failed' } })
+    );
     if (error) return null;
     const page = (data ?? []) as unknown as SessionRow[];
     if (page.length === 0) break;
@@ -81,13 +107,14 @@ async function fetchSessionRows(
 // user so simultaneous callers (and rapid period navigation during the
 // initial scan) do not each download the full history.
 const inflightLifetimeScans = new Map<string, Promise<SessionRow[] | null>>();
+let lastInvalidationEvent: Event | null = null;
 
 function fetchAllSessionRowsShared(userId: string): Promise<SessionRow[] | null> {
   const existing = inflightLifetimeScans.get(userId);
   if (existing) return existing;
 
-  const scan = fetchSessionRows(userId, 'duration, created_at').finally(() => {
-    inflightLifetimeScans.delete(userId);
+  const scan = fetchSessionRows(userId, 'duration, created_at, task, subject_id').finally(() => {
+    if (inflightLifetimeScans.get(userId) === scan) inflightLifetimeScans.delete(userId);
   });
   inflightLifetimeScans.set(userId, scan);
   return scan;
@@ -97,15 +124,20 @@ function fetchAllSessionRowsShared(userId: string): Promise<SessionRow[] | null>
 // would otherwise leak its in-flight promise into the next test.
 export function __clearInflightLifetimeScansForTests() {
   inflightLifetimeScans.clear();
+  lastInvalidationEvent = null;
 }
 
 export function useStudyStats(sessionUserId?: string | null) {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [totalFocusTime, setTotalFocusTime] = useState(0);
   const [todayFocusTime, setTodayFocusTime] = useState(0);
   const [earliestYear, setEarliestYear] = useState<number | null>(null);
   const [chartData, setChartData] = useState<ChartData[]>([]);
   const [heatmapData, setHeatmapData] = useState<HeatmapData[]>([]);
+  const [periodTotals, setPeriodTotals] = useState<StudyTotals>(() => summarizeStudySessions([]));
+  const [lifetimeTotals, setLifetimeTotals] = useState<StudyTotals>(() => summarizeStudySessions([]));
+  const lastRequestRef = useRef<{ viewMode: ViewMode; activeDate: Date; userId: string } | null>(null);
 
   // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 요청의 응답은 폐기된다.
   const requestGenerationRef = useRef(0);
@@ -120,11 +152,14 @@ export function useStudyStats(sessionUserId?: string | null) {
   if (sessionUserId !== lastSessionUserId) {
     setLastSessionUserId(sessionUserId);
     setLoading(Boolean(sessionUserId));
+    setError(null);
     setTotalFocusTime(0);
     setTodayFocusTime(0);
     setEarliestYear(null);
     setChartData([]);
     setHeatmapData([]);
+    setPeriodTotals(summarizeStudySessions([]));
+    setLifetimeTotals(summarizeStudySessions([]));
   }
 
   useEffect(() => {
@@ -132,6 +167,7 @@ export function useStudyStats(sessionUserId?: string | null) {
     // (캐시는 userId 키 검사로도 보호되므로 이 정리는 메모리 위생 목적이다.)
     requestGenerationRef.current += 1;
     allSessionsCacheRef.current = null;
+    lastRequestRef.current = null;
   }, [sessionUserId]);
 
   const fetchStats = useCallback(
@@ -144,6 +180,7 @@ export function useStudyStats(sessionUserId?: string | null) {
       const isStale = () => generation !== requestGenerationRef.current;
 
       setLoading(true);
+      setError(null);
 
       const targetUserId =
         userId ?? sessionUserId ?? (await supabase.auth.getUser()).data.user?.id;
@@ -154,9 +191,13 @@ export function useStudyStats(sessionUserId?: string | null) {
         setEarliestYear(null);
         setChartData([]);
         setHeatmapData([]);
+        setPeriodTotals(summarizeStudySessions([]));
+        setLifetimeTotals(summarizeStudySessions([]));
         setLoading(false);
         return;
       }
+
+      lastRequestRef.current = { viewMode, activeDate, userId: targetUserId };
 
       // 1. Calculate Date Range based on ViewMode
       // 공부일(05:00 경계) 기준 조회 범위. 버킷 앵커는 range.start(기간 첫
@@ -182,17 +223,22 @@ export function useStudyStats(sessionUserId?: string | null) {
           : null;
 
       const [periodSessions, allSessions, todaySessions] = await Promise.all([
-        fetchSessionRows(targetUserId, 'duration, created_at, task', range),
+        fetchSessionRows(targetUserId, 'duration, created_at, task, subject_id', range),
         cachedAll ? Promise.resolve(cachedAll) : fetchAllSessionRowsShared(targetUserId),
         fetchSessionRows(targetUserId, 'duration, created_at', getStudyDayRange()),
       ]);
       if (isStale()) return;
+
+      if (!periodSessions || !allSessions || !todaySessions) {
+        setError('일부 통계를 불러오지 못했습니다. 잠시 후 다시 조회해주세요.');
+      }
 
       if (allSessions) {
         allSessionsCacheRef.current = { userId: targetUserId, rows: allSessions };
 
         const totalSeconds = allSessions.reduce((acc, curr) => acc + curr.duration, 0);
         setTotalFocusTime(totalSeconds);
+        setLifetimeTotals(summarizeStudySessions(allSessions));
 
         // 오름차순 정렬이므로 앞에서부터 첫 유효 행이 최초 세션이다.
         for (const session of allSessions) {
@@ -223,6 +269,13 @@ export function useStudyStats(sessionUserId?: string | null) {
         setTodayFocusTime(
           todaySessions.reduce((acc, curr) => acc + curr.duration, 0)
         );
+      }
+
+      if (periodSessions) setPeriodTotals(summarizeStudySessions(periodSessions));
+      // Keep the previous period on a failed page instead of silently replacing it with zeros.
+      if (!periodSessions) {
+        setLoading(false);
+        return;
       }
 
       // 5. Process Chart Data
@@ -256,7 +309,7 @@ export function useStudyStats(sessionUserId?: string | null) {
           buckets[key] = {
             label: `${dayLabels[i]} (${format(day, 'M/d')})`,
             seconds: 0,
-            taskTotals: {},
+            taskTotals: Object.create(null),
             breakdown: `${dayFull[i]} 작업별 집중 시간`,
           };
         }
@@ -270,7 +323,7 @@ export function useStudyStats(sessionUserId?: string | null) {
           buckets[key] = {
             label: String(d),
             seconds: 0,
-            taskTotals: {},
+            taskTotals: Object.create(null),
             breakdown: `${d}일의 작업별 집중 시간`,
           };
         }
@@ -281,7 +334,7 @@ export function useStudyStats(sessionUserId?: string | null) {
           buckets[key] = {
             label: `${m + 1}`,
             seconds: 0,
-            taskTotals: {},
+            taskTotals: Object.create(null),
             breakdown: `${m + 1}월의 작업별 집중 시간`,
           };
         }
@@ -323,13 +376,36 @@ export function useStudyStats(sessionUserId?: string | null) {
     [sessionUserId]
   );
 
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const request = lastRequestRef.current;
+      if (!request || request.userId !== sessionUserId) return;
+      allSessionsCacheRef.current = null;
+      // Multiple profile hook instances receive the same event. Invalidate once,
+      // then let their replacement requests share a fresh lifetime scan.
+      if (lastInvalidationEvent !== event) {
+        inflightLifetimeScans.clear();
+        lastInvalidationEvent = event;
+      }
+      void fetchStats(request.viewMode, request.activeDate, request.userId);
+    };
+    window.addEventListener(STUDY_SUBJECTS_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(STUDY_SUBJECTS_CHANGED_EVENT, refresh);
+      requestGenerationRef.current += 1;
+    };
+  }, [fetchStats, sessionUserId]);
+
   return {
     loading,
+    error,
     totalFocusTime,
     todayFocusTime,
     earliestYear,
     chartData,
     heatmapData,
+    periodTotals,
+    lifetimeTotals,
     fetchStats,
   };
 }
