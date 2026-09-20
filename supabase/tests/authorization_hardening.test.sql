@@ -2057,6 +2057,12 @@ select is(
   'authenticated users can read referenced private feedback upload objects'
 );
 
+-- Current Storage installs a statement-level guard before row policies. The
+-- Storage API opts into DELETE with this transaction setting; reproduce only
+-- that request context so this test exercises owner RLS instead of aborting at
+-- the service guard. Fixtures are metadata-only and the entire suite rolls back.
+set local storage.allow_delete_query = 'true';
+
 with deleted as (
   delete from storage.objects
   where bucket_id = 'feedback-uploads'
@@ -2068,6 +2074,8 @@ select is(
   0::bigint,
   'a nonowner cannot delete another user''s feedback upload object'
 );
+
+set local storage.allow_delete_query = 'false';
 
 reset role;
 
