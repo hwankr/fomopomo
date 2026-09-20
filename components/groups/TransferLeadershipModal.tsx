@@ -97,17 +97,17 @@ export default function TransferLeadershipModal({
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="px-6 py-4 border-b border-gray-100 dark:border-slate-700">
+                <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-gray-100 dark:border-slate-700">
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white">그룹장 이양</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="break-words text-sm text-gray-500 dark:text-gray-400 mt-1">
                         {groupName}의 새 그룹장을 선택하세요
                     </p>
                 </div>
 
                 {/* Content */}
-                <div className="p-6">
+                <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
                     {otherMembers.length === 0 ? (
                         <div className="text-center py-8">
                             <div className="text-4xl mb-3">👤</div>
@@ -119,7 +119,7 @@ export default function TransferLeadershipModal({
                             </p>
                         </div>
                     ) : (
-                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                        <div className="space-y-2">
                             {otherMembers.map((member) => {
                                 const displayName = member.nickname || member.profiles.email.split('@')[0];
                                 const isSelected = selectedMemberId === member.user_id;
@@ -133,17 +133,17 @@ export default function TransferLeadershipModal({
                                                 : 'bg-gray-50 dark:bg-slate-700 border-2 border-transparent hover:bg-gray-100 dark:hover:bg-slate-600'
                                             }`}
                                     >
-                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-orange-400 flex items-center justify-center text-white font-bold">
+                                        <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-orange-400 flex items-center justify-center text-white font-bold">
                                             {displayName.charAt(0).toUpperCase()}
                                         </div>
-                                        <div className="flex-1 text-left">
-                                            <p className="font-medium text-gray-900 dark:text-white">{displayName}</p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        <div className="min-w-0 flex-1 text-left">
+                                            <p className="truncate font-medium text-gray-900 dark:text-white" title={displayName}>{displayName}</p>
+                                            <p className="truncate text-xs text-gray-500 dark:text-gray-400" title={member.profiles.email}>
                                                 {member.profiles.email}
                                             </p>
                                         </div>
                                         {isSelected && (
-                                            <div className="w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center">
+                                            <div className="shrink-0 w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center">
                                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                                 </svg>
@@ -169,7 +169,7 @@ export default function TransferLeadershipModal({
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-4 bg-gray-50 dark:bg-slate-700/50 flex gap-3 justify-end">
+                <div className="shrink-0 px-4 sm:px-6 py-4 bg-gray-50 dark:bg-slate-700/50 flex flex-wrap gap-3 justify-end">
                     <button
                         onClick={onClose}
                         className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors"

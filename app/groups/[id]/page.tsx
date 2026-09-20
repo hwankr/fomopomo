@@ -434,19 +434,21 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
                     <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-slate-700">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
+                            <div className="min-w-0 w-full sm:flex-1">
                                 {isEditingGroupName ? (
-                                    <div className="flex items-center gap-2 mb-2">
+                                    <div className="flex min-w-0 items-center gap-2 mb-2">
                                         <input
                                             type="text"
                                             value={tempGroupName}
                                             onChange={(e) => setTempGroupName(e.target.value)}
-                                            className="text-3xl font-bold text-gray-900 dark:text-white bg-transparent border-b-2 border-rose-500 focus:outline-none px-1"
+                                            className="min-w-0 w-full flex-1 text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white bg-transparent border-b-2 border-rose-500 focus:outline-none px-1"
+                                            aria-label="그룹 이름"
                                             autoFocus
                                         />
                                         <button
                                             onClick={handleUpdateGroupName}
-                                            className="p-2 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                            className="shrink-0 p-2 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                            aria-label="그룹 이름 저장"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -454,7 +456,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                         </button>
                                         <button
                                             onClick={() => setIsEditingGroupName(false)}
-                                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                            className="shrink-0 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                            aria-label="그룹 이름 수정 취소"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -463,14 +466,14 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-3 mb-2">
-                                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{group.name}</h1>
+                                        <h1 className="min-w-0 break-words text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">{group.name}</h1>
                                         {isLeader && (
                                             <button
                                                 onClick={() => {
                                                     setTempGroupName(group.name);
                                                     setIsEditingGroupName(true);
                                                 }}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                                                className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                                                 title="그룹 이름 수정"
                                             >
                                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -485,15 +488,15 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
                                 </p>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex min-w-0 w-full flex-wrap items-center gap-3 sm:w-auto sm:max-w-[55%]">
                                 {isLeader && (
-                                    <div className="flex items-center gap-3 bg-gray-100 dark:bg-slate-700 px-4 py-2 rounded-xl">
-                                        <span className="text-sm font-medium text-gray-500 dark:text-gray-300">코드:</span>
-                                        <code className="text-lg font-bold text-rose-500 font-mono tracking-wider">{inviteCode ?? '코드 불러오기 실패'}</code>
+                                    <div className="flex min-w-0 max-w-full items-center gap-2 bg-gray-100 dark:bg-slate-700 px-3 py-2 rounded-xl sm:gap-3 sm:px-4">
+                                        <span className="shrink-0 text-sm font-medium text-gray-500 dark:text-gray-300">코드:</span>
+                                        <code className="min-w-0 break-all text-base sm:text-lg font-bold text-rose-500 font-mono tracking-wider">{inviteCode ?? '코드 불러오기 실패'}</code>
                                         <button
                                             onClick={copyCode}
                                             disabled={!inviteCode}
-                                            className="p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="shrink-0 p-1.5 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                                             title="코드 복사"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">

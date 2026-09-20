@@ -82,11 +82,12 @@ export default function LoginModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative mx-4 w-full max-w-sm rounded-lg bg-white p-8 text-gray-800 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-lg bg-white p-6 sm:p-8 text-gray-800 shadow-2xl">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 text-gray-400 hover:text-gray-600"
+          aria-label="로그인 창 닫기"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"

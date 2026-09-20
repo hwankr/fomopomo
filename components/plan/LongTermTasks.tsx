@@ -171,6 +171,7 @@ function SortableSubtaskItem({
       style={style}
       className={cn(
         'group flex items-center gap-2 rounded-lg border border-transparent bg-white p-2 transition-all hover:border-emerald-200 dark:bg-gray-900/50 dark:hover:border-emerald-800',
+        isEditing ? 'max-sm:flex-wrap' : 'max-sm:grid max-sm:grid-cols-[auto_auto_minmax(0,1fr)]',
         isDragging &&
           'border-emerald-200 bg-white shadow-lg dark:border-emerald-900 dark:bg-gray-800'
       )}
@@ -178,7 +179,7 @@ function SortableSubtaskItem({
       <div
         {...attributes}
         {...listeners}
-        className="cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+        className="shrink-0 cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
       >
         <GripVertical className="h-4 w-4" />
       </div>
@@ -201,32 +202,33 @@ function SortableSubtaskItem({
       </button>
 
       {isEditing ? (
-        <div className="flex flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-sm:order-last max-sm:basis-full max-sm:justify-end">
           <input
             type="text"
             value={editedTitle}
             onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
             autoFocus
           />
           <button
             onClick={handleSave}
-            className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
           >
             <Check className="h-4 w-4" />
           </button>
           <button
             onClick={handleCancel}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
       ) : (
         <span
+          title={subtask.title}
           className={cn(
-            'flex-1 text-sm font-medium transition-all',
+            'min-w-0 flex-1 break-words text-sm font-medium transition-all max-sm:line-clamp-2',
             isCompleted
               ? 'text-gray-400 line-through'
               : 'text-gray-700 dark:text-gray-200'
@@ -236,32 +238,34 @@ function SortableSubtaskItem({
         </span>
       )}
 
-      {!isEditing && subtask.completed_at ? (
-        <span className="whitespace-nowrap text-xs text-gray-400">
-          {format(new Date(subtask.completed_at), 'M월 d일')} 완료
-        </span>
-      ) : null}
+      <div className="ml-auto flex shrink-0 items-center gap-2 max-sm:col-span-full max-sm:justify-end">
+        {!isEditing && subtask.completed_at ? (
+          <span className="whitespace-nowrap text-xs text-gray-400">
+            {format(new Date(subtask.completed_at), 'M월 d일')} 완료
+          </span>
+        ) : null}
 
-      {!isEditing && (
+        {!isEditing && (
+          <button
+            onClick={() => {
+              // 실시간 갱신이나 실패 롤백으로 제목이 바뀌었을 수 있으므로
+              // 편집을 열 때마다 현재 제목에서 초안을 다시 시작한다.
+              setEditedTitle(subtask.title);
+              setIsEditing(true);
+            }}
+            className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        )}
+
         <button
-          onClick={() => {
-            // 실시간 갱신이나 실패 롤백으로 제목이 바뀌었을 수 있으므로
-            // 편집을 열 때마다 현재 제목에서 초안을 다시 시작한다.
-            setEditedTitle(subtask.title);
-            setIsEditing(true);
-          }}
-          className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+          onClick={() => deleteSubtask(subtask.id)}
+          className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
         >
-          <Pencil className="h-4 w-4" />
+          <Trash2 className="h-4 w-4" />
         </button>
-      )}
-
-      <button
-        onClick={() => deleteSubtask(subtask.id)}
-        className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      </div>
     </div>
   );
 }
@@ -796,7 +800,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   };
 
   return (
-    <div className="flex flex-col rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-300 dark:border-gray-700 dark:bg-gray-800">
+    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 sm:p-6 dark:border-gray-700 dark:bg-gray-800">
       <div
         className="mb-6 flex cursor-pointer items-center justify-between lg:cursor-default"
         onClick={() => setIsExpanded(!isExpanded)}
@@ -854,9 +858,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                   key={task.id}
                   className="rounded-xl border border-transparent bg-emerald-50 p-3 transition-all hover:border-emerald-200 dark:bg-emerald-900/20 dark:hover:border-emerald-800"
                 >
-                  <div className="group flex items-center gap-3">
+                  <div className="group flex items-center gap-3 max-sm:flex-wrap max-sm:gap-2">
                     {editingTaskId === task.id ? (
-                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 max-sm:basis-full max-sm:justify-end">
                         <input
                           type="text"
                           aria-label="장기 과제 제목"
@@ -865,55 +869,59 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                             setEditedTitle(event.target.value)
                           }
                           onKeyDown={handleEditKeyDown}
-                          className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                          className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                           autoFocus
                         />
-                        <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
+                        <div className="min-w-0 max-w-full max-sm:basis-full">
+                          <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
+                        </div>
                         <button
                           onClick={() => void updateTask()}
                           aria-label="장기 과제 저장"
-                          className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
                         >
                           <Check className="h-4 w-4" />
                         </button>
                         <button
                           onClick={cancelEditing}
-                          className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                         >
                           <X className="h-4 w-4" />
                         </button>
                       </div>
                     ) : (
-                      <span className="flex-1 text-sm font-bold text-gray-700 dark:text-gray-200">
-                        <span className="block">{task.title}</span>
-                        <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                      <span className="min-w-0 flex-1 text-sm font-bold text-gray-700 max-sm:basis-full dark:text-gray-200">
+                        <span title={task.title} className="block break-words max-sm:line-clamp-2">{task.title}</span>
+                        <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
                           {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
                         </span>
                       </span>
                     )}
 
-                    {totalCount > 0 && (
-                      <span className="whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        {`${completedCount}/${totalCount}`}
-                      </span>
-                    )}
+                    <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:gap-2">
+                      {totalCount > 0 && (
+                        <span className="whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
+                          {`${completedCount}/${totalCount}`}
+                        </span>
+                      )}
 
-                    {editingTaskId !== task.id && (
+                      {editingTaskId !== task.id && (
+                        <button
+                          onClick={() => startEditing(task)}
+                          aria-label={`${task.title} 수정`}
+                          className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+
                       <button
-                        onClick={() => startEditing(task)}
-                        aria-label={`${task.title} 수정`}
-                        className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                        onClick={() => setDeletingTaskId(task.id)}
+                        className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                       >
-                        <Pencil className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
-                    )}
-
-                    <button
-                      onClick={() => setDeletingTaskId(task.id)}
-                      className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    </div>
                   </div>
 
                   {totalCount > 0 && (
@@ -965,7 +973,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                     {addingSubtaskTaskId === task.id ? (
                       <form
                         onSubmit={(event) => void addSubtask(event, task.id)}
-                        className="flex flex-col gap-2"
+                        className="flex min-w-0 flex-col gap-2"
                       >
                         <input
                           type="text"
@@ -974,7 +982,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                             setNewSubtaskTitle(event.target.value)
                           }
                           placeholder="세부 할 일을 입력하세요"
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                           autoFocus
                         />
                         <div className="flex justify-end gap-2">
@@ -1015,13 +1023,13 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
           {isAdding ? (
-            <form onSubmit={addTask} className="flex flex-col gap-3">
+            <form onSubmit={addTask} className="flex min-w-0 flex-col gap-3">
               <input
                 type="text"
                 value={newTaskTitle}
                 onChange={(event) => setNewTaskTitle(event.target.value)}
                 placeholder="장기 과제를 입력하세요 (예: 빅데이터분석기사)"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
               <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />

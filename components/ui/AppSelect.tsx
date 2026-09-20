@@ -63,7 +63,7 @@ export default function AppSelect({
           onKeyDown={event => event.stopPropagation()}
           className={cn(
             'group flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm text-slate-700 shadow-sm outline-none transition-[border-color,box-shadow,background-color] hover:border-slate-300 focus-visible:border-rose-400 focus-visible:ring-3 focus-visible:ring-rose-100 data-[state=open]:border-rose-300 data-[placeholder]:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus-visible:border-rose-400 dark:focus-visible:ring-rose-500/20 dark:data-[state=open]:border-rose-500/60',
-            compact && 'px-2.5 text-xs',
+            compact && 'h-8 px-2.5 text-xs',
           )}
         >
           <span className="min-w-0 truncate"><Select.Value placeholder={placeholder} /></span>

@@ -197,3 +197,107 @@ describe('Timeline request isolation', () => {
     expect(screen.queryByText('Stale session')).not.toBeInTheDocument();
   });
 });
+
+describe('Timeline session details', () => {
+  async function showTimeline() {
+    render(<><Timeline userId="A" selectedDate={new Date(2026, 8, 7)} /><button>다음 항목</button></>);
+    await reply(0, [sessionRow('데이터베이스 복습', 7)]);
+    return screen.getByRole('button', { name: '데이터베이스 복습 세션 정보' });
+  }
+
+  it('opens a portalled information card on hover without moving focus', async () => {
+    const trigger = await showTimeline();
+    expect(trigger).not.toHaveAttribute('title');
+    fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
+
+    const popup = await screen.findByRole('dialog', { name: '데이터베이스 복습' });
+    expect(within(popup).getByText('뽀모도로')).toBeInTheDocument();
+    expect(within(popup).getByText('10:50–11:00')).toBeInTheDocument();
+    expect(within(popup).getByText('10분')).toBeInTheDocument();
+    expect(trigger.parentElement).not.toContainElement(popup);
+    expect(trigger).not.toHaveFocus();
+  });
+
+  it('keeps the card open while the pointer crosses into it and closes after leaving', async () => {
+    const trigger = await showTimeline();
+    fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
+    const popup = await screen.findByRole('dialog');
+    fireEvent.pointerLeave(trigger, { pointerType: 'mouse' });
+    fireEvent.pointerEnter(popup, { pointerType: 'mouse' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+    expect(popup).toBeInTheDocument();
+
+    fireEvent.pointerLeave(popup, { pointerType: 'mouse' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('opens on keyboard focus and closes on Escape or blur without stealing focus back', async () => {
+    const trigger = await showTimeline();
+    act(() => trigger.focus());
+    await screen.findByRole('dialog');
+    expect(trigger).toHaveFocus();
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+
+    act(() => trigger.blur());
+    act(() => trigger.focus());
+    await screen.findByRole('dialog');
+    const next = screen.getByRole('button', { name: '다음 항목' });
+    act(() => next.focus());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(next).toHaveFocus();
+  });
+
+  it('keeps a touch tap open when focus occurs before click and dismisses outside', async () => {
+    const trigger = await showTimeline();
+    fireEvent.pointerEnter(trigger, { pointerType: 'touch' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.pointerDown(trigger, { pointerType: 'touch', button: 0 });
+    act(() => trigger.focus());
+    fireEvent.pointerUp(trigger, { pointerType: 'touch', button: 0 });
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog');
+    fireEvent.pointerLeave(trigger, { pointerType: 'touch' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body, { pointerType: 'mouse', button: 0 });
+    fireEvent.pointerUp(document.body, { pointerType: 'mouse', button: 0 });
+    fireEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('preserves midnight bar splitting and shows the whole displayed stopwatch session', async () => {
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [{ ...sessionRow('심야 복습', 7), mode: 'stopwatch', duration: 1200, created_at: new Date(2026, 8, 8, 0, 10).toISOString() }]);
+    const bars = screen.getAllByRole('button', { name: '심야 복습 세션 정보' });
+    expect(bars).toHaveLength(2);
+    fireEvent.click(bars[1]);
+    const popup = await screen.findByRole('dialog', { name: '심야 복습' });
+    expect(within(popup).getByText('스톱워치')).toBeInTheDocument();
+    expect(within(popup).getByText('23:50–00:10')).toBeInTheDocument();
+    expect(within(popup).getByText('20분')).toBeInTheDocument();
+  });
+
+  it('shows only the latest hovered bar even when another bar retains focus or a pending close', async () => {
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [sessionRow('첫 번째 공부', 7), sessionRow('두 번째 공부', 7)]);
+    const first = screen.getByRole('button', { name: '첫 번째 공부 세션 정보' });
+    const second = screen.getByRole('button', { name: '두 번째 공부 세션 정보' });
+    act(() => first.focus());
+    fireEvent.click(first);
+    await screen.findByRole('dialog', { name: '첫 번째 공부' });
+    fireEvent.pointerLeave(first, { pointerType: 'mouse' });
+    fireEvent.pointerEnter(second, { pointerType: 'mouse' });
+    await screen.findByRole('dialog', { name: '두 번째 공부' });
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+
+    act(() => first.blur());
+    fireEvent.pointerEnter(first, { pointerType: 'mouse' });
+    fireEvent.pointerLeave(first, { pointerType: 'mouse' });
+    fireEvent.pointerEnter(second, { pointerType: 'mouse' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+    expect(screen.getByRole('dialog', { name: '두 번째 공부' })).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+});

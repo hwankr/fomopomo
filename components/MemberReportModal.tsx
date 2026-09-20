@@ -89,22 +89,23 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4" onClick={onClose}>
             <div
-                className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col transition-colors duration-300"
+                className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col transition-colors duration-300"
                 onClick={e => e.stopPropagation()}
             >
-                <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-slate-700">
-                    <h2 className="text-lg font-bold text-gray-800 dark:text-white">
+                <div className="flex shrink-0 justify-between items-center gap-3 p-4 border-b border-gray-100 dark:border-slate-700">
+                    <h2 className="min-w-0 break-words text-lg font-bold text-gray-800 dark:text-white">
                         {userName}님의 리포트
                     </h2>
                     <button
                         onClick={onClose}
-                        className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+                        className="shrink-0 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+                        aria-label="리포트 닫기"
                     >
                         <X size={20} />
                     </button>
                 </div>
 
-                <div className="p-6">
+                <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
                     {loading ? (
                         <div className="flex justify-center py-8">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-500"></div>
@@ -123,9 +124,9 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
                                 {tasks.length > 0 ? (
                                     <div className="space-y-2">
                                         {tasks.map((task) => (
-                                            <div key={task.name} className="flex justify-between items-center text-sm p-2 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
-                                                <span className="text-gray-700 dark:text-gray-200 truncate max-w-[70%]">{task.name}</span>
-                                                <span className="font-mono text-gray-500 dark:text-gray-400">{formatDuration(task.duration)}</span>
+                                            <div key={task.name} className="flex justify-between items-center gap-2 text-sm p-2 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                                                <span className="min-w-0 text-gray-700 dark:text-gray-200 truncate" title={task.name}>{task.name}</span>
+                                                <span className="shrink-0 font-mono text-gray-500 dark:text-gray-400">{formatDuration(task.duration)}</span>
                                             </div>
                                         ))}
                                     </div>

@@ -180,6 +180,9 @@ function SortableTaskItem({
       style={style}
       className={cn(
         'group flex items-center gap-3 rounded-xl border border-transparent bg-gray-50 p-4 transition-all hover:border-gray-200 dark:bg-gray-900/50 dark:hover:border-gray-700',
+        'max-sm:gap-2 max-sm:p-3',
+        isEditing && 'flex-wrap sm:flex-nowrap',
+        !isEditing && 'max-sm:grid max-sm:grid-cols-[auto_auto_minmax(0,1fr)]',
         isDragging &&
           'border-rose-200 bg-white shadow-lg dark:border-rose-900 dark:bg-gray-800'
       )}
@@ -187,7 +190,7 @@ function SortableTaskItem({
       <div
         {...attributes}
         {...listeners}
-        className="cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+        className="shrink-0 cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
       >
         <GripVertical className="h-5 w-5" />
       </div>
@@ -209,37 +212,41 @@ function SortableTaskItem({
       </button>
 
       {isEditing ? (
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className="order-last flex min-w-0 basis-full flex-wrap items-start gap-2 sm:order-none sm:flex-1 sm:basis-auto">
           <input
             type="text"
             aria-label="작업 제목"
             value={editedTitle}
             onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            className="h-8 min-w-0 flex-[1_1_12rem] rounded-lg border border-gray-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
             autoFocus
           />
-          <SubjectSelect
-            subjects={subjects}
-            value={editedSubjectId}
-            onChange={setEditedSubjectId}
-            onCreate={createSubject}
-            compact
-          />
-          <button
-            onClick={handleSave}
-            aria-label="작업 저장"
-            className="rounded-lg p-1.5 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
-          >
-            <Check className="h-4 w-4" />
-          </button>
-          <button
-            onClick={handleCancel}
-            aria-label="작업 수정 취소"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex min-w-0 flex-[1_1_16rem] items-start gap-2 max-sm:flex-wrap max-sm:justify-end">
+            <div className="min-w-0 flex-1 max-sm:basis-full">
+              <SubjectSelect
+                subjects={subjects}
+                value={editedSubjectId}
+                onChange={setEditedSubjectId}
+                onCreate={createSubject}
+                compact
+              />
+            </div>
+            <button
+              onClick={handleSave}
+              aria-label="작업 저장"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+            <button
+              onClick={handleCancel}
+              aria-label="작업 수정 취소"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -257,8 +264,9 @@ function SortableTaskItem({
           </button>
           <span className="min-w-0 flex-1">
             <span
+              title={task.title}
               className={cn(
-                'block truncate font-medium transition-all',
+                'block truncate font-medium transition-all max-sm:line-clamp-2 max-sm:whitespace-normal max-sm:break-words',
                 task.status === 'done'
                   ? 'text-gray-400 line-through'
                   : 'text-gray-700 dark:text-gray-200'
@@ -266,7 +274,7 @@ function SortableTaskItem({
             >
               {task.title}
             </span>
-            <span className="block text-xs text-gray-500 dark:text-gray-400">
+            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
               {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
             </span>
             {task.parentTitle ? (
@@ -278,32 +286,34 @@ function SortableTaskItem({
         </span>
       )}
 
-      {task.duration ? (
-        <span className="whitespace-nowrap rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-500 dark:bg-rose-900/30">
-          {formatDuration(task.duration)}
-        </span>
-      ) : null}
+      <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:col-span-full max-sm:justify-end max-sm:gap-2">
+        {task.duration ? (
+          <span className="whitespace-nowrap rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-500 dark:bg-rose-900/30">
+            {formatDuration(task.duration)}
+          </span>
+        ) : null}
 
-      {!isEditing && (
+        {!isEditing && (
+          <button
+            onClick={() => {
+              setEditedTitle(task.title);
+              setEditedSubjectId(task.subject_id);
+              setIsEditing(true);
+            }}
+            aria-label={`${task.title} 수정`}
+            className="p-2 text-gray-400 transition-all hover:text-rose-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        )}
+
         <button
-          onClick={() => {
-            setEditedTitle(task.title);
-            setEditedSubjectId(task.subject_id);
-            setIsEditing(true);
-          }}
-          aria-label={`${task.title} 수정`}
-          className="p-2 text-gray-400 transition-all hover:text-rose-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
+          onClick={() => deleteTask(task.id)}
+          className="p-2 text-gray-400 transition-all hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
         >
-          <Pencil className="h-4 w-4" />
+          <Trash2 className="h-4 w-4" />
         </button>
-      )}
-
-      <button
-        onClick={() => deleteTask(task.id)}
-        className="p-2 text-gray-400 transition-all hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      </div>
     </div>
   );
 }
@@ -883,8 +893,8 @@ function ScopedTaskList({ selectedDateKey, userId }: {
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-[300px] flex-1 space-y-3 overflow-y-auto">
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="min-h-[300px] min-w-0 flex-1 space-y-3 overflow-y-auto">
         {loading && tasks.length === 0 ? (
           <div className="py-10 text-center text-gray-400">작업을 불러오는 중...</div>
         ) : tasks.length === 0 ? (
@@ -932,13 +942,13 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
       <div className="mt-6 border-t border-gray-100 pt-6 dark:border-gray-700">
         {isAdding ? (
-          <form onSubmit={addTask} className="flex flex-col gap-3">
+          <form onSubmit={addTask} className="flex min-w-0 flex-col gap-3">
             <input
               type="text"
               value={newTaskTitle}
               onChange={(event) => setNewTaskTitle(event.target.value)}
               placeholder="작업 제목을 입력하세요"
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               autoFocus
             />
             <SubjectSelect

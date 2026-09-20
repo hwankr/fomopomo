@@ -21,11 +21,11 @@ export default function ProfileHeader({ user, totalFocusTime }: ProfileHeaderPro
           <div className="absolute bottom-0 right-0 w-6 h-6 bg-green-400 border-4 border-white dark:border-slate-800 rounded-full"></div>
       </div>
       
-      <div className="flex-1 text-center md:text-left">
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">
+      <div className="w-full min-w-0 flex-1 text-center md:text-left">
+          <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-bold text-gray-800 dark:text-white mb-2">
               {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
+          <p className="break-all text-gray-500 dark:text-gray-400 text-sm mb-4">
               {user?.email}
           </p>
           

@@ -238,7 +238,7 @@ export default function Navbar({
 
                 {/* Mobile Menu Overlay */}
                 {isMenuOpen && (
-                    <div className="md:hidden absolute top-16 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-800 shadow-xl animate-in slide-in-from-top-5 duration-200 h-[calc(100vh-4rem)] overflow-y-auto">
+                    <div className="md:hidden absolute top-16 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-800 shadow-xl animate-in slide-in-from-top-5 duration-200 h-[calc(100dvh-4rem)] overflow-y-auto">
                         <div className="px-4 pt-4 pb-6 space-y-2">
                             {navLinks.map((link) => {
                                 const isActive = pathname === link.href;
@@ -290,11 +290,11 @@ export default function Navbar({
                                         <UserIcon className="w-6 h-6 text-gray-400" />
                                     </div>
                                 )}
-                                <div className="ml-4">
-                                    <div className="text-base font-bold text-gray-900 dark:text-white">
+                                <div className="ml-4 min-w-0 flex-1">
+                                    <div className="break-words [overflow-wrap:anywhere] text-base font-bold text-gray-900 dark:text-white">
                                         {session ? session.user.email?.split('@')[0] : '게스트'}
                                     </div>
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                                    <div className="break-all text-sm text-gray-500 dark:text-gray-400">
                                         {session ? session.user.email : 'fomopomo에 오신 것을 환영합니다'}
                                     </div>
                                 </div>

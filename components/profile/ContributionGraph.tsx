@@ -136,7 +136,13 @@ export default function ContributionGraph({
         </div>
 
         {/* Scrollable Graph Area */}
-        <div ref={scrollRef} className="flex-1 overflow-x-auto pb-2 scrollbar-hide">
+        <div
+          ref={scrollRef}
+          role="region"
+          aria-label="연간 공부 기록"
+          tabIndex={0}
+          className="ui-scrollbar-horizontal min-w-0 flex-1 overflow-x-auto pb-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
+        >
           <div className="flex flex-col gap-2 min-w-max px-1">
             {/* Month Labels Row */}
             <div className="grid grid-rows-1 grid-flow-col gap-1 mb-1">

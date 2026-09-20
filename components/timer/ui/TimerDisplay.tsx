@@ -89,7 +89,7 @@ export const TimerDisplay = ({
       <div className="w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 mb-6 min-h-[24px]">
         <div
           onClick={onOpenTaskSidebar}
-          className="flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in cursor-pointer hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
+          className="flex min-w-0 max-w-full items-center gap-2 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 animate-fade-in cursor-pointer hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
         >
           <span className="text-sm font-medium max-w-[200px] truncate">
             {selectedTaskId ? selectedTaskTitle : '작업 지정 없음'}
@@ -97,7 +97,8 @@ export const TimerDisplay = ({
           {selectedTaskId && (
             <button
               onClick={onClearTask}
-              className="p-0.5 hover:bg-rose-200 dark:hover:bg-rose-800 rounded-full transition-colors"
+              aria-label="작업 지정 해제"
+              className="shrink-0 p-0.5 hover:bg-rose-200 dark:hover:bg-rose-800 rounded-full transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                 <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
@@ -107,7 +108,7 @@ export const TimerDisplay = ({
         </div>
       </div>
 
-      <div className={`text-7xl sm:text-8xl font-bold mb-4 font-mono tracking-tighter transition-colors ${themeColors.textMain}`}>
+      <div className={`${timeLeft >= 3600 ? 'text-5xl min-[400px]:text-6xl sm:text-7xl' : 'text-7xl sm:text-8xl'} font-bold mb-4 font-mono tabular-nums tracking-tighter transition-colors ${themeColors.textMain}`}>
         {formatTime(timeLeft)}
       </div>
 
@@ -117,11 +118,11 @@ export const TimerDisplay = ({
             key={preset.id}
             onClick={() => onPresetClick(preset.minutes)}
             aria-label={`${preset.label} ${formatPresetDuration(preset.minutes)}`}
-            className="px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95 whitespace-nowrap"
+            className="min-w-0 max-w-full px-4 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-slate-600 hover:border-rose-300 dark:hover:border-rose-500 hover:text-rose-500 transition-all active:scale-95 whitespace-nowrap"
           >
             <span className="flex items-center gap-1.5 sm:gap-2">
-              <span>{preset.label}</span>
-              <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+              <span className="min-w-0 truncate" title={preset.label}>{preset.label}</span>
+              <span className="shrink-0 text-xs font-bold text-gray-500 dark:text-gray-400">
                 {formatPresetDuration(preset.minutes)}
               </span>
             </span>
@@ -135,10 +136,10 @@ export const TimerDisplay = ({
         </div>
       )}
 
-      <div className="flex flex-wrap justify-center gap-4">
+      <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
         <button
           onClick={onToggleTimer}
-          className={`px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${themeColors.btnMain} dark:shadow-none min-w-[140px]`}
+          className={`h-14 sm:h-auto px-4 sm:px-10 py-4 rounded-2xl font-bold text-lg text-white transition-all active:scale-95 shadow-lg ${themeColors.btnMain} dark:shadow-none min-w-24 sm:min-w-[140px]`}
         >
           {isRunning ? '일시정지' : '시작'}
         </button>
@@ -147,7 +148,7 @@ export const TimerDisplay = ({
           <button
             onClick={onSaveTimer}
             disabled={isSaving}
-            className="px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm whitespace-nowrap"
+            className="h-14 sm:h-auto px-3 sm:px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm whitespace-nowrap"
           >
             저장
           </button>
@@ -156,7 +157,8 @@ export const TimerDisplay = ({
         {showResetButton && (
           <button
             onClick={onResetTimer}
-            className="p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all animate-fade-in shadow-sm"
+            aria-label="타이머 초기화"
+            className="flex h-14 w-14 shrink-0 items-center justify-center sm:h-auto sm:w-auto p-3 sm:p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all animate-fade-in shadow-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />

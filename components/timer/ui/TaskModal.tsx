@@ -41,8 +41,8 @@ export const TaskModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden scale-100 transition-transform duration-200">
-        <div className="p-6">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain scale-100 transition-transform duration-200">
+        <div className="p-5 sm:p-6">
           <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
             무엇에 집중하셨나요?
           </h3>
@@ -60,7 +60,7 @@ export const TaskModal = ({
                       key={task.id}
                       onClick={() => onSelectTask(task.title, task.id)}
                       disabled={labelsLocked || isSaving}
-                      className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
+                      className={`min-w-0 w-full text-left [overflow-wrap:anywhere] px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
                         ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
                         : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
                         }`}

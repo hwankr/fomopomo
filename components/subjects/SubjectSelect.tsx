@@ -66,7 +66,8 @@ export default function SubjectSelect({
       <div className="flex min-w-0 items-end gap-2">
         <AppSelect
           id={selectId}
-          label={label}
+          label={compact ? undefined : label}
+          aria-label={compact ? label : undefined}
           value={value ?? unclassifiedValue}
           onValueChange={next => onChange(next === unclassifiedValue ? null : next)}
           options={options}
@@ -77,7 +78,7 @@ export default function SubjectSelect({
         {onCreate ? (
           <button type="button" disabled={disabled || saving} aria-expanded={creating} aria-controls={`${selectId}-create`}
             onClick={() => { setCreating(!creating); setError(null); }}
-            className={`ui-press h-10 shrink-0 rounded-xl border border-transparent font-medium text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:border-rose-900/40 dark:hover:bg-rose-950/40 ${compact ? 'px-2 text-xs' : 'px-3 text-sm'}`}>
+            className={`ui-press shrink-0 rounded-xl border border-transparent font-medium text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:border-rose-900/40 dark:hover:bg-rose-950/40 ${compact ? 'h-8 px-2 text-xs' : 'h-10 px-3 text-sm'}`}>
             {creating ? '닫기' : '+ 새 과목'}
           </button>
         ) : null}

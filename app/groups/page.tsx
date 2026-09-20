@@ -128,18 +128,18 @@ export default function GroupsPage() {
             />
             <div className="max-w-4xl mx-auto">
                 <div className="mb-8">
-                    <div className="flex justify-between items-center">
-                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">내 그룹</h1>
-                        <div className="flex gap-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
+                        <h1 className="shrink-0 text-3xl font-bold text-gray-900 dark:text-white">내 그룹</h1>
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-4">
                             <button
                                 onClick={() => handleActionClick(() => setIsJoinModalOpen(true))}
-                                className="px-4 py-2 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 rounded-lg shadow hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors font-medium border border-gray-200 dark:border-slate-700"
+                                className="whitespace-nowrap px-4 py-2 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 rounded-lg shadow hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors font-medium border border-gray-200 dark:border-slate-700"
                             >
                                 그룹 참여
                             </button>
                             <button
                                 onClick={() => handleActionClick(() => setIsCreateModalOpen(true))}
-                                className="px-4 py-2 bg-rose-500 text-white rounded-lg shadow hover:bg-rose-600 transition-colors font-medium"
+                                className="whitespace-nowrap px-4 py-2 bg-rose-500 text-white rounded-lg shadow hover:bg-rose-600 transition-colors font-medium"
                             >
                                 그룹 생성
                             </button>
@@ -152,7 +152,7 @@ export default function GroupsPage() {
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-500 mx-auto"></div>
                     </div>
                 ) : !session ? (
-                    <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
+                    <div className="text-center px-4 py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
                         <div className="text-6xl mb-4">👥</div>
                         <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">로그인하고 그룹에 참여해보세요!</h3>
                         <p className="text-gray-500 dark:text-gray-400 mb-8">친구들과 함께 공부할 그룹을 만들거나 기존 그룹에 참여할 수 있어요.</p>
@@ -164,7 +164,7 @@ export default function GroupsPage() {
                         </button>
                     </div>
                 ) : groups.length === 0 ? (
-                    <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
+                    <div className="text-center px-4 py-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
                         <div className="text-6xl mb-4">👥</div>
                         <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">아직 그룹이 없습니다</h3>
                         <p className="text-gray-500 dark:text-gray-400 mb-8">친구들과 함께 공부할 그룹을 만들거나 기존 그룹에 참여해보세요!</p>

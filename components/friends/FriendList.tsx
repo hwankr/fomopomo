@@ -296,19 +296,20 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
             className="group flex items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl hover:border-indigo-100 dark:hover:border-indigo-900 transition-colors cursor-pointer"
             onClick={() => setSelectedFriendForReport({ id: friend.friend_id, name: friend.nickname || friend.friend_email })}
           >
-            <div className="flex items-center gap-3 w-full">
+            <div className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 w-full sm:flex sm:gap-3">
               <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-medium text-sm shrink-0">
                 {(friend.nickname || friend.friend_email || '?')[0].toUpperCase()}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="contents sm:block sm:flex-1 sm:min-w-0">
+                <div className="contents sm:flex sm:items-center sm:justify-between sm:gap-2">
                   {editingId === friend.id ? (
-                    <div className="flex items-center gap-2 w-full max-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex min-w-0 items-center gap-2 w-full max-w-[240px]" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="text"
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
-                        className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="min-w-0 w-full flex-1 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        aria-label="친구 닉네임"
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') handleSaveEdit(friend.id);
@@ -317,25 +318,27 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
                       />
                       <button
                         onClick={() => handleSaveEdit(friend.id)}
-                        className="p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30 rounded"
+                        className="shrink-0 p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30 rounded"
+                        aria-label="닉네임 저장"
                       >
                         <Check className="w-4 h-4" />
                       </button>
                       <button
                         onClick={handleCancelEdit}
-                        className="p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 rounded"
+                        className="shrink-0 p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 rounded"
+                        aria-label="닉네임 수정 취소"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 min-w-0">
-                      <p className={`font-medium text-gray-900 dark:text-white ${friend.nickname ? 'whitespace-nowrap shrink-0' : 'truncate'}`}>
+                    <div className="flex flex-1 items-center gap-2 min-w-0">
+                      <p className="min-w-0 truncate font-medium text-gray-900 dark:text-white" title={friend.nickname || friend.friend_email}>
                         {friend.nickname || friend.friend_email || '알 수 없는 사용자'}
                       </p>
 
                       {friend.nickname && (
-                        <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                        <span className="min-w-0 text-xs text-gray-400 dark:text-gray-500 truncate" title={friend.friend_email}>
                           ({friend.friend_email})
                         </span>
                       )}
@@ -344,14 +347,14 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
                           e.stopPropagation();
                           handleStartEdit(friend);
                         }}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
+                        className="shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
                         title="닉네임 수정"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   )}
-                  <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto mt-1 sm:mt-0">
+                  <div className="col-span-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 min-w-0 w-full sm:w-auto sm:max-w-[55%] shrink-0 self-start sm:self-auto sm:gap-3">
                     <button
                       onClick={(e) => toggleNotification(friend, e)}
                       className={`p-1.5 rounded-lg transition-all ${friend.is_notification_enabled
@@ -381,7 +384,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <p className="col-span-2 text-xs text-gray-500 dark:text-gray-400 sm:mt-0.5">
                   친구 추가일: {new Date(friend.created_at).toLocaleDateString()}
                 </p>
               </div>
@@ -391,7 +394,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
         {/* Delete Confirmation Modal */}
         {deletingFriend && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain p-6 space-y-4 animate-in zoom-in-95 duration-200">
               <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
                 <div className="p-2 bg-rose-50 dark:bg-rose-900/20 rounded-full">
                   <AlertTriangle className="w-6 h-6" />
@@ -399,7 +402,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">친구 삭제</h3>
               </div>
 
-              <p className="text-gray-600 dark:text-gray-300">
+              <p className="break-words text-gray-600 dark:text-gray-300">
                 정말로 <span className="font-medium text-gray-900 dark:text-white">{deletingFriend.name}</span>님을 친구 목록에서 삭제하시겠습니까?
               </p>
 

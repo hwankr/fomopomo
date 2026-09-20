@@ -318,30 +318,30 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
             {history.map((item) => (
               <li
                 key={item.id}
-                className="p-4 transition-colors hover:bg-rose-50/40 dark:hover:bg-slate-700/30"
+                className="px-3 py-2.5 transition-colors hover:bg-rose-50/40 dark:hover:bg-slate-700/30"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <div
                     aria-hidden="true"
-                    className="w-9 h-9 shrink-0 rounded-2xl flex items-center justify-center text-base bg-rose-50 text-rose-500 dark:bg-rose-900/20"
+                    className="w-6 h-6 shrink-0 rounded-lg flex items-center justify-center text-sm bg-rose-50 text-rose-500 dark:bg-rose-900/20"
                   >
                     {item.mode === 'pomo' ? '🍅' : '⏱️'}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-700 dark:text-gray-200 text-sm">
+                  <div className="flex flex-1 min-w-0 flex-wrap items-baseline gap-x-2">
+                    <div className="whitespace-nowrap font-semibold text-gray-700 dark:text-gray-200 text-sm">
                       {item.mode === 'pomo' ? '뽀모도로' : '스톱워치'}
                     </div>
-                    <time dateTime={item.created_at} className="text-xs text-gray-400">
+                    <time dateTime={item.created_at} className="whitespace-nowrap text-[11px] text-gray-400">
                       {formatDate(item.created_at)}
                     </time>
                   </div>
-                  <div className="font-mono text-sm font-semibold text-gray-700 dark:text-gray-100 text-right">
+                  <div className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-gray-700 dark:text-gray-100 text-right">
                     {formatDuration(item.duration)}
                   </div>
                   <button
                     onClick={() => handleDelete(item.id)}
                     disabled={updatingTaskId !== null || deletingId !== null}
-                    className="ui-press shrink-0 rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/30"
+                    className="ui-press shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-950/30"
                     aria-label="기록 삭제"
                     title="삭제"
                   >
@@ -351,7 +351,7 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
                       viewBox="0 0 24 24"
                       strokeWidth={2}
                       stroke="currentColor"
-                      className="w-5 h-5"
+                      className="w-4 h-4"
                     >
                       <path
                         strokeLinecap="round"
@@ -361,12 +361,30 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
                     </svg>
                   </button>
                 </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="max-w-full truncate rounded-md bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-300">
+                <div className="mt-1 flex min-w-0 items-center gap-2">
+                  <span className="max-w-[35%] shrink-0 truncate rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-300">
                     {item.subject_id ? subjects.find(subject => subject.id === item.subject_id)?.name ?? '지정된 과목' : '미분류'}
                   </span>
+                  {editingId !== item.id && (
+                    <>
+                      <p
+                        title={item.task?.trim() ? item.task : '작업 메모 없음'}
+                        className="flex-1 min-w-0 truncate text-xs text-gray-600 dark:text-gray-300"
+                      >
+                        {item.task?.trim() ? item.task : '작업 메모 없음'}
+                      </p>
+                      <button
+                        onClick={() => startEditing(item)}
+                        disabled={updatingTaskId !== null || deletingId !== null}
+                        aria-label="작업 메모 수정"
+                        className="ui-press shrink-0 rounded-md px-1.5 py-1.5 text-xs text-gray-400 hover:text-rose-600 disabled:opacity-40"
+                      >
+                        수정
+                      </button>
+                    </>
+                  )}
                 </div>
-                {editingId === item.id ? (
+                {editingId === item.id && (
                   <form
                     className="mt-3 space-y-2"
                     onSubmit={event => { event.preventDefault(); void handleUpdateTask(item.id); }}
@@ -393,20 +411,6 @@ export default function HistoryList({ updateTrigger = 0, session, onOpenLogin }:
                       </button>
                     </div>
                   </form>
-                ) : (
-                  <div className="mt-2 flex items-start gap-2 text-sm">
-                    <p className="flex-1 min-w-0 break-words text-gray-600 dark:text-gray-300">
-                      {item.task?.trim() ? item.task : '작업 메모 없음'}
-                    </p>
-                    <button
-                      onClick={() => startEditing(item)}
-                      disabled={updatingTaskId !== null || deletingId !== null}
-                      aria-label="작업 메모 수정"
-                      className="ui-press shrink-0 rounded-md px-2 py-1 text-xs text-gray-400 hover:text-rose-600 disabled:opacity-40"
-                    >
-                      수정
-                    </button>
-                  </div>
                 )}
               </li>
             ))}

@@ -88,6 +88,61 @@ body {
   }
 }
 
+@media (forced-colors: none) {
+  .ui-scrollbar-horizontal {
+    --scrollbar-track: var(--color-slate-100);
+    --scrollbar-thumb: var(--color-rose-500);
+    --scrollbar-thumb-hover: var(--color-rose-600);
+  }
+
+  .dark .ui-scrollbar-horizontal {
+    --scrollbar-track: var(--color-slate-700);
+    --scrollbar-thumb: var(--color-rose-400);
+    --scrollbar-thumb-hover: var(--color-rose-300);
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    .ui-scrollbar-horizontal {
+      /* Standard non-auto values override the pseudo-element styling in Chromium. */
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+
+    .ui-scrollbar-horizontal::-webkit-scrollbar {
+      height: 8px;
+    }
+
+    .ui-scrollbar-horizontal::-webkit-scrollbar-track {
+      border-radius: 999px;
+      background: var(--scrollbar-track);
+    }
+
+    .ui-scrollbar-horizontal::-webkit-scrollbar-thumb {
+      min-width: 40px;
+      border-radius: 999px;
+      background: var(--scrollbar-thumb);
+    }
+
+    .ui-scrollbar-horizontal::-webkit-scrollbar-thumb:hover,
+    .ui-scrollbar-horizontal::-webkit-scrollbar-thumb:active {
+      background: var(--scrollbar-thumb-hover);
+    }
+
+    .ui-scrollbar-horizontal::-webkit-scrollbar-button {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    .ui-scrollbar-horizontal {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    }
+  }
+}
+
 .ui-press {
   transition-duration: 150ms;
 }

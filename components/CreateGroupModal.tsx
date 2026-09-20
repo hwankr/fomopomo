@@ -49,8 +49,8 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-                <div className="p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
+                <div className="p-4 sm:p-6">
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">새 그룹 만들기</h2>
                     <form onSubmit={handleSubmit}>
                         <div className="mb-6">
@@ -66,7 +66,7 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
                                 autoFocus
                             />
                         </div>
-                        <div className="flex justify-end gap-3">
+                        <div className="flex flex-wrap justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={onClose}

@@ -353,14 +353,15 @@ export default function TaskSidebar({
         onClick={onClose}
       />
 
-      <div className="fixed right-0 top-0 z-50 h-full w-80 bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
-        <div className="flex h-full flex-col p-6">
-          <div className="mb-8 flex items-center justify-between">
-            <h2 className="text-xl font-bold text-gray-800 dark:text-white">
+      <div role="dialog" aria-modal="true" aria-labelledby="task-sidebar-title" className="fixed right-0 top-0 z-50 h-dvh w-80 max-w-full bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
+        <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
+          <div className="mb-6 flex shrink-0 items-center justify-between sm:mb-8">
+            <h2 id="task-sidebar-title" className="text-xl font-bold text-gray-800 dark:text-white">
               Task list
             </h2>
             <button
               onClick={onClose}
+              aria-label="작업 목록 닫기"
               className="rounded-full p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <svg
@@ -380,7 +381,7 @@ export default function TaskSidebar({
             </button>
           </div>
 
-          <div className="flex-1 space-y-6 overflow-y-auto">
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain">
             <button
               onClick={() => selectAndClose(null)}
               className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all ${

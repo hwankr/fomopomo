@@ -355,7 +355,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const { start, end } = getCurrentWeekRange();
 
   return (
-    <div className="flex flex-col rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-300 dark:border-gray-700 dark:bg-gray-800">
+    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 sm:p-6 dark:border-gray-700 dark:bg-gray-800">
       <div
         className="mb-6 flex cursor-pointer items-center justify-between lg:cursor-default"
         onClick={() => setIsExpanded(!isExpanded)}
@@ -403,7 +403,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
             plans.map((plan) => (
               <div
                 key={plan.id}
-                className="group flex items-center gap-3 rounded-xl border border-transparent bg-indigo-50 p-3 transition-all hover:border-indigo-200 dark:bg-indigo-900/20 dark:hover:border-indigo-800"
+                className="group flex items-center gap-3 rounded-xl border border-transparent bg-indigo-50 p-3 transition-all hover:border-indigo-200 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)] max-sm:gap-2 dark:bg-indigo-900/20 dark:hover:border-indigo-800"
               >
                 <button
                   onClick={() => void togglePlanStatus(plan)}
@@ -422,27 +422,29 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                 </button>
 
                 {editingPlanId === plan.id ? (
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 max-sm:order-last max-sm:col-span-full max-sm:justify-end">
                     <input
                       type="text"
                       aria-label="목표 제목"
                       value={editedTitle}
                       onChange={(event) => setEditedTitle(event.target.value)}
                       onKeyDown={handleEditKeyDown}
-                      className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                       autoFocus
                     />
-                    <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
+                    <div className="min-w-0 max-w-full max-sm:basis-full">
+                      <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
+                    </div>
                     <button
                       aria-label="목표 저장"
                       onClick={() => void updatePlan()}
-                      className="rounded-lg p-1 text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
                     >
                       <Check className="h-4 w-4" />
                     </button>
                     <button
                       onClick={cancelEditing}
-                      className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -450,41 +452,43 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                 ) : (
                   <span
                     className={cn(
-                      'flex-1 text-sm font-medium transition-all',
+                      'min-w-0 flex-1 text-sm font-medium transition-all',
                       plan.status === 'done'
                         ? 'text-gray-400 line-through'
                         : 'text-gray-700 dark:text-gray-200'
                     )}
                   >
-                    <span className="block">{plan.title}</span>
-                    <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                    <span title={plan.title} className="block break-words max-sm:line-clamp-2">{plan.title}</span>
+                    <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
                       {subjects.find((subject) => subject.id === plan.subject_id)?.name ?? '미분류'}
                     </span>
                   </span>
                 )}
 
-                {plan.duration ? (
-                  <span className="whitespace-nowrap rounded-md bg-indigo-50 px-2 py-1 text-xs font-bold text-indigo-500 dark:bg-indigo-900/30">
-                    {formatDuration(plan.duration)}
-                  </span>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-3 max-sm:col-start-2 max-sm:justify-end max-sm:gap-2">
+                  {plan.duration ? (
+                    <span className="whitespace-nowrap rounded-md bg-indigo-50 px-2 py-1 text-xs font-bold text-indigo-500 dark:bg-indigo-900/30">
+                      {formatDuration(plan.duration)}
+                    </span>
+                  ) : null}
 
-                {editingPlanId !== plan.id && (
+                  {editingPlanId !== plan.id && (
+                    <button
+                      aria-label={`${plan.title} 수정`}
+                      onClick={() => startEditing(plan)}
+                      className="p-1.5 text-gray-400 transition-all hover:text-indigo-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+
                   <button
-                    aria-label={`${plan.title} 수정`}
-                    onClick={() => startEditing(plan)}
-                    className="p-1.5 text-gray-400 transition-all hover:text-indigo-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                    onClick={() => setDeletingPlanId(plan.id)}
+                    className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
-                    <Pencil className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" />
                   </button>
-                )}
-
-                <button
-                  onClick={() => setDeletingPlanId(plan.id)}
-                  className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                </div>
               </div>
             ))
           )}
@@ -492,13 +496,13 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
           {isAdding ? (
-            <form onSubmit={addPlan} className="flex flex-col gap-3">
+            <form onSubmit={addPlan} className="flex min-w-0 flex-col gap-3">
               <input
                 type="text"
                 value={newPlanTitle}
                 onChange={(event) => setNewPlanTitle(event.target.value)}
                 placeholder="주간 목표를 입력하세요"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
               <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import {
   format,
   getHours,
@@ -44,6 +45,104 @@ const formatDuration = (seconds: number) => {
   return `${remainingSeconds}s`;
 };
 
+function TimelineSessionBar({ session, leftPercent, widthPercent, open, onOpenChange }: {
+  session: ProcessedSession;
+  leftPercent: number;
+  widthPercent: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const titleId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFocus = session.mode === 'focus' || session.mode === 'pomo';
+  const task = session.task?.trim() || '작업 메모 없음';
+  const hours = Math.floor(session._displayDuration / 3600);
+  const minutes = Math.floor((session._displayDuration % 3600) / 60);
+  const seconds = session._displayDuration % 60;
+  const duration = [hours > 0 && `${hours}시간`, minutes > 0 && `${minutes}분`, (seconds > 0 || (!hours && !minutes)) && `${seconds}초`].filter(Boolean).join(' ');
+
+  const clearCloseTimer = () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+  const show = () => { clearCloseTimer(); onOpenChange(true); };
+  const hide = () => { clearCloseTimer(); onOpenChange(false); };
+  const scheduleHide = () => {
+    clearCloseTimer();
+    if (document.activeElement !== triggerRef.current) {
+      closeTimer.current = setTimeout(() => onOpenChange(false), 150);
+    }
+  };
+
+  useEffect(() => () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+  }, []);
+
+  return (
+    <Popover.Root open={open} onOpenChange={next => { if (next) show(); else hide(); }}>
+      <Popover.Trigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label={`${task} 세션 정보`}
+          onPointerEnter={event => { if (event.pointerType !== 'touch') show(); }}
+          onPointerLeave={event => { if (event.pointerType !== 'touch') scheduleHide(); }}
+          onFocus={show}
+          onBlur={event => { if (!contentRef.current?.contains(event.relatedTarget)) hide(); }}
+          onClick={event => { event.preventDefault(); show(); }}
+          onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hide(); }
+            if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
+          }}
+          className={cn(
+            'absolute h-full cursor-pointer opacity-80 transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900/60 dark:focus-visible:ring-white/80',
+            isFocus ? 'bg-rose-500' : 'bg-sky-500',
+          )}
+          style={{ left: `${leftPercent}%`, width: `${Math.max(widthPercent, 0.5)}%` }}
+        />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          ref={contentRef}
+          side="top"
+          sideOffset={10}
+          collisionPadding={12}
+          aria-labelledby={titleId}
+          onOpenAutoFocus={event => event.preventDefault()}
+          onCloseAutoFocus={event => event.preventDefault()}
+          onPointerEnter={clearCloseTimer}
+          onPointerLeave={scheduleHide}
+          onEscapeKeyDown={event => event.stopPropagation()}
+          className="ui-popover z-80 max-h-(--radix-popover-content-available-height) w-70 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xl shadow-slate-900/10 outline-none dark:border-slate-700 dark:bg-slate-800 dark:shadow-black/30"
+        >
+          <span className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium',
+            isFocus ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300',
+          )}>
+            <span aria-hidden="true" className={cn('h-1.5 w-1.5 rounded-full', isFocus ? 'bg-rose-500' : 'bg-sky-500')} />
+            {isFocus ? '뽀모도로' : '스톱워치'}
+          </span>
+          <h4 id={titleId} className="mt-2 text-sm font-semibold leading-6 text-slate-800 [overflow-wrap:anywhere] dark:text-slate-100">{task}</h4>
+          <dl className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-t border-slate-100 pt-3 text-xs dark:border-slate-700">
+            <div>
+              <dt className="text-[11px] text-slate-400">시간</dt>
+              <dd className="mt-1 whitespace-nowrap font-medium tabular-nums text-slate-600 dark:text-slate-300">
+                {format(session._displayStart, 'HH:mm')}–{format(session._displayEnd, 'HH:mm')}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-slate-400">집중시간</dt>
+              <dd className={cn('mt-1 font-semibold tabular-nums', isFocus ? 'text-rose-600 dark:text-rose-300' : 'text-sky-600 dark:text-sky-300')}>{duration}</dd>
+            </div>
+          </dl>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 export default function Timeline({ selectedDate, userId }: TimelineProps) {
   return (
     <ScopedTimeline
@@ -58,6 +157,7 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
   const scopeRef = usePlanRequestScope();
   const [sessions, setSessions] = useState<ProcessedSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeBarId, setActiveBarId] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = usePersistedState(
     'timeline_expanded',
     true
@@ -206,7 +306,7 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
           {[0, 6, 12, 18, 24].map((hour) => (
             <div
               key={hour}
-              className="absolute top-0 bottom-0 z-10 border-l border-gray-300 dark:border-gray-600"
+              className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-gray-300 dark:border-gray-600"
               style={{ left: `${(hour / 24) * 100}%` }}
             />
           ))}
@@ -226,15 +326,6 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
               segmentStart = segmentEnd;
             }
 
-            const isFocus = session.mode === 'focus' || session.mode === 'pomo';
-            const isBreak =
-              session.mode === 'shortBreak' || session.mode === 'longBreak';
-            const colorClass = isFocus
-              ? 'bg-rose-500'
-              : isBreak
-                ? 'bg-emerald-500'
-                : 'bg-sky-500';
-
             return segments.map((segment, segmentIndex) => {
               const startMinutes =
                 getHours(segment.start) * 60 + getMinutes(segment.start);
@@ -242,16 +333,16 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
                 (segment.end.getTime() - segment.start.getTime()) / 60000;
               const leftPercent = (startMinutes / 1440) * 100;
               const widthPercent = (durationMinutes / 1440) * 100;
+              const barId = `${session.id}-${segmentIndex}`;
 
               return (
-                <div
-                  key={`${session.id}-${segmentIndex}`}
-                  className={`absolute h-full cursor-help opacity-80 transition-opacity hover:opacity-100 ${colorClass}`}
-                  style={{
-                    left: `${leftPercent}%`,
-                    width: `${Math.max(widthPercent, 0.5)}%`,
-                  }}
-                  title={`${format(segment.start, 'HH:mm')} - ${session.task || (isFocus ? 'Focus' : 'Session')}`}
+                <TimelineSessionBar
+                  key={barId}
+                  session={session}
+                  leftPercent={leftPercent}
+                  widthPercent={widthPercent}
+                  open={activeBarId === barId}
+                  onOpenChange={next => setActiveBarId(current => next ? barId : current === barId ? null : current)}
                 />
               );
             });
@@ -311,7 +402,7 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
               </div>
 
               <div className={`rounded-lg border p-3 ${borderColor} ${cardBackground}`}>
-                <div className={`font-medium ${textColor}`}>
+                <div className={`font-medium [overflow-wrap:anywhere] ${textColor}`}>
                   {session.task || (isFocus ? 'Focus Session' : 'Session')}
                 </div>
                 {session.mode && (
