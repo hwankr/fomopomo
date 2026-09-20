@@ -11,6 +11,18 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({
+    subjects: [
+      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
+      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' },
+    ],
+    createSubject: vi.fn(async () => null),
+    loading: false, error: null,
+  }),
+}));
+
+
 const { supabaseMock, dragHandlers } = vi.hoisted(() => ({
   dragHandlers: [] as Array<(event: DragEndEvent) => void>,
   supabaseMock: {
@@ -43,6 +55,7 @@ import LongTermTasks, {
 type TaskRow = {
   id: string;
   title: string;
+  subject_id?: string | null;
   position: number;
 };
 
@@ -195,7 +208,7 @@ function renderTasks() {
 
 function getRowForTitle(title: string) {
   const label = screen.getByText(title);
-  const row = label.parentElement;
+  const row = label.closest('.group') as HTMLElement | null;
   if (!row) {
     throw new Error(`Unable to locate row for ${title}`);
   }
@@ -209,6 +222,24 @@ const SUBTASK_EDIT = 2;
 const SUBTASK_DELETE = 3;
 
 describe('LongTermTasks', () => {
+  it('saves a parent subject and supports subject-only edits for future subtasks', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    render(<LongTermTasks userId="user-1" />);
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '블록체인 강의' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 강의');
+    expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-blockchain');
+    fireEvent.click(screen.getByRole('button', { name: '블록체인 강의 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-db' } });
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 저장' }));
+    await waitFor(() => expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-db'));
+    expect(within(getRowForTitle('블록체인 강의')).getByText('데이터베이스')).toBeInTheDocument();
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(2);
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
 
@@ -265,7 +296,7 @@ describe('LongTermTasks', () => {
         })),
       })),
       insert: vi.fn(
-        (payload: { user_id: string; title: string; position: number }) => ({
+        (payload: { user_id: string; title: string; position: number; subject_id: string | null }) => ({
           select: vi.fn(() => ({
             single: vi.fn(async () => {
               if (nextTaskInsert) {
@@ -276,6 +307,7 @@ describe('LongTermTasks', () => {
               const created = {
                 id: `task-${longTermTasks.length + 1}`,
                 title: payload.title,
+                subject_id: payload.subject_id,
                 position: payload.position,
               };
               longTermTasks = [...longTermTasks, created];

@@ -25,8 +25,12 @@ import {
   isSameWeek,
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useStudyStats, ChartData, ViewMode } from '@/hooks/useStudyStats';
+import { useStudyStats, ChartData, ViewMode, StudyTotals, UNCLASSIFIED_SUBJECT } from '@/hooks/useStudyStats';
 import { useAuthSession } from '@/hooks/useAuthSession';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { getDayStart } from '@/lib/dateUtils';
+import { StudySubject } from '@/lib/studySubjects';
+import SubjectHistoryManager from '@/components/subjects/SubjectHistoryManager';
 
 export default function StudyReport() {
   const { session } = useAuthSession();
@@ -36,15 +40,22 @@ export default function StudyReport() {
   const [activeMonth, setActiveMonth] = useState(new Date());
   const [activeWeekStart, setActiveWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(null);
+  const [overviewScope, setOverviewScope] = useState<'period' | 'lifetime'>('period');
+  const [grouping, setGrouping] = useState<'subject' | 'task'>('subject');
+  const [showHistoryManager, setShowHistoryManager] = useState(false);
+  const { subjects, error: subjectsError } = useStudySubjects(userId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
 
   const {
     loading,
+    error: statsError,
     totalFocusTime,
     todayFocusTime,
     earliestYear,
     chartData,
+    periodTotals,
+    lifetimeTotals,
     fetchStats
   } = useStudyStats(userId);
 
@@ -137,8 +148,8 @@ export default function StudyReport() {
 
     const referenceDate =
       viewMode === 'year'
-        ? new Date(activeYear, today.getMonth(), today.getDate())
-        : today;
+        ? new Date(activeYear, getDayStart(today).getMonth(), getDayStart(today).getDate())
+        : getDayStart(today);
     const todayKey =
       viewMode === 'year'
         ? format(referenceDate, 'yyyy-MM')
@@ -391,9 +402,9 @@ export default function StudyReport() {
 
             <div className="text-center mt-4 text-xs text-gray-400">
               {viewMode === 'week' &&
-                `${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'M/dd')} - ${format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 6), 'M/dd')} (월~일)`}
+                `${format(activeWeekStart, 'M/dd')} - ${format(addDays(activeWeekStart, 6), 'M/dd')} (월~일)`}
               {viewMode === 'month' &&
-                `${format(startOfMonth(new Date()), 'yyyy.MM')} (1일~${endOfMonth(new Date()).getDate()}일)`}
+                `${format(startOfMonth(activeMonth), 'yyyy.MM')} (1일~${endOfMonth(activeMonth).getDate()}일)`}
               {viewMode === 'year' &&
                 `${format(startOfYear(new Date(activeYear, 0, 1)), 'yyyy')}년 (1월~12월)`}
             </div>
@@ -421,7 +432,65 @@ export default function StudyReport() {
                 <div className="text-gray-400 text-xs">데이터가 없습니다.</div>
               )}
             </div>
+
+            <section className="mt-6 rounded-xl border border-gray-100 p-4 dark:border-slate-600" aria-label="과목과 할 일별 누적 통계">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex rounded-lg bg-gray-100 p-1 dark:bg-slate-800">
+                  <button type="button" aria-pressed={overviewScope === 'period'} onClick={() => setOverviewScope('period')} className={`${tabBase} ${overviewScope === 'period' ? tabActive : tabInactive}`}>선택 기간 합계</button>
+                  <button type="button" aria-pressed={overviewScope === 'lifetime'} onClick={() => setOverviewScope('lifetime')} className={`${tabBase} ${overviewScope === 'lifetime' ? tabActive : tabInactive}`}>전체 누적</button>
+                </div>
+                <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-slate-800">
+                  <button type="button" aria-pressed={grouping === 'subject'} onClick={() => setGrouping('subject')} className={`${tabBase} ${grouping === 'subject' ? tabActive : tabInactive}`}>과목별</button>
+                  <button type="button" aria-pressed={grouping === 'task'} onClick={() => setGrouping('task')} className={`${tabBase} ${grouping === 'task' ? tabActive : tabInactive}`}>할 일별</button>
+                </div>
+              </div>
+              {(subjectsError || statsError) && <p role="alert" className="mt-3 text-xs text-red-500">{subjectsError || statsError}</p>}
+              {statsError && <button type="button" onClick={() => void fetchStats(viewMode, viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? activeMonth : new Date(activeYear, 0, 1), userId ?? undefined)} className="mt-2 text-xs font-semibold text-rose-600">통계 다시 조회</button>}
+              {loading ? <p role="status" className="mt-4 text-xs text-gray-400">통계를 불러오는 중…</p> : <StudyTotalsOverview key={`${userId}:${overviewScope}:${grouping}`} totals={overviewScope === 'period' ? periodTotals : lifetimeTotals} subjects={subjects} grouping={grouping} formatDuration={formatDuration} />}
+            </section>
+
+            {userId && <div className="mt-5">
+              <button type="button" aria-expanded={showHistoryManager} onClick={() => setShowHistoryManager(value => !value)} className="text-sm font-semibold text-rose-500 hover:text-rose-600">{showHistoryManager ? '기존 기록 과목 정리 닫기' : '기존 기록 과목 정리'}</button>
+              {showHistoryManager && <SubjectHistoryManager userId={userId} />}
+            </div>}
           </div>
+    </div>
+  );
+}
+
+function StudyTotalsOverview({ totals, subjects, grouping, formatDuration }: {
+  totals: StudyTotals;
+  subjects: StudySubject[];
+  grouping: 'subject' | 'task';
+  formatDuration: (seconds: number) => string;
+}) {
+  const names = new Map(subjects.map(subject => [subject.id, subject.name]));
+  const rows = grouping === 'subject'
+    ? Object.entries(totals.subjects).map(([id, value]) => ({ id, name: id === UNCLASSIFIED_SUBJECT ? '미분류' : names.get(id) ?? '알 수 없는 과목', ...value }))
+    : Object.entries(totals.taskTotals).map(([task, seconds]) => ({ id: task, name: task, seconds, taskTotals: {} as Record<string, number> }));
+  rows.sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
+
+  return (
+    <div className="mt-4">
+      <p className="mb-3 text-sm font-bold text-gray-700 dark:text-gray-200">합계 {formatDuration(totals.seconds)}</p>
+      {!rows.length ? <p className="text-xs text-gray-400">데이터가 없습니다.</p> : <ul className="space-y-2">
+        {rows.map(row => {
+          const share = totals.seconds > 0 ? row.seconds / totals.seconds * 100 : 0;
+          const content = <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <span className="min-w-0 break-words">{row.name}</span>
+            <span className="shrink-0 font-mono text-xs">{formatDuration(row.seconds)} <span className="text-gray-400">({share.toFixed(1)}%)</span></span>
+          </span>;
+          return <li key={row.id} className="rounded-lg border border-gray-100 bg-gray-50 dark:border-slate-700 dark:bg-slate-800/50">
+            {grouping === 'subject' ? <details>
+              <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-sm text-gray-700 dark:text-gray-200"><ChevronRight aria-hidden="true" size={14} className="shrink-0" />{content}</summary>
+              <ul className="space-y-2 border-t border-gray-100 px-4 py-3 dark:border-slate-700" aria-label={`${row.name} 세부 할 일`}>
+                {Object.entries(row.taskTotals).sort((a, b) => b[1] - a[1]).map(([task, seconds]) => <li key={task} className="flex justify-between gap-4 text-xs text-gray-600 dark:text-gray-300"><span className="break-words">{task}</span><span className="shrink-0 font-mono">{formatDuration(seconds)}</span></li>)}
+              </ul>
+            </details> : <div className="flex p-3 text-sm text-gray-700 dark:text-gray-200">{content}</div>}
+          </li>;
+        })}
+      </ul>}
+      {grouping === 'subject' && rows.length > 0 && <p className="mt-3 text-xs text-gray-400">과목을 누르면 세부 할 일별 시간을 볼 수 있습니다.</p>}
     </div>
   );
 }

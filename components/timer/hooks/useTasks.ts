@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
+import { STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import {
   materializeSubtaskForToday,
   toggleSubtaskCompletion,
@@ -32,6 +33,7 @@ export type TaskItem = {
   kind: TaskKind;
   sourceSubtaskId?: string | null;
   parentTitle?: string;
+  subjectId?: string | null;
 };
 
 export type { LongTermSubtaskItem, LongTermTaskItem } from '@/lib/longTermTasks';
@@ -41,6 +43,7 @@ type TaskRow = {
   title: string;
   status: TaskStatus;
   source_subtask_id?: string | null;
+  subject_id?: string | null;
 };
 
 type SessionDurationRow = {
@@ -59,6 +62,7 @@ export const TASK_STATE_KEY = 'fomopomo_task_state';
 export type SavedTaskState = {
   taskId?: string | null;
   taskTitle?: string;
+  subjectId?: string | null;
 };
 
 export const useTasks = (isLoggedIn: boolean) => {
@@ -69,6 +73,7 @@ export const useTasks = (isLoggedIn: boolean) => {
   const [longTermTasks, setLongTermTasks] = useState<LongTermTaskItem[]>([]);
   const [selectedTask, setSelectedTask] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [isTasksLoaded, setIsTasksLoaded] = useState(false);
   const fetchGenerationRef = useRef(0);
   const currentOwnerRef = useRef(taskOwner);
@@ -94,14 +99,16 @@ export const useTasks = (isLoggedIn: boolean) => {
     setLongTermTasks([]);
     setSelectedTask('');
     setSelectedTaskId(null);
+    setSelectedSubjectId(null);
     setIsTasksLoaded(false);
     setPendingSubtaskIds(new Set());
   }, [taskOwner]);
 
   const applyRestoredTaskState = useCallback(
-    (taskId: string | null, taskTitle: string) => {
+    (taskId: string | null, taskTitle: string, subjectId: string | null = null) => {
       setSelectedTaskId(taskId);
       setSelectedTask(taskTitle);
+      setSelectedSubjectId(subjectId);
     },
     []
   );
@@ -131,14 +138,14 @@ export const useTasks = (isLoggedIn: boolean) => {
       // Daily tasks (완료 항목도 표시하므로 status 필터 없음)
       const { data: tasksData } = await supabase
         .from('tasks')
-        .select('id, title, status, source_subtask_id')
+        .select('id, title, status, source_subtask_id, subject_id')
         .eq('user_id', user.id)
         .eq('due_date', today);
 
       // Weekly plans - filter by current week
       const { data: weeklyData } = await supabase
         .from('weekly_plans')
-        .select('id, title, status')
+        .select('id, title, status, subject_id')
         .eq('user_id', user.id)
         .gte('start_date', format(weekStart, 'yyyy-MM-dd'))
         .lte('end_date', format(weekEnd, 'yyyy-MM-dd'));
@@ -146,7 +153,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       // Monthly plans - filter by current month and year
       const { data: monthlyData } = await supabase
         .from('monthly_plans')
-        .select('id, title, status')
+        .select('id, title, status, subject_id')
         .eq('user_id', user.id)
         .eq('month', currentMonth)
         .eq('year', currentYear);
@@ -154,7 +161,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       const { data: longTermData, error: longTermError } = await supabase
         .from('long_term_tasks')
         .select(
-          'id, title, position, long_term_subtasks(id, title, position, completed_at)'
+          'id, title, position, subject_id, long_term_subtasks(id, title, position, completed_at)'
         )
         .eq('user_id', user.id)
         .is('archived_at', null)
@@ -168,6 +175,7 @@ export const useTasks = (isLoggedIn: boolean) => {
         id: task.id,
         title: task.title,
         position: task.position ?? 0,
+        subject_id: task.subject_id ?? null,
         subtasks: (task.long_term_subtasks ?? [])
           .map((subtask) => ({
             ...subtask,
@@ -221,6 +229,7 @@ export const useTasks = (isLoggedIn: boolean) => {
           status: row.status,
           durationSeconds: durationByTaskId.get(row.id) ?? 0,
           kind,
+          subjectId: row.subject_id ?? null,
           ...(kind === 'daily'
             ? {
                 sourceSubtaskId,
@@ -273,18 +282,16 @@ export const useTasks = (isLoggedIn: boolean) => {
         owner
       );
       if (savedTaskState) {
-        const { taskId, taskTitle } = savedTaskState;
+        const { taskId, taskTitle, subjectId } = savedTaskState;
         if (taskId) {
           // Validate that the saved task exists in current data
-          const taskExists =
-            dbTasks.some(t => t.id === taskId) ||
-            weeklyPlans.some(t => t.id === taskId) ||
-            monthlyPlans.some(t => t.id === taskId);
+          const restoredTask = [...dbTasks, ...weeklyPlans, ...monthlyPlans]
+            .find(t => t.id === taskId);
 
-          if (taskExists) {
+          if (restoredTask) {
             queueMicrotask(() => {
               if (currentOwnerRef.current === owner) {
-                applyRestoredTaskState(taskId, taskTitle || '');
+                applyRestoredTaskState(taskId, restoredTask.title, restoredTask.subjectId ?? null);
               }
             });
           } else {
@@ -296,6 +303,12 @@ export const useTasks = (isLoggedIn: boolean) => {
               }
             });
           }
+        } else if (taskTitle || subjectId) {
+          queueMicrotask(() => {
+            if (currentOwnerRef.current === owner) {
+              applyRestoredTaskState(null, taskTitle || '', subjectId ?? null);
+            }
+          });
         }
       }
     } catch (error) {
@@ -320,9 +333,11 @@ export const useTasks = (isLoggedIn: boolean) => {
       void fetchDbTasks();
     };
     window.addEventListener('focus', onFocus);
+    window.addEventListener(STUDY_SUBJECTS_CHANGED_EVENT, onFocus);
     return () => {
       clearTimeout(initialFetch);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener(STUDY_SUBJECTS_CHANGED_EVENT, onFocus);
     };
   }, [fetchDbTasks]);
 
@@ -378,6 +393,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       if (existingTask) {
         setSelectedTask(existingTask.title);
         setSelectedTaskId(existingTask.id);
+        setSelectedSubjectId(existingTask.subjectId ?? null);
         return existingTask;
       }
 
@@ -395,7 +411,10 @@ export const useTasks = (isLoggedIn: boolean) => {
         } = await supabase.auth.getUser();
         if (!user || user.id !== selectionOwner) return null;
 
-        const materialized = await materializeSubtaskForToday(user.id, subtask);
+        const parentTask = longTermTasks.find((task) =>
+          task.subtasks.some((item) => item.id === subtask.id)
+        );
+        const materialized = await materializeSubtaskForToday(user.id, subtask, parentTask?.subject_id ?? null);
         if (
           !materialized ||
           currentOwnerRef.current !== selectionOwner
@@ -409,10 +428,9 @@ export const useTasks = (isLoggedIn: boolean) => {
           status: materialized.status,
           durationSeconds: 0,
           kind: 'daily',
+          subjectId: materialized.subject_id ?? null,
           sourceSubtaskId: materialized.source_subtask_id ?? subtask.id,
-          parentTitle: longTermTasks.find((longTermTask) =>
-            longTermTask.subtasks.some((item) => item.id === subtask.id)
-          )?.title,
+          parentTitle: parentTask?.title,
         };
 
         setDbTasks((currentTasks) =>
@@ -422,6 +440,7 @@ export const useTasks = (isLoggedIn: boolean) => {
         );
         setSelectedTask(task.title);
         setSelectedTaskId(task.id);
+        setSelectedSubjectId(task.subjectId ?? null);
         void fetchDbTasks();
         return task;
       } catch (error) {
@@ -505,6 +524,14 @@ export const useTasks = (isLoggedIn: boolean) => {
     return task?.title || '';
   }, [dbTasks, weeklyPlans, monthlyPlans, selectedTaskId]);
 
+  // Current task edits apply to future records. Already-created records carry
+  // their own snapshot in useStudySession, including when the task is deleted.
+  const getSelectedTaskSubjectId = useCallback(() => {
+    const task = [...dbTasks, ...weeklyPlans, ...monthlyPlans]
+      .find((item) => item.id === selectedTaskId);
+    return task ? task.subjectId ?? null : selectedSubjectId;
+  }, [dbTasks, weeklyPlans, monthlyPlans, selectedTaskId, selectedSubjectId]);
+
   return {
     dbTasks,
     weeklyPlans,
@@ -512,9 +539,12 @@ export const useTasks = (isLoggedIn: boolean) => {
     longTermTasks,
     selectedTask,
     selectedTaskId,
+    selectedSubjectId,
     setSelectedTask,
     setSelectedTaskId,
+    setSelectedSubjectId,
     getSelectedTaskTitle,
+    getSelectedTaskSubjectId,
     fetchDbTasks,
     toggleTaskStatus,
     selectSubtaskForTimer,

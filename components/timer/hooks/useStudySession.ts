@@ -75,6 +75,7 @@ type PendingSessionDraftV2 = {
   mode: string;
   task: string | null;
   taskId: string | null;
+  subjectId?: string | null;
   segments: SessionSegment[];
   failedAt: number;
   // 'conflict': the server already holds this batch id with a different
@@ -205,6 +206,7 @@ const callRecordBatchRpc = async (draft: {
   mode: string;
   task: string | null;
   taskId: string | null;
+  subjectId?: string | null;
   segments: SessionSegment[];
 }, isCurrent: () => boolean = () => true) => {
   const { data: { session }, error } = await supabase.auth.getSession();
@@ -223,6 +225,7 @@ const callRecordBatchRpc = async (draft: {
     p_task: draft.task,
     p_task_id: draft.taskId,
     p_segments: draft.segments,
+    ...(draft.subjectId ? { p_subject_id: draft.subjectId } : {}),
   }).setHeader('Authorization', `Bearer ${session.access_token}`);
 };
 
@@ -297,6 +300,7 @@ export type PendingStudyRecord = {
   duration: number;
   forcedEndTime: number;
   segments: SessionSegment[];
+  subjectId?: string | null;
 };
 
 const formatKoreanDuration = (totalSeconds: number) => {
@@ -311,12 +315,14 @@ interface UseStudySessionProps {
   isLoggedIn: boolean;
   onRecordSaved: () => void;
   selectedTaskTitle: string;
+  selectedSubjectId?: string | null;
 }
 
 export const useStudySession = ({
   isLoggedIn,
   onRecordSaved,
   selectedTaskTitle,
+  selectedSubjectId = null,
 }: UseStudySessionProps) => {
   const ownerId = isLoggedIn ? getCurrentUserId() : null;
   const [isSaving, setIsSaving] = useState(false);
@@ -324,6 +330,13 @@ export const useStudySession = ({
   // Ref-based lock to prevent duplicate saves (sync check, unlike useState)
   const isSavingRef = useRef(false);
   const currentIntervalStartRef = useRef<number | null>(null);
+  // Once a request has been sent, all later retries must carry its original
+  // labels too, even if the user edits the modal or selects another task.
+  const finalizedLabelsRef = useRef(new WeakMap<PendingStudyRecord, {
+    task: string | null;
+    taskId: string | null;
+    subjectId: string | null;
+  }>());
 
   const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0) => {
     try {
@@ -381,6 +394,7 @@ export const useStudySession = ({
         intervals: { start: number; end: number }[];
         currentStart: number | null;
         sessionId?: string;
+        subjectId?: string | null;
       }
     ): PendingStudyRecord | null => {
       const ownerId = getCurrentUserId();
@@ -396,6 +410,7 @@ export const useStudySession = ({
         duration,
         forcedEndTime: endTime,
         segments: buildSessionSegments(sourceIntervals, sourceStart, endTime, duration),
+        subjectId: contentOverride ? contentOverride.subjectId ?? null : selectedSubjectId,
       };
 
       if (!contentOverride) {
@@ -418,13 +433,14 @@ export const useStudySession = ({
         mode: record.mode,
         task: null,
         taskId: null,
+        subjectId: record.subjectId,
         segments: record.segments,
         failedAt: Date.now(),
       });
 
       return record;
     },
-    [intervals]
+    [intervals, selectedSubjectId]
   );
 
   // Saves a created record, attaching the given label. Retries call this again
@@ -432,7 +448,7 @@ export const useStudySession = ({
   // byte-identical across attempts and the server's idempotency contract can
   // always prove a duplicate.
   const savePendingRecord = useCallback(
-    async (record: PendingStudyRecord, taskText = '', taskId: string | null = null): Promise<SaveRecordResult> => {
+    async (record: PendingStudyRecord, taskText = '', taskId: string | null = null, subjectId = record.subjectId ?? null): Promise<SaveRecordResult> => {
       // Prevent duplicate saves using ref (synchronous check). The record
       // stays shielded: the in-flight save's own terminal handling owns it.
       if (isSavingRef.current) {
@@ -460,12 +476,26 @@ export const useStudySession = ({
         },
       });
 
-      const payload = {
-        mode: record.mode,
+      const labels = finalizedLabelsRef.current.get(record) ?? {
         task: taskText.trim() || null,
         taskId,
+        subjectId,
+      };
+      finalizedLabelsRef.current.set(record, labels);
+      const payload = {
+        mode: record.mode,
+        ...labels,
         segments: record.segments,
       };
+      // Persist the final choice before the request starts: closing the tab
+      // during a slow/offline save must retain the chosen subject and label.
+      upsertPendingSession({
+        version: 2,
+        sessionId: record.sessionId,
+        ownerId: record.ownerId,
+        ...payload,
+        failedAt: Date.now(),
+      });
 
       try {
         const response = await callRecordBatchRpc({ sessionId: record.sessionId, ownerId: record.ownerId, ...payload });

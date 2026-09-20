@@ -234,7 +234,7 @@ select ok(
 select is(
   has_function_privilege(
     'anon',
-    'public.record_study_session_batch(uuid, text, text, uuid, jsonb)',
+    'public.record_study_session_batch(uuid, text, text, uuid, jsonb, uuid)',
     'EXECUTE'
   ),
   false,
@@ -244,7 +244,7 @@ select is(
 select is(
   has_function_privilege(
     'service_role',
-    'public.record_study_session_batch(uuid, text, text, uuid, jsonb)',
+    'public.record_study_session_batch(uuid, text, text, uuid, jsonb, uuid)',
     'EXECUTE'
   ),
   false,
@@ -254,7 +254,7 @@ select is(
 select ok(
   has_function_privilege(
     'authenticated',
-    'public.record_study_session_batch(uuid, text, text, uuid, jsonb)',
+    'public.record_study_session_batch(uuid, text, text, uuid, jsonb, uuid)',
     'EXECUTE'
   ),
   'authenticated can execute record_study_session_batch'

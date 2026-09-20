@@ -41,8 +41,11 @@ vi.mock('@/lib/supabase', () => ({
 import {
   useStudyStats,
   __clearInflightLifetimeScansForTests,
+  summarizeStudySessions,
+  UNCLASSIFIED_SUBJECT,
   type ViewMode,
 } from '@/hooks/useStudyStats';
+import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 
 // 테스트에서 기간 네비게이션(재-fetch)을 흉내 내기 위한 탈출구.
 let fetchStatsRef:
@@ -50,7 +53,7 @@ let fetchStatsRef:
   | null = null;
 
 function StatsProbe({ userId }: { userId: string | null }) {
-  const { totalFocusTime, heatmapData, chartData, earliestYear, fetchStats } = useStudyStats(userId);
+  const { totalFocusTime, heatmapData, chartData, earliestYear, fetchStats, periodTotals, lifetimeTotals } = useStudyStats(userId);
 
   useEffect(() => {
     fetchStatsRef = fetchStats;
@@ -65,6 +68,8 @@ function StatsProbe({ userId }: { userId: string | null }) {
   return (
     <div>
       <div data-testid="total">{totalFocusTime}</div>
+      <div data-testid="period-subjects">{JSON.stringify(periodTotals.subjects)}</div>
+      <div data-testid="lifetime-subjects">{JSON.stringify(lifetimeTotals.subjects)}</div>
       <div data-testid="heatmap-count">{heatmapData.length}</div>
       <div data-testid="earliest-year">{earliestYear}</div>
       <div data-testid="heatmap-dates">{heatmapData.map((entry) => entry.date).join(',')}</div>
@@ -147,6 +152,8 @@ describe('useStudyStats 로그아웃/계정 전환 잔존 데이터 방지', () 
     expect(screen.getByTestId('total').textContent).toBe('0');
     expect(screen.getByTestId('heatmap-count').textContent).toBe('0');
     expect(screen.getByTestId('chart-seconds').textContent).toBe('0');
+    expect(screen.getByTestId('period-subjects').textContent).toBe('{}');
+    expect(screen.getByTestId('lifetime-subjects').textContent).toBe('{}');
   });
 
   it('계정 전환 후 도착한 이전 계정의 in-flight 응답은 폐기한다', async () => {
@@ -255,5 +262,55 @@ describe('useStudyStats 로그아웃/계정 전환 잔존 데이터 방지', () 
     expect(screen.getByTestId('heatmap-count').textContent).toBe('0');
     expect(screen.getByTestId('chart-seconds').textContent).toBe('0');
     expect(pendingQueries.length).toBe(queriesBeforeLogout);
+  });
+
+  it('과목 변경 이벤트가 전체 캐시와 현재 기간을 새로 조회한다', async () => {
+    render(<StatsProbe userId="user-a" />);
+    await resolveFetchQueries(0, { duration: 3600, createdAt: '2026-03-02T10:00:00.000Z' });
+    expect(screen.getByTestId('lifetime-subjects').textContent).toContain(UNCLASSIFIED_SUBJECT);
+    const startIndex = pendingQueries.length;
+    act(() => notifyStudySubjectsChanged());
+    await waitFor(() => expect(pendingQueries.length).toBe(startIndex + 3));
+    const changed = [{ duration: 3600, created_at: '2026-03-02T10:00:00.000Z', task: '블록체인 9/12 복습', subject_id: 'blockchain' }];
+    await resolveQuery(startIndex, { data: changed });
+    await resolveQuery(startIndex + 1, { data: changed });
+    await resolveQuery(startIndex + 2, { data: [] });
+    await resolveQuery(startIndex + 3, { data: [] });
+    await resolveQuery(startIndex + 4, { data: [] });
+    await waitFor(() => expect(screen.getByTestId('lifetime-subjects').textContent).toContain('blockchain'));
+    expect(screen.getByTestId('period-subjects').textContent).toContain('blockchain');
+    expect(screen.getByTestId('total').textContent).toBe('3600');
+    expect(screen.getByTestId('heatmap-count').textContent).toBe('1');
+  });
+});
+
+describe('과목 및 세부 할 일 집계', () => {
+  it('여러 제목을 과목 ID로 묶고 미분류를 포함해 전체 시간을 보존한다', () => {
+    const totals = summarizeStudySessions([
+      { duration: 1800, created_at: '', task: '블록체인 9/12 복습', subject_id: 'blockchain' },
+      { duration: 3000, created_at: '', task: '블록체인 9/19 복습', subject_id: 'blockchain' },
+      { duration: 3600, created_at: '', task: '코딩테스트 XX문제', subject_id: 'coding' },
+      { duration: 1200, created_at: '', task: '자유 공부', subject_id: null },
+    ]);
+    expect(totals.subjects.blockchain.seconds).toBe(4800);
+    expect(totals.subjects.blockchain.taskTotals).toEqual({ '블록체인 9/12 복습': 1800, '블록체인 9/19 복습': 3000 });
+    expect(totals.subjects[UNCLASSIFIED_SUBJECT].seconds).toBe(1200);
+    expect(totals.seconds).toBe(9600);
+    expect(Object.values(totals.subjects).reduce((sum, subject) => sum + subject.seconds, 0)).toBe(totals.seconds);
+    expect(Object.values(totals.taskTotals).reduce((sum, seconds) => sum + seconds, 0)).toBe(totals.seconds);
+  });
+
+  it('같은 제목이나 객체 속성 이름을 사용해도 과목 ID를 혼동하지 않는다', () => {
+    const totals = summarizeStudySessions([
+      { duration: 10, created_at: '', task: '__proto__', subject_id: 'a' },
+      { duration: 20, created_at: '', task: '__proto__', subject_id: 'b' },
+      { duration: 30, created_at: '', task: '미분류', subject_id: 'c' },
+      { duration: 40, created_at: '', task: '미분류', subject_id: null },
+    ]);
+    expect(Object.keys(totals.subjects)).toHaveLength(4);
+    expect(totals.subjects.a.seconds).toBe(10);
+    expect(totals.subjects.b.seconds).toBe(20);
+    expect(totals.taskTotals.__proto__).toBe(30);
+    expect(totals.seconds).toBe(100);
   });
 });

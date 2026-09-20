@@ -114,6 +114,20 @@ create table public.monthly_plans (
   created_at timestamptz default now()
 );
 
+-- Match the recurring-task table that predates the forward migration baseline.
+create table public.pinned_tasks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  position integer default 0,
+  created_at timestamptz default now()
+);
+alter table public.pinned_tasks enable row level security;
+create policy "Users can manage their own pinned tasks"
+  on public.pinned_tasks for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 create table public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,

@@ -447,6 +447,7 @@ describe('account-reset route', () => {
       tasks: { id: 'other-daily', user_id: 'user-2', source_subtask_id: 'other-subtask' },
       long_term_subtasks: { id: 'other-subtask', user_id: 'user-2', long_term_task_id: 'other-parent' },
       long_term_tasks: { id: 'other-parent', user_id: 'user-2', archived_at: null },
+      study_subjects: { id: 'other-subject', user_id: 'user-2', name: '다른 계정 과목' },
     };
     const { client, state } = createMockClient({
       rowsByTable: {
@@ -463,6 +464,10 @@ describe('account-reset route', () => {
           { id: 'parent-1', user_id: 'user-1', archived_at: null },
           { id: 'parent-2', user_id: 'user-1', archived_at: '2026-09-01T00:00:00Z' },
           otherUserRows.long_term_tasks,
+        ],
+        study_subjects: [
+          { id: 'subject-1', user_id: 'user-1', name: '블록체인' },
+          otherUserRows.study_subjects,
         ],
       },
     });
@@ -484,6 +489,7 @@ describe('account-reset route', () => {
       { table: 'tasks', column: 'user_id', value: 'user-1' },
       { table: 'long_term_subtasks', column: 'user_id', value: 'user-1' },
       { table: 'long_term_tasks', column: 'user_id', value: 'user-1' },
+      { table: 'study_subjects', column: 'user_id', value: 'user-1' },
     ]);
     expect(state.profileUpdateCalls[0]).toMatchObject({ column: 'id', value: 'user-1' });
     expect(state.deleteUserMock).not.toHaveBeenCalled();
@@ -496,7 +502,7 @@ describe('account-reset route', () => {
     }
   });
 
-  it.each(['long_term_subtasks', 'long_term_tasks'])(
+  it.each(['long_term_subtasks', 'long_term_tasks', 'study_subjects'])(
     'returns 500 instead of reporting success when deleting %s fails',
     async (table) => {
       const { client, state } = createMockClient({

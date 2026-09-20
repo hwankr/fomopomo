@@ -1,6 +1,19 @@
 import { StrictMode } from 'react';
+import toast from 'react-hot-toast';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({
+    subjects: [
+      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
+      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' },
+    ],
+    createSubject: vi.fn(async () => null),
+    loading: false, error: null,
+  }),
+}));
+
 import TaskList from '../TaskList';
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn() }));
@@ -107,9 +120,111 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('TaskList request ownership', () => {
+  it('persists the selected subject when creating a daily task', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/12 복습' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/12 복습');
+    expect(rows.tasks.find((row) => row.title === '블록체인 9/12 복습')).toMatchObject({ subject_id: 'subject-blockchain' });
+    expect(within(taskRow('블록체인 9/12 복습')).getByText('블록체인')).toBeInTheDocument();
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(1);
+  });
+
+  it('changes only the task and pinned template subject, preserving past session classification', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    rows.tasks[0].subject_id = 'subject-db';
+    rows.study_sessions = [{ id: 'session-1', user_id: 'user-1', task_id: 'a-task', duration: 600, subject_id: 'subject-db' }];
+    const { rerender } = mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByTitle('작업 고정'));
+    await waitFor(() => expect(rows.pinned_tasks[0]).toMatchObject({ subject_id: 'subject-db' }));
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(rows.pinned_tasks[0]).toMatchObject({ subject_id: 'subject-blockchain' }));
+    expect(rows.tasks[0].subject_id).toBe('subject-blockchain');
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(1);
+    expect(rows.study_sessions[0].subject_id).toBe('subject-db');
+    expect(queries.some((query) => query.table === 'study_sessions' && query.action === 'update')).toBe(false);
+    rerender(view(DAY_B));
+    await screen.findByText('9월 6일 작업');
+    expect(rows.tasks.find((row) => row.title === '9월 6일 작업' && row.due_date === '2026-09-07')).toMatchObject({ subject_id: 'subject-blockchain' });
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(2);
+  });
+
+  it('does not reload subject consumers for title-only or status changes', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    rows.tasks[0].subject_id = 'subject-db';
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '작업 제목' }), { target: { value: '데이터베이스 복습' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(rows.tasks[0].title).toBe('데이터베이스 복습'));
+    fireEvent.click(within(taskRow('데이터베이스 복습')).getAllByRole('button')[1]);
+    await waitFor(() => expect(rows.tasks[0].status).toBe('done'));
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(0);
+  });
+
+  it('does not announce a subject edit that fails to save', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const toastError = vi.spyOn(toast, 'error').mockReturnValue('save-error');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    rows.tasks[0].subject_id = 'subject-db';
+    mount();
+    await screen.findByText('9월 6일 작업');
+    intercept = query => query.table === 'tasks' && query.action === 'update'
+      ? Promise.resolve({ data: null, error: { message: 'save failed' } }) : undefined;
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(within(taskRow('9월 6일 작업')).getByText('데이터베이스')).toBeInTheDocument());
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(0);
+    expect(toastError).toHaveBeenCalledWith('할 일을 저장하지 못했습니다. 다시 시도해주세요.');
+  });
+
+  it('reports a pinned-template failure while preserving the saved daily subject', async () => {
+    const toastError = vi.spyOn(toast, 'error').mockReturnValue('pin-error');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    rows.tasks[0].subject_id = 'subject-db';
+    rows.pinned_tasks = [{ id: 'pin-a', user_id: 'user-1', title: '9월 6일 작업', position: 0, subject_id: 'subject-db' }];
+    const { rerender } = mount();
+    await screen.findByText('9월 6일 작업');
+    intercept = query => query.table === 'pinned_tasks' && query.action === 'update'
+      ? Promise.resolve({ data: null, error: { message: 'pin save failed' } }) : undefined;
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(
+      '할 일은 저장했지만 고정 작업은 저장하지 못했습니다. 이후 자동 추가에는 이전 설정이 적용됩니다.'
+    ));
+    await waitFor(() => expect(queries.filter((query) => query.table === 'tasks' && query.action === 'select').length).toBeGreaterThan(1));
+    expect(rows.tasks.find((row) => row.id === 'a-task')?.subject_id).toBe('subject-blockchain');
+    expect(within(taskRow('9월 6일 작업')).getByText('블록체인')).toBeInTheDocument();
+    expect(rows.pinned_tasks[0].subject_id).toBe('subject-db');
+    rerender(view(DAY_B));
+    await screen.findByText('9월 6일 작업');
+    expect(rows.tasks.find((row) => row.title === '9월 6일 작업' && row.due_date === '2026-09-07')?.subject_id).toBe('subject-db');
+  });
+
+  it('allows removing a task subject without renaming it', async () => {
+    rows.tasks[0].subject_id = 'subject-db';
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(rows.tasks[0].subject_id).toBeNull());
+    expect(within(taskRow('9월 6일 작업')).getByText('미분류')).toBeInTheDocument();
+  });
+
   it('loads the selected day with its parent title and only the owner’s study duration', async () => {
     rows.tasks[0].source_subtask_id = 'sub-a';
     rows.long_term_subtasks = [{ id: 'sub-a', long_term_tasks: { title: '장기 과제 A' } }];

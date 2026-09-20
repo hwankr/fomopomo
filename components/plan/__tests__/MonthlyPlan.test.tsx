@@ -8,6 +8,18 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({
+    subjects: [
+      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
+      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' },
+    ],
+    createSubject: vi.fn(async () => null),
+    loading: false, error: null,
+  }),
+}));
+
+
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
     from: vi.fn(),
@@ -25,6 +37,7 @@ import MonthlyPlan from '../MonthlyPlan';
 type MonthlyPlanRow = {
   id: string;
   title: string;
+  subject_id?: string | null;
   status: 'todo' | 'done';
   month: number;
   year: number;
@@ -53,7 +66,7 @@ function renderPlan() {
 
 function getCardForTitle(title: string) {
   const label = screen.getByText(title);
-  const card = label.parentElement;
+  const card = label.closest('.group') as HTMLElement | null;
   if (!card) {
     throw new Error(`Unable to locate card for ${title}`);
   }
@@ -100,6 +113,7 @@ describe('MonthlyPlan', () => {
                 const created = {
                   id: `monthly-${monthlyPlans.length + 1}`,
                   title: payload.title,
+                  subject_id: payload.subject_id,
                   status: payload.status,
                   month: payload.month,
                   year: payload.year,
@@ -158,6 +172,24 @@ describe('MonthlyPlan', () => {
     expect(screen.getByText('2h 0m')).toBeInTheDocument();
   });
 
+  it('persists a subject on create and changes it without renaming the goal', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    renderPlan();
+    await screen.findByText('Finish portfolio');
+    fireEvent.click(screen.getByRole('button', { name: '월간 목표 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('월간 목표를 입력하세요'), { target: { value: '블록체인 복습' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-blockchain' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 복습');
+    expect(monthlyPlans.find((row) => row.title === '블록체인 복습')?.subject_id).toBe('subject-blockchain');
+    fireEvent.click(screen.getByRole('button', { name: '블록체인 복습 수정' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과목' }), { target: { value: 'subject-db' } });
+    fireEvent.click(screen.getByRole('button', { name: '목표 저장' }));
+    await waitFor(() => expect(monthlyPlans.find((row) => row.title === '블록체인 복습')?.subject_id).toBe('subject-db'));
+    expect(within(getCardForTitle('블록체인 복습')).getByText('데이터베이스')).toBeInTheDocument();
+    expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(2);
+  });
+
   it('adds a new monthly goal', async () => {
     renderPlan();
 
@@ -183,7 +215,7 @@ describe('MonthlyPlan', () => {
     fireEvent.click(within(card).getAllByRole('button')[0]);
 
     await waitFor(() => {
-      expect(screen.getByText('Finish portfolio')).toHaveClass('line-through');
+      expect(screen.getByText('Finish portfolio').parentElement).toHaveClass('line-through');
     });
   });
 

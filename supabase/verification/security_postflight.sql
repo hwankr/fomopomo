@@ -22,7 +22,8 @@ with expected_authenticated_functions(signature) as (
     ('public.is_group_leader(uuid)'),
     ('public.is_safe_push_endpoint(text)'),
     ('public.join_group_by_code(text)'),
-    ('public.record_study_session_batch(uuid,text,text,uuid,jsonb)'),
+    ('public.record_study_session_batch(uuid,text,text,uuid,jsonb,uuid)'),
+    ('public.classify_study_sessions(bigint[],uuid)'),
     ('public.send_friend_request(text)'),
     ('public.transfer_group_leadership(uuid,uuid)')
 ),

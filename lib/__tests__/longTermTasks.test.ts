@@ -23,7 +23,7 @@ const todayKey = '2026-08-29';
 const now = new Date(2026, 7, 29, 3, 30);
 const nowIso = now.toISOString();
 const taskSelect =
-  'id, title, status, estimated_pomodoros, position, source_subtask_id';
+  'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id';
 
 const subtask: LongTermSubtaskRow = {
   id: 'subtask-1',
@@ -36,6 +36,7 @@ const subtask: LongTermSubtaskRow = {
 const materializedTask: MaterializedTaskRow = {
   id: 'task-1',
   title: 'Chapter 1',
+  subject_id: null,
   status: 'todo',
   estimated_pomodoros: 1,
   position: 5,
@@ -210,6 +211,7 @@ describe('longTermTasks helpers', () => {
           status: 'todo',
           position: 5,
           source_subtask_id: 'subtask-1',
+          subject_id: null,
         },
         options: {
           onConflict: 'source_subtask_id,due_date',
@@ -227,6 +229,26 @@ describe('longTermTasks helpers', () => {
     await materializeSubtaskForToday('user-1', subtask);
 
     expect(upsertCalls[0].payload).toMatchObject({ position: 0 });
+  });
+
+  it('copies the parent subject into a newly materialized daily task', async () => {
+    upsertResult = { data: { ...materializedTask, subject_id: 'subject-blockchain' }, error: null };
+
+    const result = await materializeSubtaskForToday('user-1', subtask, 'subject-blockchain');
+
+    expect(upsertCalls[0].payload).toMatchObject({ source_subtask_id: subtask.id, subject_id: 'subject-blockchain' });
+    expect(result?.subject_id).toBe('subject-blockchain');
+  });
+
+  it('keeps an existing daily task classification when the parent subject later changes', async () => {
+    upsertResult = { data: null, error: null };
+    fallbackResult = { data: { ...materializedTask, subject_id: 'subject-original' }, error: null };
+
+    const result = await materializeSubtaskForToday('user-1', subtask, 'subject-new');
+
+    expect(upsertCalls[0].options.ignoreDuplicates).toBe(true);
+    expect(result?.subject_id).toBe('subject-original');
+    expect(taskUpdatePatches).toEqual([]);
   });
 
   it('normalizes an existing null position before appending the task', async () => {

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   persistSettings: vi.fn(),
   setSelectedTask: vi.fn(),
   setSelectedTaskId: vi.fn(),
+  setSelectedSubjectId: vi.fn(),
   settings: {
     pomoTime: 25, shortBreak: 5, longBreak: 15, longBreakInterval: 4,
     autoStartPomos: false, autoStartBreaks: false,
@@ -45,8 +46,11 @@ vi.mock('@/components/timer/hooks/useTasks', () => ({
   useTasks: () => ({
     dbTasks: [], weeklyPlans: [], monthlyPlans: [], longTermTasks: [],
     selectedTask: '', selectedTaskId: null,
+    selectedSubjectId: null,
     setSelectedTask: mocks.setSelectedTask, setSelectedTaskId: mocks.setSelectedTaskId,
     getSelectedTaskTitle: () => '',
+    getSelectedTaskSubjectId: () => null,
+    setSelectedSubjectId: mocks.setSelectedSubjectId,
   }),
 }));
 vi.mock('@/components/TaskSidebar', () => ({ default: () => null }));
