@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Profile } from '@/lib/types';
 import { Search, Shield } from 'lucide-react';
+import AppSelect from '@/components/ui/AppSelect';
 
 interface UserTableProps {
   users: Profile[];
@@ -97,17 +98,16 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
           사용자 ({filteredUsers.length})
         </h2>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            <span>정렬</span>
-            <select
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <span id="user-sort-label">정렬</span>
+            <AppSelect
+              aria-label="정렬"
               value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as SortOption)}
-              className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-gray-200"
-            >
-              <option value="recentAccess">최근 접속</option>
-              <option value="joined">최근 가입</option>
-            </select>
-          </label>
+              onValueChange={(value) => setSortBy(value as SortOption)}
+              options={[{ value: 'recentAccess', label: '최근 접속' }, { value: 'joined', label: '최근 가입' }]}
+              className="flex-1 sm:w-32"
+            />
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input

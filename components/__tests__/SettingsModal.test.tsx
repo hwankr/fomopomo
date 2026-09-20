@@ -1,10 +1,12 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from '@testing-library/react';
+import { createPortal } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { toastMock, supabaseMock, routerReplaceMock } = vi.hoisted(() => ({
   toastMock: {
@@ -41,11 +43,19 @@ vi.mock('@/lib/pushSubscriptionLifecycle', () => ({
 
 vi.mock('../NotificationManager', () => ({
   default: ({ mode }: { mode: string }) => (
-    <div data-mode={mode} data-testid="notification-manager" />
+    <div data-mode={mode} data-testid="notification-manager">
+      {createPortal(<button type="button">포털 내부 동작</button>, document.body)}
+    </div>
   ),
 }));
 
+const subjectMocks = vi.hoisted(() => ({ create: vi.fn(), rename: vi.fn() }));
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, refresh: vi.fn(), createSubject: subjectMocks.create, renameSubject: subjectMocks.rename }),
+}));
 import SettingsModal from '../SettingsModal';
+import { getSettingsStorageKey } from '../timer/hooks/settingsStore';
+import { getStorageOwner } from '@/lib/userScopedStorage';
 
 type SettingsShape = {
   pomoTime: number;
@@ -84,7 +94,7 @@ const DEFAULT_SETTINGS: SettingsShape = {
   volume: 50,
   isMuted: false,
   taskPopupEnabled: true,
-  tasks: ['국어', '수학', '영어'],
+  tasks: [],
   presets: [
     { id: '1', label: '집중', minutes: 25 },
     { id: '2', label: '집중', minutes: 50 },
@@ -124,6 +134,8 @@ function getTimeInputs(): HTMLInputElement[] {
 }
 
 function mockUser(id: string | null) {
+  if (id) window.localStorage.setItem('sb-testproj-auth-token', JSON.stringify({ access_token: 'token', user: { id } }));
+  else window.localStorage.removeItem('sb-testproj-auth-token');
   supabaseMock.auth.getUser.mockResolvedValue({
     data: { user: id ? { id } : null },
   });
@@ -138,8 +150,9 @@ function mockSession(session: SessionShape['data']['session']) {
 
 function setStoredSettings(settings: Partial<SettingsShape>) {
   window.localStorage.setItem(
-    'fomopomo_settings',
+    getSettingsStorageKey(),
     JSON.stringify({
+      ...(getStorageOwner() === 'guest' ? {} : { ownerUserId: getStorageOwner() }),
       ...DEFAULT_SETTINGS,
       ...settings,
     })
@@ -172,7 +185,10 @@ function expectSettingsChangedEventDispatched() {
 describe('SettingsModal', () => {
   beforeEach(() => {
     cleanup();
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://testproj.supabase.co');
     window.localStorage.clear();
+    subjectMocks.create.mockReset();
+    subjectMocks.create.mockImplementation(async (name: string) => ({ id: name, user_id: getStorageOwner(), name }));
     window.history.replaceState({}, '', '/before');
 
     userSettingsResult = { data: null };
@@ -215,7 +231,83 @@ describe('SettingsModal', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     cleanup();
+  });
+
+  it('saves selective legacy imports without overwriting current form edits or reoffering imported names', async () => {
+    mockUser('user-import');
+    setStoredSettings({ pomoTime: 31, tasks: [' DB ', '남길 메모', ''] });
+    let finish!: (value: { id: string; user_id: string; name: string }) => void;
+    subjectMocks.create.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { rerender, onClose, onSave } = renderModal();
+    await screen.findByText('이전 작업 목록 가져오기 (3)');
+    fireEvent.change(getTimeInputs()[0], { target: { value: '44' } });
+    fireEvent.click(screen.getByText('이전 작업 목록 가져오기 (3)'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '이전 항목 1 선택' }));
+    fireEvent.click(screen.getByRole('button', { name: '선택 항목 가져오기' }));
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeDisabled();
+    fireEvent.click(screen.getByTestId('settings-backdrop'));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(upsertMock).not.toHaveBeenCalled();
+    await act(async () => finish({ id: 'db', user_id: 'user-import', name: 'DB' }));
+    await waitFor(() => expect(screen.queryByDisplayValue(' DB ')).not.toBeInTheDocument());
+    expect(getTimeInputs()[0]).toHaveValue(44);
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(upsertMock).toHaveBeenCalledWith({ user_id: 'user-import', settings: expect.objectContaining({ pomoTime: 44, tasks: ['남길 메모', ''] }) });
+    rerender(<SettingsModal isOpen={false} onClose={onClose} onSave={onSave} />);
+    rerender(<SettingsModal isOpen onClose={onClose} onSave={onSave} />);
+    await screen.findByText('이전 작업 목록 가져오기 (2)');
+    expect(screen.queryByDisplayValue(' DB ')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('남길 메모')).toBeInTheDocument();
+  });
+
+  it('preserves guest legacy names without offering them to the next signed-in account', async () => {
+    setStoredSettings({ tasks: ['게스트 메모'] });
+    const { rerender, onClose, onSave } = renderModal();
+    await screen.findByText(/이 기기에 저장된 이전 작업 목록은 그대로 보관/);
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(window.localStorage.getItem('fomopomo_settings') ?? '{}').tasks).toEqual(['게스트 메모']);
+    mockUser('fresh-account');
+    rerender(<SettingsModal isOpen onClose={onClose} onSave={onSave} />);
+    await screen.findByText('아직 과목이 없어요. 자주 공부하는 과목을 추가해보세요.');
+    expect(screen.queryByText(/이전 작업 목록 가져오기/)).not.toBeInTheDocument();
+    expect(subjectMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a portal click as a backdrop dismissal', async () => {
+    const { onClose } = renderModal();
+    await screen.findByText(/로그인하면 과목/);
+    fireEvent.click(screen.getByRole('button', { name: '포털 내부 동작' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(toastMock.success).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('settings-backdrop'));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('keeps keyboard focus in the dialog and saves on Escape', async () => {
+    const { onClose } = renderModal();
+    await screen.findByText(/로그인하면 과목/);
+    const close = screen.getByRole('button', { name: '설정 저장하고 닫기' });
+    const save = screen.getByRole('button', { name: '저장하기' });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(save).toHaveFocus();
+    fireEvent.keyDown(save, { key: 'Tab' });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not dismiss settings on Escape while a confirmation is open', async () => {
+    const { onClose } = renderModal();
+    await screen.findByText(/로그인하면 과목/);
+    fireEvent.click(screen.getByRole('button', { name: '설정 초기화' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: '설정 저장하고 닫기' }), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '초기화' })).toBeInTheDocument();
   });
 
   it('loads remote settings on open when user settings exist', async () => {
@@ -276,7 +368,8 @@ describe('SettingsModal', () => {
 
     expect(getTimeInputs()[1]).toHaveValue(8);
     expect(getTimeInputs()[2]).toHaveValue(19);
-    expect(screen.getByDisplayValue('화학')).toBeInTheDocument();
+    expect(screen.getByText(/이 기기에 저장된 이전 작업 목록은 그대로 보관/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('화학')).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('복습')).toBeInTheDocument();
   });
 
@@ -300,7 +393,7 @@ describe('SettingsModal', () => {
     });
 
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
 
     expect(savedSettings.pomoTime).toBe(33);
@@ -360,14 +453,14 @@ describe('SettingsModal', () => {
     expect(onSave).not.toHaveBeenCalled();
     expect(toastMock.success).not.toHaveBeenCalled();
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
     expect(savedSettings.pomoTime).toBe(40);
   });
 
   it('recovers cleared inputs to the stored values and clamps zeros on save', async () => {
-    setStoredSettings({ pomoTime: 30 });
     mockUser('user-clamp');
+    setStoredSettings({ pomoTime: 30 });
 
     renderModal();
 
@@ -400,7 +493,7 @@ describe('SettingsModal', () => {
     // the user already had (dismissing the modal mid-edit must never destroy
     // it), and an explicit 0 clamps to the minimum.
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
     expect(savedSettings.pomoTime).toBe(30);
     expect(savedSettings.shortBreak).toBe(1);
@@ -420,10 +513,10 @@ describe('SettingsModal', () => {
   });
 
   it('keeps a preset whose minutes were cleared instead of saving a 1-minute preset', async () => {
+    mockUser('user-preset');
     setStoredSettings({
       presets: [{ id: 'p1', label: '심화', minutes: 47 }],
     });
-    mockUser('user-preset');
 
     renderModal();
 
@@ -444,7 +537,7 @@ describe('SettingsModal', () => {
 
     // …and saving recovers the preset's previous minutes.
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
     expect(savedSettings.presets).toEqual([
       { id: 'p1', label: '심화', minutes: 47 },
@@ -475,10 +568,10 @@ describe('SettingsModal', () => {
     });
 
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
 
-    expect(savedSettings).toEqual(DEFAULT_SETTINGS);
+    expect(savedSettings).toEqual({ ...DEFAULT_SETTINGS, ownerUserId: getStorageOwner() });
     expect(upsertMock).toHaveBeenCalledWith({
       user_id: 'user-reset-settings',
       settings: DEFAULT_SETTINGS,
@@ -492,12 +585,13 @@ describe('SettingsModal', () => {
 
   it('repairs corrupt local settings during reset but stays open when remote persistence fails', async () => {
     mockUser('user-reset-fail');
-    window.localStorage.setItem('fomopomo_settings', 'not-json');
+    window.localStorage.setItem(getSettingsStorageKey(), 'not-json');
     upsertMock.mockImplementationOnce(async () => {
       throw new Error('reset failed');
     });
 
     const { onClose, onSave } = renderModal();
+    await screen.findByLabelText('새 과목 이름');
 
     fireEvent.click(screen.getByRole('button', { name: /설정 초기화/ }));
     fireEvent.click(screen.getByRole('button', { name: '초기화' }));
@@ -509,10 +603,10 @@ describe('SettingsModal', () => {
     });
 
     const savedSettings = JSON.parse(
-      window.localStorage.getItem('fomopomo_settings') ?? '{}'
+      window.localStorage.getItem(getSettingsStorageKey()) ?? '{}'
     ) as SettingsShape;
 
-    expect(savedSettings).toEqual(DEFAULT_SETTINGS);
+    expect(savedSettings).toEqual({ ...DEFAULT_SETTINGS, ownerUserId: getStorageOwner() });
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

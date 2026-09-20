@@ -24,7 +24,7 @@ import {
   isSameMonth,
   isSameWeek,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { useStudyStats, ChartData, ViewMode, StudyTotals, UNCLASSIFIED_SUBJECT } from '@/hooks/useStudyStats';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
@@ -163,63 +163,65 @@ export default function StudyReport() {
   }, [activeYear, chartData, selectedBucketKey, today, viewMode]);
 
 
-  const tabBase = 'px-4 py-1.5 text-xs font-bold rounded-md transition-all';
+  const tabBase = 'ui-press whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-lg transition-colors';
   const tabActive =
-    'bg-white dark:bg-slate-600 text-gray-800 dark:text-white shadow-sm border border-gray-200 dark:border-slate-500';
+    'bg-white text-rose-600 shadow-sm dark:bg-slate-700 dark:text-rose-200';
   const tabInactive =
-    'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-700';
+    'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200';
 
   return (
-    <div className="animate-fade-in w-full">
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="bg-gray-50 dark:bg-slate-700/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-600">
-              <div className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">
-                Total Hours
+    <div className="ui-panel-enter w-full">
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5 dark:border-slate-700 dark:bg-slate-800/50">
+              <div className="mb-3 text-xs font-medium text-slate-500 dark:text-slate-400">
+                총 누적 시간
               </div>
-              <div className="text-3xl font-mono font-bold text-gray-800 dark:text-white">
-                {Math.floor(totalFocusTime / 3600)}
-                <span className="text-lg text-gray-400 ml-1">h</span>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums text-slate-800 sm:text-3xl dark:text-white">
+                {formatDuration(totalFocusTime)}
               </div>
-              <div className="text-xs text-gray-500 mt-1">총 누적 시간</div>
+              <div className="mt-2 text-xs text-slate-400">전체 기간</div>
             </div>
-            <div className="bg-gray-50 dark:bg-slate-700/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-600">
-              <div className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">
-                Today
+            <div className="rounded-2xl border border-rose-100 bg-rose-50/40 p-4 sm:p-5 dark:border-rose-900/40 dark:bg-rose-950/15">
+              <div className="mb-3 text-xs font-medium text-slate-500 dark:text-slate-400">
+                오늘 집중 시간
               </div>
-              <div className="text-3xl font-mono font-bold text-rose-500 dark:text-rose-400">
+              <div className="text-2xl font-semibold tracking-tight tabular-nums text-rose-500 sm:text-3xl dark:text-rose-300">
                 {formatDuration(todayFocusTime)}
               </div>
-              <div className="text-xs text-gray-500 mt-1">오늘 집중 시간</div>
+              <div className="mt-2 text-xs text-slate-400">오전 5시부터 새로운 하루</div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-700/30 p-0 sm:p-6 rounded-2xl sm:border border-gray-100 dark:border-slate-600">
+          <div className="rounded-2xl border-slate-200/80 bg-white p-0 sm:border sm:p-5 dark:border-slate-700 dark:bg-slate-800/30">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
                 집중 통계
               </h3>
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-lg flex">
+                <div className="ui-segmented flex">
                   <button
                     onClick={() => setViewMode('week')}
+                    aria-pressed={viewMode === 'week'}
                     className={`${tabBase} ${viewMode === 'week' ? tabActive : tabInactive
                       }`}
                   >
-                    Week
+                    주간
                   </button>
                   <button
                     onClick={() => setViewMode('month')}
+                    aria-pressed={viewMode === 'month'}
                     className={`${tabBase} ${viewMode === 'month' ? tabActive : tabInactive
                       }`}
                   >
-                    Month
+                    월간
                   </button>
                   <button
                     onClick={() => setViewMode('year')}
+                    aria-pressed={viewMode === 'year'}
                     className={`${tabBase} ${viewMode === 'year' ? tabActive : tabInactive
                       }`}
                   >
-                    Year
+                    연간
                   </button>
                 </div>
                 {viewMode === 'year' && (
@@ -433,13 +435,13 @@ export default function StudyReport() {
               )}
             </div>
 
-            <section className="mt-6 rounded-xl border border-gray-100 p-4 dark:border-slate-600" aria-label="과목과 할 일별 누적 통계">
+            <section className="mt-6 rounded-2xl border border-slate-200/80 p-4 sm:p-5 dark:border-slate-700" aria-label="과목과 할 일별 누적 통계">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex rounded-lg bg-gray-100 p-1 dark:bg-slate-800">
+                <div className="ui-segmented flex">
                   <button type="button" aria-pressed={overviewScope === 'period'} onClick={() => setOverviewScope('period')} className={`${tabBase} ${overviewScope === 'period' ? tabActive : tabInactive}`}>선택 기간 합계</button>
                   <button type="button" aria-pressed={overviewScope === 'lifetime'} onClick={() => setOverviewScope('lifetime')} className={`${tabBase} ${overviewScope === 'lifetime' ? tabActive : tabInactive}`}>전체 누적</button>
                 </div>
-                <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-slate-800">
+                <div className="ui-segmented flex">
                   <button type="button" aria-pressed={grouping === 'subject'} onClick={() => setGrouping('subject')} className={`${tabBase} ${grouping === 'subject' ? tabActive : tabInactive}`}>과목별</button>
                   <button type="button" aria-pressed={grouping === 'task'} onClick={() => setGrouping('task')} className={`${tabBase} ${grouping === 'task' ? tabActive : tabInactive}`}>할 일별</button>
                 </div>
@@ -450,7 +452,7 @@ export default function StudyReport() {
             </section>
 
             {userId && <div className="mt-5">
-              <button type="button" aria-expanded={showHistoryManager} onClick={() => setShowHistoryManager(value => !value)} className="text-sm font-semibold text-rose-500 hover:text-rose-600">{showHistoryManager ? '기존 기록 과목 정리 닫기' : '기존 기록 과목 정리'}</button>
+              <button type="button" aria-expanded={showHistoryManager} onClick={() => setShowHistoryManager(value => !value)} className="ui-button-secondary ui-press inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium"><SlidersHorizontal size={15} aria-hidden="true" />{showHistoryManager ? '기존 기록 과목 정리 닫기' : '기존 기록 과목 정리'}</button>
               {showHistoryManager && <SubjectHistoryManager userId={userId} />}
             </div>}
           </div>
@@ -471,22 +473,25 @@ function StudyTotalsOverview({ totals, subjects, grouping, formatDuration }: {
   rows.sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
 
   return (
-    <div className="mt-4">
-      <p className="mb-3 text-sm font-bold text-gray-700 dark:text-gray-200">합계 {formatDuration(totals.seconds)}</p>
-      {!rows.length ? <p className="text-xs text-gray-400">데이터가 없습니다.</p> : <ul className="space-y-2">
+    <div className="ui-panel-enter mt-5">
+      <p className="mb-4 text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">합계 {formatDuration(totals.seconds)}</p>
+      {!rows.length ? <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-400 dark:bg-slate-800/50">데이터가 없습니다.</p> : <ul className="space-y-2">
         {rows.map(row => {
           const share = totals.seconds > 0 ? row.seconds / totals.seconds * 100 : 0;
-          const content = <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-            <span className="min-w-0 break-words">{row.name}</span>
-            <span className="shrink-0 font-mono text-xs">{formatDuration(row.seconds)} <span className="text-gray-400">({share.toFixed(1)}%)</span></span>
+          const content = <span className="flex min-w-0 flex-1 flex-col gap-2.5">
+            <span className="flex items-center justify-between gap-3">
+              <span className="min-w-0 break-words font-medium">{row.name}</span>
+              <span className="flex shrink-0 items-baseline gap-2 text-xs tabular-nums"><span className="font-semibold">{formatDuration(row.seconds)}</span><span className="w-12 text-right text-slate-400">{share.toFixed(1)}%</span></span>
+            </span>
+            <span aria-hidden="true" className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700/70"><span className="block h-full rounded-full bg-rose-300 transition-[width] duration-300 motion-reduce:transition-none dark:bg-rose-400/70" style={{ width: `${share}%` }} /></span>
           </span>;
-          return <li key={row.id} className="rounded-lg border border-gray-100 bg-gray-50 dark:border-slate-700 dark:bg-slate-800/50">
-            {grouping === 'subject' ? <details>
-              <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-sm text-gray-700 dark:text-gray-200"><ChevronRight aria-hidden="true" size={14} className="shrink-0" />{content}</summary>
-              <ul className="space-y-2 border-t border-gray-100 px-4 py-3 dark:border-slate-700" aria-label={`${row.name} 세부 할 일`}>
-                {Object.entries(row.taskTotals).sort((a, b) => b[1] - a[1]).map(([task, seconds]) => <li key={task} className="flex justify-between gap-4 text-xs text-gray-600 dark:text-gray-300"><span className="break-words">{task}</span><span className="shrink-0 font-mono">{formatDuration(seconds)}</span></li>)}
+          return <li key={row.id} className="overflow-hidden rounded-xl border border-slate-100 bg-white transition-colors hover:border-rose-100 dark:border-slate-700 dark:bg-slate-800/30 dark:hover:border-rose-900/50">
+            {grouping === 'subject' ? <details className="group">
+              <summary className="flex cursor-pointer list-none items-center gap-3 p-3.5 text-sm text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rose-300 dark:text-slate-200">{content}<ChevronRight aria-hidden="true" size={14} className="shrink-0 text-slate-400 transition-transform group-open:rotate-90 motion-reduce:transition-none" /></summary>
+              <ul className="ui-panel-enter space-y-3 border-t border-slate-100 bg-slate-50/60 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/20" aria-label={`${row.name} 세부 할 일`}>
+                {Object.entries(row.taskTotals).sort((a, b) => b[1] - a[1]).map(([task, seconds]) => <li key={task} className="flex justify-between gap-4 text-xs leading-relaxed text-slate-600 dark:text-slate-300"><span className="break-words">{task}</span><span className="shrink-0 font-medium tabular-nums">{formatDuration(seconds)}</span></li>)}
               </ul>
-            </details> : <div className="flex p-3 text-sm text-gray-700 dark:text-gray-200">{content}</div>}
+            </details> : <div className="flex p-3.5 text-sm text-slate-700 dark:text-slate-200">{content}</div>}
           </li>;
         })}
       </ul>}

@@ -1,10 +1,12 @@
 ﻿'use client';
 
 import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
+import { Bell, Coffee, LogOut, Plus, RotateCcw, Settings2, ShieldAlert, Timer, Trash2, Volume2, X } from 'lucide-react';
+import SubjectManager from '@/components/subjects/SubjectManager';
 import NotificationManager from './NotificationManager';
 import ConfirmModal from './ConfirmModal';
 import {
@@ -17,7 +19,7 @@ import {
   type Preset,
 } from './timer/hooks/settingsStore';
 import { clearPendingSessionsForUser } from './timer/hooks/useStudySession';
-import { getScopedStorageKey } from '@/lib/userScopedStorage';
+import { getScopedStorageKey, getStorageOwner, GUEST_OWNER } from '@/lib/userScopedStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,12 +37,23 @@ type ConflictPayload = {
 // like the duration fields.
 type PresetFormEntry = Omit<Preset, 'minutes'> & { minutes: number | '' };
 
-export default function SettingsModal({
+export default function SettingsModal(props: SettingsModalProps) {
+  return props.isOpen ? <SettingsModalContent key={getStorageOwner()} {...props} /> : null;
+}
+
+function SettingsModalContent({
   isOpen,
   onClose,
   onSave,
 }: SettingsModalProps) {
   const router = useRouter();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const currentOwner = getStorageOwner();
+  const subjectUserId = currentOwner === GUEST_OWNER ? null : currentOwner;
+  const formOwnerRef = useRef<string | null>(null);
+  const formGenerationRef = useRef(0);
+  const [formOwner, setFormOwner] = useState<string | null>(null);
+  const [subjectsBusy, setSubjectsBusy] = useState(false);
   // False until the load effect hydrates the form with the user's stored
   // settings. Every dismissal path saves, so persisting before hydration
   // would overwrite the stored settings with the untouched default form.
@@ -65,6 +78,7 @@ export default function SettingsModal({
     DEFAULT_FOMOPOMO_SETTINGS.taskPopupEnabled
   );
   const [tasks, setTasks] = useState<string[]>(DEFAULT_FOMOPOMO_SETTINGS.tasks);
+  const legacyTasksRef = useRef(DEFAULT_FOMOPOMO_SETTINGS.tasks);
   const [presets, setPresets] = useState<PresetFormEntry[]>(DEFAULT_FOMOPOMO_SETTINGS.presets);
   // The settings the form was last hydrated from (load, save, or reset).
   // Fields cleared at save time recover to these values — dismissing the
@@ -76,6 +90,14 @@ export default function SettingsModal({
   const [isResetSettingsConfirmOpen, setIsResetSettingsConfirmOpen] = useState(false);
   const [isResetAccountConfirmOpen, setIsResetAccountConfirmOpen] = useState(false);
   const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const previouslyFocused = document.activeElement;
+    dialogRef.current?.querySelector<HTMLButtonElement>('[data-settings-close]')?.focus();
+    return () => {
+      if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) previouslyFocused.focus();
+    };
+  }, []);
 
   const applySettingsToForm = useCallback((settings: FomopomoSettings) => {
     setLoadedSettings(settings);
@@ -89,6 +111,7 @@ export default function SettingsModal({
     setIsMuted(settings.isMuted);
     setTaskPopupEnabled(settings.taskPopupEnabled);
     setTasks(settings.tasks);
+    legacyTasksRef.current = settings.tasks;
     setPresets(settings.presets);
   }, []);
 
@@ -109,7 +132,7 @@ export default function SettingsModal({
       volume,
       isMuted,
       taskPopupEnabled,
-      tasks,
+      tasks: legacyTasksRef.current,
       presets: presets.map((preset) => ({
         ...preset,
         minutes:
@@ -129,11 +152,15 @@ export default function SettingsModal({
     // the modal saved and closed — handleSave's write-back must stay the
     // last word on what the form (and the next open) shows.
     let cancelled = false;
+    const generation = ++formGenerationRef.current;
     hydratedRef.current = false;
+    formOwnerRef.current = null;
     const loadSettings = async () => {
       const persistedSettings = await loadPersistedSettings();
-      if (!cancelled) {
+      if (!cancelled && getStorageOwner() === currentOwner) {
         applySettingsToForm(persistedSettings);
+        formOwnerRef.current = currentOwner;
+        setFormOwner(currentOwner);
         hydratedRef.current = true;
       }
     };
@@ -141,11 +168,22 @@ export default function SettingsModal({
     void loadSettings();
     return () => {
       cancelled = true;
+      if (formGenerationRef.current === generation) formGenerationRef.current += 1;
     };
-  }, [applySettingsToForm, isOpen]);
+  }, [applySettingsToForm, currentOwner, isOpen]);
+
+  const handleLegacyImported = (names: string[]) => {
+    if (!hydratedRef.current || formOwnerRef.current !== currentOwner || getStorageOwner() !== currentOwner) return;
+    const imported = new Set(names);
+    // Import may finish after another form field changed. Only remove the
+    // successful archive names, never replace a newer settings snapshot.
+    legacyTasksRef.current = legacyTasksRef.current.filter((name) => !imported.has(name));
+    setTasks(legacyTasksRef.current);
+  };
 
   const handleSave = async () => {
-    if (!hydratedRef.current) {
+    if (subjectsBusy) return;
+    if (!hydratedRef.current || formOwnerRef.current !== getStorageOwner()) {
       // The stored settings haven't reached the form yet — persisting now
       // would replace them with defaults. Dismiss without saving.
       onClose();
@@ -153,10 +191,12 @@ export default function SettingsModal({
     }
 
     const settingsToSave = buildSettingsFromForm();
+    const generation = formGenerationRef.current;
     // Reflect the normalized values in the form so the UI never disagrees
     // with what was stored (a cleared field shows its recovered default).
     applySettingsToForm(settingsToSave);
     const didPersist = await persistStoredSettings(settingsToSave);
+    if (generation !== formGenerationRef.current || currentOwner !== getStorageOwner()) return;
     if (!didPersist) {
       toast.error('설정을 저장할 수 없습니다. 데이터를 복구하거나 초기화한 뒤 다시 시도해주세요.');
       return;
@@ -167,13 +207,16 @@ export default function SettingsModal({
   };
 
   const handleResetSettings = async () => {
+    if (subjectsBusy || formOwnerRef.current !== getStorageOwner()) return;
     applySettingsToForm(DEFAULT_FOMOPOMO_SETTINGS);
+    const generation = formGenerationRef.current;
     const didResetSnapshot = resetSettingsSnapshot();
     if (!didResetSnapshot) {
       toast.error('설정을 초기화할 수 없습니다.');
       return;
     }
     const didPersist = await persistStoredSettings(DEFAULT_FOMOPOMO_SETTINGS);
+    if (generation !== formGenerationRef.current || currentOwner !== getStorageOwner()) return;
     if (!didPersist) {
       toast.error('설정을 기본값으로 저장할 수 없습니다. 다시 시도해주세요.');
       return;
@@ -357,22 +400,6 @@ export default function SettingsModal({
     setPresets(presets.filter((p) => p.id !== id));
   };
 
-  const addTask = () => {
-    if (tasks.length >= 10) {
-      toast.error('작업은 최대 10개까지만 저장할 수 있어요.');
-      return;
-    }
-    setTasks([...tasks, '새 작업']);
-  };
-
-  const updateTask = (index: number, value: string) => {
-    setTasks(tasks.map((task, i) => (i === index ? value : task)));
-  };
-
-  const removeTask = (index: number) => {
-    setTasks(tasks.filter((_, i) => i !== index));
-  };
-
   const updatePreset = (
     id: string,
     field: 'label' | 'minutes',
@@ -383,350 +410,123 @@ export default function SettingsModal({
     );
   };
 
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isResetSettingsConfirmOpen || isResetAccountConfirmOpen || isDeleteAccountConfirmOpen) return;
+    const dialog = event.currentTarget;
+    // Portaled popovers own their keyboard interaction. In particular, Escape
+    // must close that surface before it can dismiss the settings behind it.
+    if (event.defaultPrevented || !dialog.contains(event.target as Node)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      void handleSave();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => {
+      const closedDetails = element.closest('details:not([open])');
+      if (closedDetails && !(element.tagName === 'SUMMARY' && element.parentElement === closedDetails)) return false;
+      const style = window.getComputedStyle(element);
+      return !element.closest('[hidden]') && style.display !== 'none' && style.visibility !== 'hidden';
+    });
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first) { event.preventDefault(); dialog.focus(); return; }
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
+  };
+
   if (!isOpen) return null;
 
-  const inputStyle =
-    'w-full bg-gray-100 text-gray-700 p-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-rose-200 transition-all text-sm';
-  const toggleBase =
-    'w-10 h-5 rounded-full relative transition-colors duration-200 ease-in-out cursor-pointer';
-  const toggleDot =
-    'absolute top-1 left-1 w-3 h-3 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out';
+  const inputStyle = 'ui-input w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition-colors focus:border-rose-300 focus:ring-2 focus:ring-rose-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-rose-950';
+  const sectionTitle = 'mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200';
+  const ready = formOwner === currentOwner;
 
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
-        onClick={handleSave}
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+        onClick={(event) => { if (event.target === event.currentTarget) void handleSave(); }}
+        data-testid="settings-backdrop"
       >
-        <div
-          className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex justify-between items-center p-5 border-b border-gray-100">
-            <h2 className="text-gray-500 font-bold tracking-widest text-sm flex items-center gap-2">
-              ⚙️ 설정
-            </h2>
-            <button
-              onClick={handleSave}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              ✕
-            </button>
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={handleDialogKeyDown}
+          className="ui-panel-enter flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800">
+          <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700 sm:px-6">
+            <div className="flex items-center gap-3">
+              <span className="rounded-xl bg-rose-50 p-2 text-rose-500 dark:bg-rose-950/50 dark:text-rose-300"><Settings2 className="h-5 w-5" /></span>
+              <div><h2 id="settings-title" className="text-base font-bold text-slate-800 dark:text-slate-100">설정</h2><p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">공부 방식에 맞게 조정해보세요.</p></div>
+            </div>
+            <button type="button" data-settings-close onClick={() => { void handleSave(); }} disabled={subjectsBusy} aria-label="설정 저장하고 닫기" className="ui-press rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:hover:bg-slate-700 dark:hover:text-slate-200"><X className="h-5 w-5" /></button>
+          </header>
+
+          <div className="min-h-0 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+            <section>
+              {ready ? <SubjectManager userId={subjectUserId} legacyTasks={tasks} onLegacyImported={handleLegacyImported} onBusyChange={setSubjectsBusy} /> : <p role="status" className="text-sm text-slate-500 dark:text-slate-400">설정을 불러오는 중…</p>}
+            </section>
+            <hr className="border-slate-100 dark:border-slate-700" />
+            <fieldset disabled={subjectsBusy} className="min-w-0 space-y-6 disabled:opacity-60">
+              <section>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className={sectionTitle + ' mb-0'}><Timer className="h-4 w-4 text-rose-400" />뽀모도로 프리셋 설정</h3>
+                  {presets.length < 3 && <button type="button" onClick={addPreset} className="ui-press flex items-center gap-1 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950"><Plus className="h-3.5 w-3.5" />추가</button>}
+                </div>
+                <div className="space-y-2">
+                  {presets.map((preset, index) => <div key={preset.id} className="flex items-center gap-2">
+                    <input type="text" aria-label={'프리셋 ' + (index + 1) + ' 이름'} value={preset.label} onChange={(event) => updatePreset(preset.id, 'label', event.target.value)} className={inputStyle + ' min-w-0 flex-1'} placeholder="이름" />
+                    <div className="w-20 shrink-0"><input type="number" min={1} aria-label={'프리셋 ' + (index + 1) + ' 시간 (분)'} value={preset.minutes} onChange={(event) => updatePreset(preset.id, 'minutes', event.target.value === '' ? '' : Number(event.target.value))} className={inputStyle + ' text-center'} placeholder="분" /></div>
+                    <button type="button" onClick={() => removePreset(preset.id)} aria-label={'프리셋 ' + (index + 1) + ' 삭제'} className="ui-press shrink-0 rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/40"><Trash2 className="h-4 w-4" /></button>
+                  </div>)}
+                </div>
+              </section>
+              <section>
+                <h3 className={sectionTitle}>기본 시간 설정 (분)</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <label className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400"><span>집중</span><input type="number" min={1} value={pomoTime} onChange={(event) => setPomoTime(event.target.value === '' ? '' : Number(event.target.value))} className={inputStyle} /></label>
+                  <label className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400"><span>짧은 휴식</span><input type="number" min={1} value={shortBreak} onChange={(event) => setShortBreak(event.target.value === '' ? '' : Number(event.target.value))} className={inputStyle} /></label>
+                  <label className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400"><span>긴 휴식</span><input type="number" min={1} value={longBreak} onChange={(event) => setLongBreak(event.target.value === '' ? '' : Number(event.target.value))} className={inputStyle} /></label>
+                </div>
+              </section>
+              <section className="space-y-4 rounded-2xl bg-slate-50 p-4 dark:bg-slate-900/50">
+                <SettingToggle label="휴식 자동 시작" checked={autoStartBreaks} onChange={() => setAutoStartBreaks(!autoStartBreaks)} />
+                <SettingToggle label="뽀모도로 자동 시작" checked={autoStartPomos} onChange={() => setAutoStartPomos(!autoStartPomos)} />
+                <SettingToggle label="저장 시 작업 메모 팝업" description="공부를 마칠 때 작업 내용과 과목을 확인해요." checked={taskPopupEnabled} onChange={() => setTaskPopupEnabled(!taskPopupEnabled)} />
+                <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700"><label htmlFor="settings-break-interval" className="text-sm text-slate-600 dark:text-slate-300">긴 휴식 간격 (사이클)</label><input id="settings-break-interval" type="number" min={1} value={longBreakInterval} onChange={(event) => setLongBreakInterval(event.target.value === '' ? '' : Number(event.target.value))} className={inputStyle + ' max-w-20 text-center'} /></div>
+              </section>
+              <section>
+                <h3 className={sectionTitle}><Volume2 className="h-4 w-4 text-rose-400" />알림 소리</h3>
+                <SettingToggle label="음소거" checked={isMuted} onChange={() => setIsMuted(!isMuted)} />
+                <div className={isMuted ? 'mt-4 opacity-50' : 'mt-4'}>
+                  <div className="mb-2 flex items-center justify-between"><label htmlFor="settings-volume" className="text-xs text-slate-500 dark:text-slate-400">볼륨</label><span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">{volume}%</span></div>
+                  <input id="settings-volume" type="range" min="0" max="100" value={volume} disabled={isMuted} onChange={(event) => setVolume(Number(event.target.value))} className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-200 accent-rose-500 disabled:cursor-not-allowed dark:bg-slate-700" />
+                </div>
+              </section>
+              <hr className="border-slate-100 dark:border-slate-700" />
+              <section><h3 className={sectionTitle}><Bell className="h-4 w-4 text-rose-400" />알림 설정</h3><NotificationManager mode="inline" /></section>
+              <hr className="border-slate-100 dark:border-slate-700" />
+              <section>
+                <h3 className={sectionTitle}><ShieldAlert className="h-4 w-4 text-rose-400" />계정 설정</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setIsResetSettingsConfirmOpen(true)} className="ui-button-secondary ui-press flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"><RotateCcw className="h-3.5 w-3.5" />설정 초기화</button>
+                  <button type="button" onClick={() => setIsResetAccountConfirmOpen(true)} className="ui-press flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 px-2 py-3 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950"><Trash2 className="h-3.5 w-3.5" />계정 초기화</button>
+                  <button type="button" onClick={() => setIsDeleteAccountConfirmOpen(true)} className="ui-press col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-rose-50 px-3 py-3 text-xs font-semibold text-rose-600 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950"><LogOut className="h-3.5 w-3.5" />계정 탈퇴 (복구 불가)</button>
+                </div>
+              </section>
+              <section className="rounded-2xl border border-slate-100 p-4 dark:border-slate-700">
+                <h3 className={sectionTitle + ' mb-2'}><Coffee className="h-4 w-4 text-rose-400" />후원</h3>
+                <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">서비스가 마음에 드셨다면, 커피 한 잔으로 응원해주세요.</p>
+                <a href="/support" className="ui-press inline-flex rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">후원하기 →</a>
+              </section>
+            </fieldset>
           </div>
-
-          <div className="p-6 overflow-y-auto space-y-8 scrollbar-hide">
-            <section>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-gray-400 text-xs font-bold flex items-center gap-2">
-                  🗂️ 작업 목록
-                </h3>
-                <button
-                  onClick={addTask}
-                  className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 transition-colors font-bold"
-                >
-                  + 추가
-                </button>
-              </div>
-              <p className="text-[11px] text-gray-500 mb-2">
-                여기서 정한 이름만 선택해서 저장되므로, Report에서 국어·수학처럼 일관된 항목으로 모아볼 수 있어요.
-              </p>
-              <div className="space-y-2">
-                {tasks.map((task, index) => (
-                  <div key={index} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={task}
-                      onChange={(e) => updateTask(index, e.target.value)}
-                      className={`${inputStyle} flex-grow`}
-                      placeholder="예: 국어"
-                    />
-                    <button
-                      onClick={() => removeTask(index)}
-                      className="text-gray-400 hover:text-red-500 p-2"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))}
-                {tasks.length === 0 && (
-                  <div className="text-[11px] text-gray-400">작업을 추가해주세요.</div>
-                )}
-              </div>
-            </section>
-            <hr className="border-gray-100" />
-            <section>
-              <div className="flex justify-between items-end mb-3">
-                <h3 className="text-gray-400 text-xs font-bold flex items-center gap-2">
-                  🔥 뽀모도로 프리셋 설정
-                </h3>
-                {presets.length < 3 && (
-                  <button
-                    onClick={addPreset}
-                    className="text-xs bg-rose-100 text-rose-500 px-2 py-1 rounded hover:bg-rose-200 transition-colors font-bold"
-                  >
-                    + 추가
-                  </button>
-                )}
-              </div>
-              <div className="space-y-2">
-                {presets.map((preset) => (
-                  <div key={preset.id} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={preset.label}
-                      onChange={(e) =>
-                        updatePreset(preset.id, 'label', e.target.value)
-                      }
-                      className={`${inputStyle} flex-grow`}
-                      placeholder="이름"
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      value={preset.minutes}
-                      onChange={(e) =>
-                        updatePreset(
-                          preset.id,
-                          'minutes',
-                          e.target.value === '' ? '' : Number(e.target.value)
-                        )
-                      }
-                      className={`${inputStyle} w-20 text-center`}
-                      placeholder="분"
-                    />
-                    <button
-                      onClick={() => removePreset(preset.id)}
-                      className="text-gray-400 hover:text-red-500 p-2"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <hr className="border-gray-100" />
-            <section>
-              <h3 className="text-gray-400 text-xs font-bold mb-3">
-                🕒 기본 시간 설정 (분)
-              </h3>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <span className="text-[10px] text-gray-400 mb-1 block">
-                    집중
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={pomoTime}
-                    onChange={(e) =>
-                      setPomoTime(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className={inputStyle}
-                  />
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-400 mb-1 block">
-                    짧은 휴식
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={shortBreak}
-                    onChange={(e) =>
-                      setShortBreak(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className={inputStyle}
-                  />
-                </div>
-                <div>
-                  <span className="text-[10px] text-gray-400 mb-1 block">
-                    긴 휴식
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={longBreak}
-                    onChange={(e) =>
-                      setLongBreak(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className={inputStyle}
-                  />
-                </div>
-              </div>
-            </section>
-            <section className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600 text-sm font-medium">
-                  휴식 자동 시작
-                </span>
-                <button
-                  onClick={() => setAutoStartBreaks(!autoStartBreaks)}
-                  className={`${toggleBase} ${autoStartBreaks ? 'bg-rose-400' : 'bg-gray-300'
-                    }`}
-                >
-                  <span
-                    className={`${toggleDot} ${autoStartBreaks ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  ></span>
-                </button>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600 text-sm font-medium">
-                  뽀모도로 자동 시작
-                </span>
-                <button
-                  onClick={() => setAutoStartPomos(!autoStartPomos)}
-                  className={`${toggleBase} ${autoStartPomos ? 'bg-rose-400' : 'bg-gray-300'
-                    }`}
-                >
-                  <span
-                    className={`${toggleDot} ${autoStartPomos ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  ></span>
-                </button>
-              </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="text-gray-600 text-sm font-medium">
-                    저장 시 작업 메모 팝업
-                  </span>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    작업 내용을 기록할지 물어보는 팝업입니다.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setTaskPopupEnabled(!taskPopupEnabled)}
-                  className={`${toggleBase} ${taskPopupEnabled ? 'bg-rose-400' : 'bg-gray-300'
-                    }`}
-                >
-                  <span
-                    className={`${toggleDot} ${taskPopupEnabled ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  ></span>
-                </button>
-              </div>
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-gray-600 text-sm font-medium">
-                  긴 휴식 간격 (사이클)
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  value={longBreakInterval}
-                  onChange={(e) =>
-                    setLongBreakInterval(e.target.value === '' ? '' : Number(e.target.value))
-                  }
-                  className="w-16 bg-gray-100 text-gray-700 p-1 rounded text-center font-bold focus:outline-none"
-                />
-              </div>
-            </section>
-            <hr className="border-gray-100" />
-
-            {/* ✨ 소리 설정 (음소거 기능 추가) */}
-            <section>
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-gray-400 text-xs font-bold">🔊 알림 소리</h3>
-
-                {/* 음소거 토글 */}
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500 text-xs font-bold">음소거</span>
-                  <button
-                    onClick={() => setIsMuted(!isMuted)}
-                    className={`${toggleBase} w-8 h-4 ${isMuted ? 'bg-gray-600' : 'bg-gray-300'
-                      }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transform transition-transform duration-200 ${isMuted ? 'translate-x-4' : 'translate-x-0'
-                        }`}
-                    ></span>
-                  </button>
-                </div>
-              </div>
-
-              {/* 음소거면 슬라이더 비활성화 효과 */}
-              <div
-                className={`transition-opacity duration-200 ${isMuted ? 'opacity-40 pointer-events-none' : 'opacity-100'
-                  }`}
-              >
-                <div className="flex justify-between mb-1">
-                  <span className="text-gray-500 text-xs">볼륨</span>
-                  <span className="text-gray-400 text-xs font-mono">
-                    {volume}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={(e) => setVolume(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-rose-400"
-                />
-              </div>
-            </section>
-
-            <hr className="border-gray-100" />
-            <section>
-              <h3 className="text-gray-400 text-xs font-bold mb-3 flex items-center gap-2">
-                🔔 알림 설정
-              </h3>
-              <NotificationManager mode="inline" />
-            </section>
-
-            <hr className="border-gray-100" />
-            <section>
-              <h3 className="text-red-400 text-xs font-bold mb-3 flex items-center gap-2">
-                ⚠️ 계정 설정
-              </h3>
-              <div className="flex flex-col gap-3">
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setIsResetSettingsConfirmOpen(true)}
-                    className="flex-1 py-3 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors border border-orange-100 text-center"
-                  >
-                    ↻ 설정 초기화
-                  </button>
-                  <button
-                    onClick={() => setIsResetAccountConfirmOpen(true)}
-                    className="flex-1 py-3 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors border border-red-100 text-center"
-                  >
-                    🗑️ 계정 초기화
-                  </button>
-                </div>
-                <button
-                  onClick={() => setIsDeleteAccountConfirmOpen(true)}
-                  className="w-full py-3 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 transition-colors text-center"
-                >
-                  ⚠️ 계정 탈퇴 (복구 불가)
-                </button>
-              </div>
-            </section>
-
-            {/* ☕ 후원 섹션 */}
-            <hr className="border-gray-100" />
-            <section>
-              <h3 className="text-gray-400 text-xs font-bold mb-3 flex items-center gap-2">
-                ☕ 후원
-              </h3>
-              <p className="text-xs text-gray-500 mb-3">
-                서비스가 마음에 드셨다면, 커피 한 잔으로 응원해주세요!
-              </p>
-              <a
-                href="/support"
-                className="flex items-center justify-center gap-2 w-full py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-medium rounded-lg transition-colors border border-amber-200"
-              >
-                후원하기 →
-              </a>
-            </section>
-          </div>
-          <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
-            <button
-              onClick={handleSave}
-              className="px-6 py-3 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900 transition-colors shadow-lg text-sm"
-            >
-              저장하기
-            </button>
-          </div>
+          <footer className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/80 px-5 py-4 dark:border-slate-700 dark:bg-slate-900/50 sm:px-6">
+            <p className="text-xs text-slate-400 dark:text-slate-500">{subjectsBusy ? '과목을 저장하고 있어요.' : '닫을 때 변경 사항이 저장됩니다.'}</p>
+            <button type="button" onClick={() => { void handleSave(); }} disabled={subjectsBusy} className="ui-button-primary ui-press shrink-0 rounded-xl bg-rose-500 px-5 py-2.5 text-sm font-bold text-white hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50">저장하기</button>
+          </footer>
         </div>
       </div>
       <ConfirmModal
@@ -792,4 +592,8 @@ export default function SettingsModal({
       />
     </>
   );
+}
+
+function SettingToggle({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: () => void }) {
+  return <div className="flex items-center justify-between gap-4"><div><span className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</span>{description && <p className="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">{description}</p>}</div><button type="button" role="switch" aria-label={label} aria-checked={checked} onClick={onChange} className={'ui-press relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 ' + (checked ? 'bg-rose-500' : 'bg-slate-300 dark:bg-slate-600')}><span className={'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none ' + (checked ? 'translate-x-5' : 'translate-x-0')} /></button></div>;
 }

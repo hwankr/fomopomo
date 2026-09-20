@@ -15,6 +15,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
+import AppSelect from '@/components/ui/AppSelect';
 
 export default function ProfilePage() {
   const { session, loading: sessionLoading } = useAuthSession();
@@ -110,21 +111,17 @@ export default function ProfilePage() {
           <>
             {/* Contribution Graph Section */}
             <section className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                <span>공부 기록</span>
-                <select
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-gray-800 dark:text-white">공부 기록</h2>
+                <AppSelect
                   aria-label="연도"
-                  value={selectedYear}
-                  onChange={(event) => setSelectedYear(Number(event.target.value))}
-                  className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-transparent focus:outline-none focus:ring-2 focus:ring-rose-400/50"
-                >
-                  {availableYears.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </h2>
+                  value={String(selectedYear)}
+                  onValueChange={(value) => setSelectedYear(Number(value))}
+                  options={availableYears.map((year) => ({ value: String(year), label: `${year}년` }))}
+                  compact
+                  className="w-28"
+                />
+              </div>
               {statsLoading && heatmapData.length === 0 ? (
                    <div className="h-32 flex items-center justify-center text-gray-400 text-sm">잔디 심는 중...</div>
               ) : (

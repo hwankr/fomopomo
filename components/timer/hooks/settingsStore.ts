@@ -21,6 +21,7 @@ export type FomopomoSettings = {
   volume: number;
   isMuted: boolean;
   taskPopupEnabled: boolean;
+  /** Legacy names kept only for explicit import into study_subjects. */
   tasks: string[];
   presets: Preset[];
 };
@@ -42,7 +43,8 @@ export function getSettingsStorageKey(
 }
 
 export const SETTINGS_CHANGED_EVENT = 'settingsChanged';
-export const DEFAULT_TASK_OPTIONS = ['국어', '수학', '영어'];
+/** @deprecated Study categories live in study_subjects. */
+export const DEFAULT_TASK_OPTIONS: string[] = [];
 export const DEFAULT_FOMOPOMO_SETTINGS: FomopomoSettings = {
   pomoTime: 25,
   shortBreak: 5,
@@ -101,7 +103,7 @@ const getValidTasks = (
   tasks: string[] | null | undefined,
   fallback: string[]
 ): string[] => {
-  if (!Array.isArray(tasks) || tasks.length === 0) {
+  if (!Array.isArray(tasks)) {
     return cloneTasks(fallback);
   }
 
@@ -434,11 +436,16 @@ async function fetchRemoteSettings(userId: string) {
 }
 
 export async function loadPersistedSettings(): Promise<FomopomoSettings> {
+  const owner = getStorageOwner();
   try {
     const userId = await getAuthenticatedUserId();
+    if (getStorageOwner() !== owner || userId !== (owner === GUEST_OWNER ? null : owner)) {
+      return readSettingsSnapshot();
+    }
 
     if (userId) {
       const remoteSettings = await fetchRemoteSettings(userId);
+      if (getStorageOwner() !== owner) return readSettingsSnapshot();
       if (remoteSettings) {
         const normalizedSettings = normalizeSettings(remoteSettings);
         restoreSettingsSnapshot(normalizedSettings);
@@ -452,27 +459,13 @@ export async function loadPersistedSettings(): Promise<FomopomoSettings> {
   return readSettingsSnapshot();
 }
 
+/** @deprecated Migration-only access to the preserved legacy archive. */
 export async function loadTaskOptions(): Promise<string[]> {
-  try {
-    const userId = await getAuthenticatedUserId();
-
-    if (userId) {
-      const remoteSettings = await fetchRemoteSettings(userId);
-      if (
-        Array.isArray(remoteSettings?.tasks) &&
-        remoteSettings.tasks.length > 0
-      ) {
-        return cloneTasks(remoteSettings.tasks);
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load task options', error);
-  }
-
-  return getValidTasks(readSettingsSnapshot().tasks, DEFAULT_TASK_OPTIONS);
+  return cloneTasks((await loadPersistedSettings()).tasks);
 }
 
 export async function persistSettings(settings: FomopomoSettings) {
+  const owner = getStorageOwner();
   const normalizedSettings = normalizeSettings(settings);
   const wroteSnapshot = writeSettingsSnapshot(normalizedSettings);
 
@@ -482,6 +475,7 @@ export async function persistSettings(settings: FomopomoSettings) {
 
   try {
     const userId = await getAuthenticatedUserId();
+    if (getStorageOwner() !== owner || userId !== (owner === GUEST_OWNER ? null : owner)) return false;
 
     if (!userId) {
       return true;

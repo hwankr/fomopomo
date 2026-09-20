@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState } from 'react';
 import { validateSubjectName, type StudySubject } from '@/lib/studySubjects';
+import AppSelect from '@/components/ui/AppSelect';
 
 type SubjectSelectProps = {
   subjects: StudySubject[];
@@ -24,6 +25,12 @@ export default function SubjectSelect({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
+  const unclassifiedValue = '__unclassified__';
+  const options = [
+    { value: unclassifiedValue, label: '미분류' },
+    ...(value && !subjects.some(subject => subject.id === value) ? [{ value, label: '지정된 과목' }] : []),
+    ...subjects.map(subject => ({ value: subject.id, label: subject.name })),
+  ];
 
   const create = async () => {
     if (!onCreate || disabled || pending.current) return;
@@ -55,38 +62,36 @@ export default function SubjectSelect({
   };
 
   return (
-    <div className={compact ? 'min-w-0 text-xs' : 'space-y-2 text-sm'}>
-      <label htmlFor={selectId} className="mb-1 block font-medium text-slate-600 dark:text-slate-300">{label}</label>
-      <div className="flex min-w-0 items-center gap-2">
-        <select
+    <div className={compact ? 'min-w-0 text-xs' : 'min-w-0 space-y-2 text-sm'}>
+      <div className="flex min-w-0 items-end gap-2">
+        <AppSelect
           id={selectId}
-          value={value ?? ''}
-          onChange={event => onChange(event.target.value || null)}
+          label={label}
+          value={value ?? unclassifiedValue}
+          onValueChange={next => onChange(next === unclassifiedValue ? null : next)}
+          options={options}
           disabled={disabled || saving}
-          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-        >
-          <option value="">미분류</option>
-          {value && !subjects.some(subject => subject.id === value) ? <option value={value}>지정된 과목</option> : null}
-          {subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
-        </select>
+          compact={compact}
+          className="min-w-0 flex-1"
+        />
         {onCreate ? (
-          <button type="button" disabled={disabled || saving} aria-expanded={creating}
+          <button type="button" disabled={disabled || saving} aria-expanded={creating} aria-controls={`${selectId}-create`}
             onClick={() => { setCreating(!creating); setError(null); }}
-            className="shrink-0 rounded-lg px-2 py-2 font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 dark:text-indigo-300 dark:hover:bg-slate-700">
+            className={`ui-press h-10 shrink-0 rounded-xl border border-transparent font-medium text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:border-rose-900/40 dark:hover:bg-rose-950/40 ${compact ? 'px-2 text-xs' : 'px-3 text-sm'}`}>
             {creating ? '닫기' : '+ 새 과목'}
           </button>
         ) : null}
       </div>
       {creating ? (
-        <div className="mt-2 flex items-center gap-2">
+        <div id={`${selectId}-create`} className="ui-panel-enter mt-2 flex items-center gap-2 rounded-xl bg-rose-50/60 p-2 dark:bg-rose-950/20">
           <input
             aria-label="새 과목 이름" placeholder="예: 블록체인" value={draft} maxLength={80}
             disabled={saving || disabled} onChange={event => setDraft(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); void create(); } }}
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            className="ui-input min-w-0 flex-1 px-3 py-2 text-sm"
           />
           <button type="button" disabled={saving || disabled || !draft.trim()} onClick={() => { void create(); }}
-            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 font-medium text-white disabled:opacity-50">
+            className="ui-button-primary ui-press shrink-0 px-3 py-2 text-sm font-medium">
             {saving ? '추가 중…' : '추가'}
           </button>
         </div>

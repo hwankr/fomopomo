@@ -56,3 +56,90 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@layer components {
+  .ui-input {
+    @apply min-h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:border-rose-400 focus:ring-3 focus:ring-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-rose-500/20;
+  }
+
+  .ui-button-primary,
+  .ui-button-secondary {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium outline-none transition-[background-color,box-shadow,transform] duration-150 focus-visible:ring-3 focus-visible:ring-rose-300/60 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-button-primary {
+    @apply bg-rose-500 text-white enabled:hover:bg-rose-600 dark:bg-rose-500 dark:enabled:hover:bg-rose-400;
+  }
+
+  .ui-button-secondary {
+    @apply border border-slate-200 bg-white text-slate-600 enabled:hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:enabled:hover:bg-slate-700;
+  }
+
+  .ui-segmented {
+    @apply inline-flex min-w-0 items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900/70;
+  }
+
+  .ui-segmented > button {
+    @apply min-h-9 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 outline-none transition-[background-color,color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-rose-400 dark:text-slate-400;
+  }
+
+  .ui-segmented > button[aria-pressed='true'] {
+    @apply bg-white text-rose-600 shadow-sm dark:bg-slate-700 dark:text-rose-300;
+  }
+}
+
+.ui-press {
+  transition-duration: 150ms;
+}
+
+.ui-press:enabled:active {
+  transform: translateY(1px);
+}
+
+.ui-popover[data-state='open'] {
+  animation: ui-popover-in 140ms ease-out;
+}
+
+.ui-popover[data-state='closed'] {
+  animation: ui-popover-out 90ms ease-in;
+}
+
+.ui-panel-enter,
+.animate-scale-in {
+  animation: ui-panel-in 160ms ease-out;
+}
+
+.animate-fade-in {
+  animation: ui-fade-in 160ms ease-out;
+}
+
+@keyframes ui-popover-in {
+  from { opacity: 0; transform: translateY(3px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-popover-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes ui-panel-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ui-press:enabled:active { transform: none; }
+}
