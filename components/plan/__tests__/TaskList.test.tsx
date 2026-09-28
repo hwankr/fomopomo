@@ -128,6 +128,76 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('TaskList request ownership', () => {
+  it('suggests registered subjects for repeated task titles and persists the suggestion', async () => {
+    mount();
+    await screen.findByText('9월 6일 작업');
+    for (const title of ['블록체인 9/13 복습', '블록체인 9/15 복습']) {
+      fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+      fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: title } });
+      expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      await screen.findByText(title);
+      expect(rows.tasks.find(row => row.title === title)).toMatchObject({ subject_id: 'subject-blockchain' });
+    }
+  });
+
+  it('preserves an explicit initially unclassified selection while typing and resets it after save or cancel', async () => {
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
+    await chooseSubject('미분류');
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/15 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/15 복습');
+    expect(rows.tasks.find(row => row.title === '블록체인 9/15 복습')).toMatchObject({ subject_id: null });
+
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/17 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    await chooseSubject('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    expect(screen.getByPlaceholderText('작업 제목을 입력하세요')).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/19 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+  });
+
+  it('lets users confirm the suggested subject and later re-enable automatic selection', async () => {
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/13 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    await chooseSubject('블록체인');
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '데이터베이스 9/15 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    await chooseSubject('제목에 맞춰 선택');
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('데이터베이스');
+    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/17 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/17 복습');
+    expect(rows.tasks.find(row => row.title === '블록체인 9/17 복습')).toMatchObject({ subject_id: 'subject-blockchain' });
+  });
+
+  it('keeps ambiguous new tasks unclassified and preserves assigned subjects during title edits', async () => {
+    rows.tasks[0].subject_id = 'subject-db';
+    mount();
+    await screen.findByText('9월 6일 작업');
+    addTask('블록체인과 데이터베이스 복습');
+    await screen.findByText('블록체인과 데이터베이스 복습');
+    expect(rows.tasks.find(row => row.title === '블록체인과 데이터베이스 복습')).toMatchObject({ subject_id: null });
+
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '작업 제목' }), { target: { value: '블록체인 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await waitFor(() => expect(rows.tasks[0]).toMatchObject({ title: '블록체인 복습', subject_id: 'subject-db' }));
+  });
+
   it('persists the selected subject when creating a daily task', async () => {
     const dispatch = vi.spyOn(window, 'dispatchEvent');
     mount();

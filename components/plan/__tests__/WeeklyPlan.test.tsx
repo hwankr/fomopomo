@@ -177,13 +177,13 @@ describe('WeeklyPlan', () => {
     expect(screen.getByText('1h 30m')).toBeInTheDocument();
   });
 
-  it('persists a subject on create and changes it without renaming the goal', async () => {
+  it('infers and saves a subject from a new title while keeping subject-only edits available', async () => {
     const dispatch = vi.spyOn(window, 'dispatchEvent');
     renderPlan();
     await screen.findByText('Read chapter 1');
     fireEvent.click(screen.getByRole('button', { name: '주간 목표 추가' }));
     fireEvent.change(screen.getByPlaceholderText('주간 목표를 입력하세요'), { target: { value: '블록체인 복습' } });
-    await chooseSubject('블록체인');
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 복습');
     expect(weeklyPlans.find((row) => row.title === '블록체인 복습')?.subject_id).toBe('subject-blockchain');
@@ -193,6 +193,56 @@ describe('WeeklyPlan', () => {
     await waitFor(() => expect(weeklyPlans.find((row) => row.title === '블록체인 복습')?.subject_id).toBe('subject-db'));
     expect(within(getCardForTitle('블록체인 복습')).getByText('데이터베이스')).toBeInTheDocument();
     expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(2);
+  });
+
+  it.each([
+    ['데이터베이스', 'subject-db'],
+    ['미분류', null],
+  ] as const)('preserves a manual %s selection through typing and infers again for the next goal', async (name, subjectId) => {
+    renderPlan();
+    await screen.findByText('Read chapter 1');
+    fireEvent.click(screen.getByRole('button', { name: '주간 목표 추가' }));
+    const title = screen.getByPlaceholderText('주간 목표를 입력하세요');
+    fireEvent.change(title, { target: { value: '블록체인 9/13 복습' } });
+    await chooseSubject(name);
+    fireEvent.change(title, { target: { value: '블록체인 9/15 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent(name);
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/15 복습');
+    expect(weeklyPlans.find((row) => row.title === '블록체인 9/15 복습')?.subject_id).toBe(subjectId);
+
+    fireEvent.click(screen.getByRole('button', { name: '주간 목표 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('주간 목표를 입력하세요'), { target: { value: '블록체인 9/17 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/17 복습');
+    expect(weeklyPlans.find((row) => row.title === '블록체인 9/17 복습')?.subject_id).toBe('subject-blockchain');
+  });
+
+  it('clears the draft and manual subject when adding is cancelled', async () => {
+    renderPlan();
+    await screen.findByText('Read chapter 1');
+    fireEvent.click(screen.getByRole('button', { name: '주간 목표 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('주간 목표를 입력하세요'), { target: { value: '블록체인 초안' } });
+    await chooseSubject('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '주간 목표 추가' }));
+    const title = screen.getByPlaceholderText('주간 목표를 입력하세요');
+    expect(title).toHaveValue('');
+    fireEvent.change(title, { target: { value: '블록체인 새 목표' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+  });
+
+  it('preserves the saved subject when an existing goal title is edited', async () => {
+    weeklyPlans[0].subject_id = 'subject-db';
+    renderPlan();
+    await screen.findByText('Read chapter 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Read chapter 1 수정' }));
+    fireEvent.change(screen.getByDisplayValue('Read chapter 1'), { target: { value: '블록체인 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '목표 저장' }));
+    await screen.findByText('블록체인 복습');
+    expect(weeklyPlans[0].subject_id).toBe('subject-db');
   });
 
   it('adds a new weekly goal', async () => {

@@ -13,10 +13,13 @@ type SubjectSelectProps = {
   label?: string;
   id?: string;
   compact?: boolean;
+  automatic?: boolean;
+  onAutoSelect?: () => void;
 };
 
 export default function SubjectSelect({
   subjects, value, onChange, onCreate, disabled = false, label = '과목', id, compact = false,
+  automatic = false, onAutoSelect,
 }: SubjectSelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
@@ -26,7 +29,10 @@ export default function SubjectSelect({
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
   const unclassifiedValue = '__unclassified__';
+  const automaticValue = '__automatic__';
+  const automaticLabel = value ? subjects.find(subject => subject.id === value)?.name ?? '지정된 과목' : '미분류';
   const options = [
+    ...(onAutoSelect ? [{ value: automaticValue, label: '제목에 맞춰 선택' }] : []),
     { value: unclassifiedValue, label: '미분류' },
     ...(value && !subjects.some(subject => subject.id === value) ? [{ value, label: '지정된 과목' }] : []),
     ...subjects.map(subject => ({ value: subject.id, label: subject.name })),
@@ -68,8 +74,12 @@ export default function SubjectSelect({
           id={selectId}
           label={compact ? undefined : label}
           aria-label={compact ? label : undefined}
-          value={value ?? unclassifiedValue}
-          onValueChange={next => onChange(next === unclassifiedValue ? null : next)}
+          value={onAutoSelect && automatic ? automaticValue : value ?? unclassifiedValue}
+          displayValue={onAutoSelect && automatic ? automaticLabel : undefined}
+          onValueChange={next => {
+            if (next === automaticValue && onAutoSelect) onAutoSelect();
+            else onChange(next === unclassifiedValue ? null : next);
+          }}
           options={options}
           disabled={disabled || saving}
           compact={compact}

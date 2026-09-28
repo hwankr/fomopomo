@@ -36,6 +36,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
@@ -275,7 +276,8 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   const [tasks, setTasks] = useState<LongTermTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
+  const { subjectId: newSubjectId, selectSubject, resetSubject, isAutomatic } =
+    useSuggestedSubject(newTaskTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = usePersistedState(
     'long_term_expanded',
@@ -319,7 +321,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     setTasks([]);
     setLoading(true);
     setNewTaskTitle('');
-    setNewSubjectId(null);
+    resetSubject();
     setIsAdding(false);
     setDeletingTaskId(null);
     setDeletingSubtaskId(null);
@@ -485,7 +487,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     );
     setLoading(false);
     setNewTaskTitle('');
-    setNewSubjectId(null);
+    resetSubject();
     setIsAdding(false);
   };
 
@@ -1032,12 +1034,16 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                 className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
-              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />
+              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={selectSubject} onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} />
               <p className="text-xs text-gray-500">세부 할 일을 공부할 때 이 과목으로 기록됩니다.</p>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => {
+                    setIsAdding(false);
+                    setNewTaskTitle('');
+                    resetSubject();
+                  }}
                   className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   취소

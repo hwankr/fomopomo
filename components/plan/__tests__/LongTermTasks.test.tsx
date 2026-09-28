@@ -227,13 +227,13 @@ const SUBTASK_EDIT = 2;
 const SUBTASK_DELETE = 3;
 
 describe('LongTermTasks', () => {
-  it('saves a parent subject and supports subject-only edits for future subtasks', async () => {
+  it('infers and saves a parent subject and supports subject-only edits for future subtasks', async () => {
     const dispatch = vi.spyOn(window, 'dispatchEvent');
     render(<LongTermTasks userId="user-1" />);
     await screen.findByText('빅데이터분석기사');
     fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
     fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '블록체인 강의' } });
-    await chooseSubject('블록체인');
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 강의');
     expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-blockchain');
@@ -243,6 +243,56 @@ describe('LongTermTasks', () => {
     await waitFor(() => expect(longTermTasks.find((task) => task.title === '블록체인 강의')?.subject_id).toBe('subject-db'));
     expect(within(getRowForTitle('블록체인 강의')).getByText('데이터베이스')).toBeInTheDocument();
     expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(2);
+  });
+
+  it.each([
+    ['데이터베이스', 'subject-db'],
+    ['미분류', null],
+  ] as const)('preserves a manual %s selection through typing and infers again for the next task', async (name, subjectId) => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    const title = screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)');
+    fireEvent.change(title, { target: { value: '블록체인 9/13 복습' } });
+    await chooseSubject(name);
+    fireEvent.change(title, { target: { value: '블록체인 9/15 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent(name);
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/15 복습');
+    expect(tasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ title: '블록체인 9/15 복습', subject_id: subjectId }));
+
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '블록체인 9/17 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('블록체인 9/17 복습');
+    expect(tasksTable.insert).toHaveBeenLastCalledWith(expect.objectContaining({ title: '블록체인 9/17 복습', subject_id: 'subject-blockchain' }));
+  });
+
+  it('clears the draft and manual subject when adding is cancelled', async () => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '블록체인 초안' } });
+    await chooseSubject('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    const title = screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)');
+    expect(title).toHaveValue('');
+    fireEvent.change(title, { target: { value: '블록체인 새 과제' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
+  });
+
+  it('preserves the saved subject when an existing task title is edited', async () => {
+    longTermTasks[0].subject_id = 'subject-db';
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '빅데이터분석기사 수정' }));
+    fireEvent.change(screen.getByDisplayValue('빅데이터분석기사'), { target: { value: '블록체인 복습' } });
+    expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 저장' }));
+    await screen.findByText('블록체인 복습');
+    expect(tasksTable.update).toHaveBeenCalledWith({ title: '블록체인 복습', subject_id: 'subject-db' });
   });
 
   beforeEach(() => {

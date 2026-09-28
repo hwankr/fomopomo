@@ -18,6 +18,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
@@ -76,8 +77,9 @@ function ScopedMonthlyPlan({ userId }: MonthlyPlanProps) {
   const [plans, setPlans] = useState<MonthlyPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [newPlanTitle, setNewPlanTitle] = useState('');
-  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
   const { subjects, createSubject } = useStudySubjects(userId);
+  const { subjectId: newSubjectId, selectSubject, resetSubject, isAutomatic } =
+    useSuggestedSubject(newPlanTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = usePersistedState(
     'monthly_plan_expanded',
@@ -240,7 +242,7 @@ function ScopedMonthlyPlan({ userId }: MonthlyPlanProps) {
     setPlans((currentPlans) => [...currentPlans, { ...createdPlan, duration: 0 }]);
     if (createdPlan.subject_id) notifyStudySubjectsChanged();
     setNewPlanTitle('');
-    setNewSubjectId(null);
+    resetSubject();
     setIsAdding(false);
   };
 
@@ -502,11 +504,15 @@ function ScopedMonthlyPlan({ userId }: MonthlyPlanProps) {
                 className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 autoFocus
               />
-              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={setNewSubjectId} onCreate={createSubject} />
+              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={selectSubject} onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => {
+                    setIsAdding(false);
+                    setNewPlanTitle('');
+                    resetSubject();
+                  }}
                   className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   취소

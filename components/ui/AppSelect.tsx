@@ -18,6 +18,7 @@ export type AppSelectProps = {
   label?: string;
   id?: string;
   placeholder?: string;
+  displayValue?: string;
   disabled?: boolean;
   className?: string;
   compact?: boolean;
@@ -34,6 +35,7 @@ export default function AppSelect({
   label,
   id,
   placeholder = '선택',
+  displayValue,
   disabled = false,
   className,
   compact = false,
@@ -66,7 +68,7 @@ export default function AppSelect({
             compact && 'h-8 px-2.5 text-xs',
           )}
         >
-          <span className="min-w-0 truncate"><Select.Value placeholder={placeholder} /></span>
+          <span className="min-w-0 truncate"><Select.Value placeholder={placeholder}>{displayValue}</Select.Value></span>
           <Select.Icon asChild>
             <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
           </Select.Icon>

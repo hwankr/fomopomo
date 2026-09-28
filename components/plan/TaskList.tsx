@@ -34,6 +34,7 @@ import { CSS } from '@dnd-kit/utilities';
 import ConfirmModal from '@/components/ConfirmModal';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import { notifyStudySubjectsChanged, type StudySubject } from '@/lib/studySubjects';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
@@ -354,8 +355,8 @@ function ScopedTaskList({ selectedDateKey, userId }: {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newSubjectId, setNewSubjectId] = useState<string | null>(null);
   const { subjects, createSubject } = useStudySubjects(userId);
+  const { subjectId: newSubjectId, isAutomatic, selectSubject, resetSubject } = useSuggestedSubject(newTaskTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [pinnedTasks, setPinnedTasks] = useState<PinnedTask[]>([]);
@@ -784,7 +785,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0 }]);
       if (createdTask.subject_id) notifyStudySubjectsChanged();
       setNewTaskTitle('');
-      setNewSubjectId(null);
+      resetSubject();
       setIsAdding(false);
     } catch (error) {
       if (scope.active) console.error('Error adding task:', error);
@@ -954,13 +955,19 @@ function ScopedTaskList({ selectedDateKey, userId }: {
             <SubjectSelect
               subjects={subjects}
               value={newSubjectId}
-              onChange={setNewSubjectId}
+              onChange={selectSubject}
               onCreate={createSubject}
+              automatic={isAutomatic}
+              onAutoSelect={resetSubject}
             />
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setIsAdding(false)}
+                onClick={() => {
+                  setIsAdding(false);
+                  setNewTaskTitle('');
+                  resetSubject();
+                }}
                 className="rounded-xl px-4 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
               >
                 취소
