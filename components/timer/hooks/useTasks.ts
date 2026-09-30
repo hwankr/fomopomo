@@ -9,6 +9,8 @@ import { supabase } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import {
+  fetchLongTermTaskDurations,
+  materializeLongTermTaskForToday,
   materializeSubtaskForToday,
   toggleSubtaskCompletion,
   type LongTermSubtaskItem,
@@ -32,6 +34,7 @@ export type TaskItem = {
   durationSeconds: number;
   kind: TaskKind;
   sourceSubtaskId?: string | null;
+  sourceLongTermTaskId?: string | null;
   parentTitle?: string;
   subjectId?: string | null;
 };
@@ -43,6 +46,7 @@ type TaskRow = {
   title: string;
   status: TaskStatus;
   source_subtask_id?: string | null;
+  source_long_term_task_id?: string | null;
   subject_id?: string | null;
 };
 
@@ -79,6 +83,8 @@ export const useTasks = (isLoggedIn: boolean) => {
   const currentOwnerRef = useRef(taskOwner);
   const restoredTaskStateOwnerRef = useRef<string | null>(null);
   const pendingSubtaskIdsRef = useRef<Set<string>>(new Set());
+  const longTermSelectionRequestRef = useRef(0);
+  const pendingLongTermSelectionRef = useRef<number | null>(null);
   const [pendingSubtaskIds, setPendingSubtaskIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -93,6 +99,8 @@ export const useTasks = (isLoggedIn: boolean) => {
     fetchGenerationRef.current += 1;
     restoredTaskStateOwnerRef.current = null;
     pendingSubtaskIdsRef.current.clear();
+    longTermSelectionRequestRef.current += 1;
+    pendingLongTermSelectionRef.current = null;
     setDbTasks([]);
     setWeeklyPlans([]);
     setMonthlyPlans([]);
@@ -138,7 +146,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       // Daily tasks (완료 항목도 표시하므로 status 필터 없음)
       const { data: tasksData } = await supabase
         .from('tasks')
-        .select('id, title, status, source_subtask_id, subject_id')
+        .select('id, title, status, source_subtask_id, source_long_term_task_id, subject_id')
         .eq('user_id', user.id)
         .eq('due_date', today);
 
@@ -167,6 +175,13 @@ export const useTasks = (isLoggedIn: boolean) => {
         .is('archived_at', null)
         .order('position', { ascending: true });
 
+      let longTermDurations: Map<string, number> | undefined;
+      try {
+        longTermDurations = await fetchLongTermTaskDurations();
+      } catch (error) {
+        console.error('Error fetching long-term task durations:', error);
+      }
+
       const taskRows = (tasksData ?? []) as TaskRow[];
       const weeklyRows = (weeklyData ?? []) as TaskRow[];
       const monthlyRows = (monthlyData ?? []) as TaskRow[];
@@ -176,6 +191,7 @@ export const useTasks = (isLoggedIn: boolean) => {
         title: task.title,
         position: task.position ?? 0,
         subject_id: task.subject_id ?? null,
+        durationSeconds: longTermDurations ? longTermDurations.get(task.id) ?? 0 : undefined,
         subtasks: (task.long_term_subtasks ?? [])
           .map((subtask) => ({
             ...subtask,
@@ -189,7 +205,9 @@ export const useTasks = (isLoggedIn: boolean) => {
       }
 
       const parentTitleBySubtaskId = new Map<string, string>();
+      const parentTitleByTaskId = new Map<string, string>();
       for (const longTermTask of longTermItems) {
+        parentTitleByTaskId.set(longTermTask.id, longTermTask.title);
         for (const subtask of longTermTask.subtasks) {
           parentTitleBySubtaskId.set(subtask.id, longTermTask.title);
         }
@@ -223,6 +241,7 @@ export const useTasks = (isLoggedIn: boolean) => {
 
       const toItem = (kind: TaskKind) => (row: TaskRow): TaskItem => {
         const sourceSubtaskId = row.source_subtask_id ?? null;
+        const sourceLongTermTaskId = row.source_long_term_task_id ?? null;
         return {
           id: row.id,
           title: row.title,
@@ -233,9 +252,10 @@ export const useTasks = (isLoggedIn: boolean) => {
           ...(kind === 'daily'
             ? {
                 sourceSubtaskId,
+                sourceLongTermTaskId,
                 parentTitle: sourceSubtaskId
                   ? parentTitleBySubtaskId.get(sourceSubtaskId)
-                  : undefined,
+                  : sourceLongTermTaskId ? parentTitleByTaskId.get(sourceLongTermTaskId) : undefined,
               }
             : {}),
         };
@@ -490,6 +510,50 @@ export const useTasks = (isLoggedIn: boolean) => {
     [dbTasks, fetchDbTasks, longTermTasks, taskOwner]
   );
 
+  const selectLongTermTaskForTimer = useCallback(
+    async (parent: LongTermTaskItem, applySelection = true): Promise<TaskItem | null> => {
+      const owner = taskOwner;
+      if (owner === GUEST_OWNER || currentOwnerRef.current !== owner || pendingLongTermSelectionRef.current !== null) return null;
+      const request = ++longTermSelectionRequestRef.current;
+      pendingLongTermSelectionRef.current = request;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || user.id !== owner || currentOwnerRef.current !== owner || request !== longTermSelectionRequestRef.current) return null;
+        // Always resolve today's row on the server. A cached daily row can
+        // belong to yesterday when the timer stays open across midnight.
+        const materialized = await materializeLongTermTaskForToday(user.id, parent);
+        if (!materialized || currentOwnerRef.current !== owner || request !== longTermSelectionRequestRef.current) return null;
+        const existing = dbTasks.find(task => task.id === materialized.id);
+        const task: TaskItem = {
+          id: materialized.id,
+          title: materialized.title,
+          status: materialized.status,
+          durationSeconds: existing?.durationSeconds ?? 0,
+          kind: 'daily',
+          subjectId: materialized.subject_id ?? null,
+          sourceSubtaskId: null,
+          sourceLongTermTaskId: materialized.source_long_term_task_id ?? parent.id,
+          parentTitle: parent.title,
+        };
+        fetchGenerationRef.current += 1;
+        setDbTasks(current => [...current.filter(item => item.id !== task.id && item.sourceLongTermTaskId !== parent.id), task]);
+        if (applySelection) {
+          setSelectedTask(task.title);
+          setSelectedTaskId(task.id);
+          setSelectedSubjectId(task.subjectId ?? null);
+        }
+        void fetchDbTasks();
+        return task;
+      } catch (error) {
+        console.error('Error materializing long-term task:', error);
+        return null;
+      } finally {
+        if (pendingLongTermSelectionRef.current === request) pendingLongTermSelectionRef.current = null;
+      }
+    },
+    [dbTasks, fetchDbTasks, taskOwner]
+  );
+
   const toggleSubtask = useCallback(
     async (subtask: LongTermSubtaskItem): Promise<void> => {
       const subtaskId = subtask.id;
@@ -588,6 +652,7 @@ export const useTasks = (isLoggedIn: boolean) => {
     toggleTaskStatus,
     completeTask,
     selectSubtaskForTimer,
+    selectLongTermTaskForTimer,
     toggleSubtask,
     pendingSubtaskIds,
   };

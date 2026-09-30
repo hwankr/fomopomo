@@ -314,6 +314,37 @@ describe('TaskList request ownership', () => {
     expect(screen.queryByText('9월 7일 작업')).not.toBeInTheDocument();
   });
 
+  it('shows the direct long-term parent tag with the daily subject and recorded duration', async () => {
+    rows.tasks[0].source_long_term_task_id = 'parent-a';
+    rows.tasks[0].subject_id = 'subject-db';
+    rows.long_term_tasks = [{ id: 'parent-a', user_id: 'user-1', title: '코딩테스트' }];
+    rows.study_sessions = [
+      { user_id: 'user-1', task_id: 'a-task', duration: 600 },
+      { user_id: 'user-2', task_id: 'a-task', duration: 3600 },
+    ];
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const row = within(taskRow('9월 6일 작업'));
+    expect(row.getByText('코딩테스트')).toBeInTheDocument();
+    expect(row.getByText('데이터베이스')).toBeInTheDocument();
+    expect(row.getByText('10m')).toBeInTheDocument();
+    expect(queries.find(query => query.table === 'long_term_tasks')?.filters).toContainEqual(['user_id', ['user-1']]);
+  });
+
+  it('discards a direct parent lookup when the selected date changes', async () => {
+    rows.tasks[0].source_long_term_task_id = 'parent-a';
+    const pending = deferred();
+    intercept = query => query.table === 'long_term_tasks' ? pending.promise : undefined;
+    const { rerender } = mount();
+    await waitFor(() => expect(queries.some(query => query.table === 'long_term_tasks')).toBe(true));
+    rerender(view(DAY_B));
+    await screen.findByText('9월 7일 작업');
+    await act(async () => pending.resolve(success([{ id: 'parent-a', title: '이전 날짜 코딩테스트' }])));
+    expect(screen.queryByText('이전 날짜 코딩테스트')).not.toBeInTheDocument();
+    expect(screen.queryByText('9월 6일 작업')).not.toBeInTheDocument();
+    expect(screen.getByText('9월 7일 작업')).toBeInTheDocument();
+  });
+
   it.each(['tasks', 'long_term_subtasks', 'study_sessions'])('ignores an old date response delayed at %s', async (table) => {
     rows.tasks[0].source_subtask_id = 'sub-a';
     rows.long_term_subtasks = [{ id: 'sub-a', long_term_tasks: { title: '이전 날짜 과제' } }];

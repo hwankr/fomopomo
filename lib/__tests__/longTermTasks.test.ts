@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
     from: vi.fn(),
+    rpc: vi.fn(),
   },
 }));
 
@@ -12,6 +13,8 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   materializeSubtaskForToday,
+  materializeLongTermTaskForToday,
+  fetchLongTermTaskDurations,
   toggleSubtaskCompletion,
   type LongTermSubtaskRow,
   type MaterializedTaskRow,
@@ -23,7 +26,7 @@ const todayKey = '2026-08-29';
 const now = new Date(2026, 7, 29, 3, 30);
 const nowIso = now.toISOString();
 const taskSelect =
-  'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id';
+  'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id';
 
 const subtask: LongTermSubtaskRow = {
   id: 'subtask-1',
@@ -266,10 +269,80 @@ describe('longTermTasks helpers', () => {
     const result = await materializeSubtaskForToday('user-1', subtask);
 
     expect(fallbackFilters).toEqual([
+      ['user_id', 'user-1'],
       ['source_subtask_id', 'subtask-1'],
       ['due_date', todayKey],
     ]);
     expect(result).toEqual(materializedTask);
+  });
+
+  it('materializes a project without subtasks using its own daily conflict key', async () => {
+    const projectTask = {
+      ...materializedTask,
+      title: 'Coding practice',
+      source_subtask_id: null,
+      source_long_term_task_id: 'long-task-1',
+    };
+    upsertResult = { data: projectTask, error: null };
+
+    expect(await materializeLongTermTaskForToday('user-1', {
+      id: 'long-task-1', title: 'Coding practice', subject_id: 'subject-1',
+    })).toEqual(projectTask);
+    expect(upsertCalls).toEqual([{
+      payload: {
+        user_id: 'user-1', title: 'Coding practice', due_date: todayKey,
+        status: 'todo', position: 5, source_long_term_task_id: 'long-task-1', subject_id: 'subject-1',
+      },
+      options: { onConflict: 'source_long_term_task_id,due_date', ignoreDuplicates: true },
+    }]);
+  });
+
+  it('returns the existing completed project task without changing its status or classification', async () => {
+    upsertResult = { data: null, error: null };
+    fallbackResult = { data: { ...materializedTask, status: 'done', subject_id: 'old-subject' }, error: null };
+
+    const result = await materializeLongTermTaskForToday('user-1', {
+      id: 'long-task-1', title: 'Coding practice', subject_id: 'new-subject',
+    });
+
+    expect(result).toMatchObject({ status: 'done', subject_id: 'old-subject' });
+    expect(fallbackFilters).toEqual([
+      ['user_id', 'user-1'], ['source_long_term_task_id', 'long-task-1'], ['due_date', todayKey],
+    ]);
+    expect(taskUpdatePatches).toEqual([]);
+    expect(subtaskUpdatePatches).toEqual([]);
+  });
+
+  it('creates a fresh project task for the next calendar day', async () => {
+    vi.setSystemTime(new Date(2026, 7, 30, 3, 30));
+    await materializeLongTermTaskForToday('user-1', {
+      id: 'long-task-1', title: 'Coding practice', subject_id: null,
+    });
+    expect(upsertCalls[0].payload).toMatchObject({ due_date: '2026-08-30', status: 'todo' });
+  });
+
+  it('propagates materialization failures without returning a fabricated task', async () => {
+    upsertResult = { data: null, error: { message: 'Could not create task' } };
+    await expect(materializeLongTermTaskForToday('user-1', {
+      id: 'long-task-1', title: 'Coding practice', subject_id: null,
+    })).rejects.toEqual(upsertResult.error);
+  });
+
+  it('fetches server-aggregated durations, including a real zero', async () => {
+    supabaseMock.rpc.mockResolvedValueOnce({ data: [
+      { long_term_task_id: 'long-task-1', duration_seconds: 125 },
+      { long_term_task_id: 'long-task-2', duration_seconds: 0 },
+    ], error: null });
+    expect(await fetchLongTermTaskDurations()).toEqual(new Map([
+      ['long-task-1', 125], ['long-task-2', 0],
+    ]));
+    expect(supabaseMock.rpc).toHaveBeenCalledWith('get_long_term_task_durations');
+  });
+
+  it('propagates a duration query failure so unknown durations stay unknown', async () => {
+    const error = { message: 'Duration query unavailable' };
+    supabaseMock.rpc.mockResolvedValueOnce({ data: null, error });
+    await expect(fetchLongTermTaskDurations()).rejects.toEqual(error);
   });
 
   it('updates the subtask first, then only today\'s materialized task', async () => {

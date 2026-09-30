@@ -4,12 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   getStorageOwnerMock,
   materializeSubtaskForTodayMock,
+  materializeLongTermTaskForTodayMock,
+  fetchLongTermTaskDurationsMock,
   readOwnedJsonMock,
   supabaseMock,
   toggleSubtaskCompletionMock,
 } = vi.hoisted(() => ({
   getStorageOwnerMock: vi.fn(),
   materializeSubtaskForTodayMock: vi.fn(),
+  materializeLongTermTaskForTodayMock: vi.fn(),
+  fetchLongTermTaskDurationsMock: vi.fn(),
   readOwnedJsonMock: vi.fn(),
   supabaseMock: {
     from: vi.fn(),
@@ -26,6 +30,8 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/longTermTasks', () => ({
   materializeSubtaskForToday: materializeSubtaskForTodayMock,
+  materializeLongTermTaskForToday: materializeLongTermTaskForTodayMock,
+  fetchLongTermTaskDurations: fetchLongTermTaskDurationsMock,
   toggleSubtaskCompletion: toggleSubtaskCompletionMock,
 }));
 
@@ -44,6 +50,7 @@ type Row = {
   title: string;
   status: string;
   source_subtask_id?: string | null;
+  source_long_term_task_id?: string | null;
   subject_id?: string | null;
 };
 type SessionRow = { task_id: string | null; duration: number | null };
@@ -161,6 +168,10 @@ describe('useTasks', () => {
     getStorageOwnerMock.mockReturnValue('user-1');
     materializeSubtaskForTodayMock.mockReset();
     materializeSubtaskForTodayMock.mockResolvedValue(null);
+    materializeLongTermTaskForTodayMock.mockReset();
+    materializeLongTermTaskForTodayMock.mockResolvedValue(null);
+    fetchLongTermTaskDurationsMock.mockReset();
+    fetchLongTermTaskDurationsMock.mockResolvedValue(new Map());
     readOwnedJsonMock.mockReset();
     readOwnedJsonMock.mockReturnValue(null);
     toggleSubtaskCompletionMock.mockReset();
@@ -261,6 +272,7 @@ describe('useTasks', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -281,7 +293,7 @@ describe('useTasks', () => {
       parentTitle: '자격증 공부',
     });
     expect(taskSelectCalls[0]).toBe(
-      'id, title, status, source_subtask_id, subject_id'
+      'id, title, status, source_subtask_id, source_long_term_task_id, subject_id'
     );
     expect(doneTask).toMatchObject({ id: 't2', status: 'done' });
 
@@ -301,6 +313,7 @@ describe('useTasks', () => {
         id: 'lt1',
         title: '자격증 공부',
         subject_id: null,
+        durationSeconds: 0,
         position: 0,
         subtasks: [
           {
@@ -359,6 +372,7 @@ describe('useTasks', () => {
           id: 'lt-null',
           title: '위치 없는 과제',
           subject_id: null,
+          durationSeconds: 0,
           position: 0,
           subtasks: [
             {
@@ -406,6 +420,110 @@ describe('useTasks', () => {
     rerender({ loggedIn: false });
     expect(result.current.selectedSubjectId).toBeNull();
     expect(result.current.getSelectedTaskSubjectId()).toBeNull();
+  });
+
+  it('loads parent linkage and the server aggregate separately from today\'s time', async () => {
+    taskRows[0].source_subtask_id = null;
+    taskRows[0].source_long_term_task_id = 'lt1';
+    fetchLongTermTaskDurationsMock.mockResolvedValue(new Map([['lt1', 7200]]));
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.dbTasks).toHaveLength(2));
+    expect(result.current.dbTasks[0]).toMatchObject({ sourceLongTermTaskId: 'lt1', parentTitle: '자격증 공부', durationSeconds: 900 });
+    expect(result.current.longTermTasks[0].durationSeconds).toBe(7200);
+  });
+
+  it('keeps projects available with an unknown aggregate when its fetch fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchLongTermTaskDurationsMock.mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    expect(result.current.longTermTasks[0].durationSeconds).toBeUndefined();
+  });
+
+  it('materializes a project without subtasks with its subject, reuses today and resolves a fresh row after midnight', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T12:00:00'));
+    longTermRows[0].long_term_subtasks = [];
+    longTermRows[0].subject_id = 'subject-parent';
+    materializeLongTermTaskForTodayMock.mockImplementation(async () => {
+      const id = `daily-${new Date().getDate()}`;
+      const row = { id, title: '자격증 공부', status: 'todo', subject_id: 'subject-parent', source_long_term_task_id: 'lt1' };
+      taskRows = [row];
+      return row;
+    });
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    const parent = result.current.longTermTasks[0];
+    await act(async () => { await result.current.selectLongTermTaskForTimer(parent); });
+    expect(result.current.selectedTaskId).toBe('daily-29');
+    expect(result.current.selectedSubjectId).toBe('subject-parent');
+    expect(result.current.dbTasks[0]).toMatchObject({ kind: 'daily', sourceLongTermTaskId: 'lt1', sourceSubtaskId: null });
+    await act(async () => { await result.current.selectLongTermTaskForTimer(parent); });
+    expect(result.current.dbTasks).toHaveLength(1);
+    expect(result.current.selectedTaskId).toBe('daily-29');
+    vi.setSystemTime(new Date('2026-09-30T12:00:00'));
+    await act(async () => { await result.current.selectLongTermTaskForTimer(parent); });
+    expect(result.current.selectedTaskId).toBe('daily-30');
+    expect(result.current.dbTasks).toHaveLength(1);
+    expect(materializeLongTermTaskForTodayMock).toHaveBeenCalledTimes(3);
+    expect(materializeLongTermTaskForTodayMock).toHaveBeenCalledWith('user-1', parent);
+  });
+
+  it('only completes today\'s direct parent row and leaves the parent available', async () => {
+    taskRows = [{ id: 'parent-today', title: '코딩 테스트', status: 'todo', source_long_term_task_id: 'lt1' }];
+    longTermRows[0].long_term_subtasks = [];
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.dbTasks).toHaveLength(1));
+    await act(async () => { expect(await result.current.completeTask(result.current.dbTasks[0])).toBe(true); });
+    expect(result.current.dbTasks[0].status).toBe('done');
+    expect(result.current.longTermTasks).toHaveLength(1);
+    expect(toggleSubtaskCompletionMock).not.toHaveBeenCalled();
+    expect(updateCalls).toEqual([{ table: 'tasks', patch: { status: 'done' }, id: 'parent-today' }]);
+  });
+
+  it('serializes parent selection and defers applying labels for the timer handoff', async () => {
+    const pending = createDeferred<Row>();
+    materializeLongTermTaskForTodayMock.mockReturnValue(pending.promise);
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    let selecting!: Promise<TaskItem | null>;
+    await act(async () => {
+      selecting = result.current.selectLongTermTaskForTimer(result.current.longTermTasks[0], false);
+      expect(await result.current.selectLongTermTaskForTimer(result.current.longTermTasks[0], false)).toBeNull();
+    });
+    expect(materializeLongTermTaskForTodayMock).toHaveBeenCalledOnce();
+    await act(async () => {
+      pending.resolve({ id: 'today', title: '부모', status: 'todo', source_long_term_task_id: 'lt1' });
+      expect(await selecting).toMatchObject({ id: 'today', sourceLongTermTaskId: 'lt1' });
+    });
+    expect(result.current.selectedTaskId).toBeNull();
+  });
+
+  it('ignores a parent selection that settles after the owner changes', async () => {
+    const pending = createDeferred<Row>();
+    materializeLongTermTaskForTodayMock.mockReturnValue(pending.promise);
+    const { result, rerender } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    let selecting!: Promise<TaskItem | null>;
+    await act(async () => { selecting = result.current.selectLongTermTaskForTimer(result.current.longTermTasks[0]); });
+    getStorageOwnerMock.mockReturnValue('user-2');
+    rerender();
+    await act(async () => {
+      pending.resolve({ id: 'old-owner-task', title: '부모', status: 'todo' });
+      expect(await selecting).toBeNull();
+    });
+    expect(result.current.selectedTaskId).toBeNull();
+    expect(result.current.dbTasks).toEqual([]);
+  });
+
+  it('leaves the current selection alone when parent materialization fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    materializeLongTermTaskForTodayMock.mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
+    await act(async () => { result.current.setSelectedTaskId('t1'); });
+    await act(async () => { expect(await result.current.selectLongTermTaskForTimer(result.current.longTermTasks[0])).toBeNull(); });
+    expect(result.current.selectedTaskId).toBe('t1');
   });
 
   it('inherits the parent subject when materializing a long-term subtask', async () => {

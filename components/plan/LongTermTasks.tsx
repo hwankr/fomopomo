@@ -41,12 +41,13 @@ import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
 import {
+  fetchLongTermTaskDurations,
   toggleSubtaskCompletion,
   type LongTermSubtaskItem,
   type LongTermTaskItem,
   type LongTermTaskRow,
 } from '@/lib/longTermTasks';
-import { cn } from '@/lib/utils';
+import { cn, formatDuration } from '@/lib/utils';
 
 interface LongTermTasksProps {
   userId: string;
@@ -369,24 +370,35 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     setLoading(true);
 
-    // v1은 보관되지 않은 장기 과제만 다룬다.
-    const { data, error } = await supabase
-      .from('long_term_tasks')
-      .select(`${TASK_SELECT}, long_term_subtasks(${SUBTASK_SELECT})`)
-      .eq('user_id', userId)
-      .is('archived_at', null)
-      .order('position', { ascending: true });
+    const [taskResult, durationResult] = await Promise.allSettled([
+      supabase
+        .from('long_term_tasks')
+        .select(`${TASK_SELECT}, long_term_subtasks(${SUBTASK_SELECT})`)
+        .eq('user_id', userId)
+        .is('archived_at', null)
+        .order('position', { ascending: true }),
+      fetchLongTermTaskDurations(),
+    ]);
 
     // 더 새로운 fetch나 로컬 변경 커밋이 세대를 올렸다면 이 응답은 이미 낡았다.
     if (!isCurrentScope(generation) || epoch !== fetchEpochRef.current) return;
 
-    if (error) {
-      console.error('Error fetching long term tasks:', error);
+    if (taskResult.status === 'rejected' || taskResult.value.error) {
+      console.error('Error fetching long term tasks:', taskResult.status === 'rejected'
+        ? taskResult.reason : taskResult.value.error);
       setLoading(false);
       return;
     }
 
-    setTasks(normalizeTaskRows(data as LongTermTaskRow[]));
+    if (durationResult.status === 'rejected') {
+      console.error('Error fetching long term task durations:', durationResult.reason);
+    }
+    setTasks(normalizeTaskRows(taskResult.value.data as LongTermTaskRow[]).map((task) => ({
+      ...task,
+      durationSeconds: durationResult.status === 'fulfilled'
+        ? durationResult.value.get(task.id) ?? 0
+        : undefined,
+    })));
     setLoading(false);
   }, [userId, isCurrentScope]);
 
@@ -430,10 +442,27 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
       )
       .subscribe();
 
+    const sessionChannel = supabase
+      .channel('long-term-task-session-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'study_sessions',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void fetchTasks(generation);
+        }
+      )
+      .subscribe();
+
     return () => {
       clearTimeout(initialFetch);
       supabase.removeChannel(taskChannel);
       supabase.removeChannel(subtaskChannel);
+      supabase.removeChannel(sessionChannel);
     };
   }, [fetchTasks, userId]);
 
@@ -483,7 +512,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         ? currentTasks.map((task) =>
             task.id === createdTask.id ? { ...task, ...createdTask } : task
           )
-        : [...currentTasks, { ...createdTask, subtasks: [] }]
+        : [...currentTasks, { ...createdTask, subtasks: [], durationSeconds: 0 }]
     );
     setLoading(false);
     setNewTaskTitle('');
@@ -813,7 +842,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
             장기 과제
           </h2>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            세부 할 일을 만들어 두고 매일 골라서 진행하세요.
+            기간 없이 꾸준히 할 공부도 등록하세요. 타이머의 Task list에서 장기 과제를 고르면 그날 기록과 누적 시간에 함께 쌓여요.
           </p>
         </div>
         <div className="text-gray-400 lg:hidden">
@@ -896,6 +925,11 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                         <span title={task.title} className="block break-words max-sm:line-clamp-2">{task.title}</span>
                         <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
                           {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
+                        </span>
+                        <span className="mt-1 block text-xs font-normal text-emerald-700 dark:text-emerald-300">
+                          {task.durationSeconds === undefined
+                            ? '누적 시간 조회 실패'
+                            : `누적 ${formatDuration(task.durationSeconds)}`}
                         </span>
                       </span>
                     )}

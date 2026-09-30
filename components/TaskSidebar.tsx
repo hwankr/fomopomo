@@ -22,6 +22,7 @@ interface TaskSidebarProps {
   // 첫 선택 시 챕터가 오늘 할 일로 구체화되므로, 실제로 선택된 tasks 행을
   // (실패 시 null을) resolve하는 promise를 돌려줘야 한다.
   onSelectSubtask: (subtask: LongTermSubtaskItem) => Promise<TaskItem | null>;
+  onSelectLongTermTask: (task: LongTermTaskItem) => Promise<TaskItem | null>;
   onToggleSubtask: (subtask: LongTermSubtaskItem) => void;
   pendingToggleSubtaskIds?: ReadonlySet<string>;
   selectedTaskId: string | null;
@@ -156,14 +157,20 @@ function LongTermTaskSection({
   items,
   materializedSubtaskIds,
   pendingSubtaskId,
+  pendingLongTermTaskId,
+  unavailableParentIds,
   pendingToggleSubtaskIds,
+  onSelectLongTermTask,
   onSelectSubtask,
   onToggleSubtask,
 }: {
   items: LongTermTaskItem[];
   materializedSubtaskIds: Set<string>;
   pendingSubtaskId: string | null;
+  pendingLongTermTaskId: string | null;
+  unavailableParentIds: ReadonlySet<string>;
   pendingToggleSubtaskIds: ReadonlySet<string>;
+  onSelectLongTermTask: (task: LongTermTaskItem) => void;
   onSelectSubtask: (subtask: LongTermSubtaskItem) => void;
   onToggleSubtask: (subtask: LongTermSubtaskItem) => void;
 }) {
@@ -193,44 +200,38 @@ function LongTermTaskSection({
         const doneCount = task.subtasks.filter(
           (subtask) => subtask.completed_at !== null
         ).length;
-        if (!hasSubtasks) {
-          // 펼칠 내용이 없으면 디스클로저 대신 정적 행 + 빈 상태 문구를 보여준다.
-          return (
-            <div
-              key={task.id}
-              className="flex w-full items-center rounded-xl border border-transparent pr-2"
-            >
-              <span className="min-w-0 flex-1 py-3 pl-3 pr-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span className="block truncate">{task.title}</span>
-              </span>
-              <span className="flex-shrink-0 whitespace-nowrap px-2 py-1 text-xs font-normal text-gray-400 dark:text-gray-500">
-                세부 할 일 없음
-              </span>
-            </div>
-          );
-        }
+        const isPending = task.id === pendingLongTermTaskId;
+        const selectionPending = pendingSubtaskId !== null || pendingLongTermTaskId !== null;
+        const durationLabel = task.durationSeconds === undefined
+          ? '누적 시간 확인 불가'
+          : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
         return (
           <div key={task.id} className="space-y-2">
-            <button
-              onClick={() => toggleExpanded(task.id)}
-              aria-expanded={isExpanded}
-              className="flex w-full items-center rounded-xl border border-transparent pr-2 transition-all hover:bg-gray-50 dark:hover:bg-slate-800/50"
-            >
-              <span className="min-w-0 flex-1 py-3 pl-3 pr-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span className="block truncate">{task.title}</span>
-              </span>
-              <span
-                className={`flex-shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs font-bold ${styles.badge}`}
-              >
-                {`완료 ${doneCount}/${task.subtasks.length}`}
-              </span>
-              <ChevronDown
-                className={`ml-1 h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${
-                  isExpanded ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
-            {isExpanded && (
+            <div className="rounded-xl border border-transparent px-3 py-2">
+              <div className="flex items-center gap-2">
+                {hasSubtasks ? (
+                  <button onClick={() => toggleExpanded(task.id)} aria-expanded={isExpanded}
+                    className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <span className="truncate">{task.title}</span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate py-1 text-sm font-medium text-gray-700 dark:text-gray-300">{task.title}</span>
+                )}
+                {!unavailableParentIds.has(task.id) && (
+                  <button onClick={() => onSelectLongTermTask(task)} disabled={selectionPending}
+                    aria-label={`${task.title} 공부하기`} aria-busy={isPending}
+                    className={`shrink-0 rounded-md px-2 py-1 text-xs font-bold disabled:opacity-60 ${styles.badge}`}>
+                    {isPending ? '준비 중…' : '공부하기'}
+                  </button>
+                )}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
+                <span>{durationLabel}</span>
+                {hasSubtasks && <span>{`완료 ${doneCount}/${task.subtasks.length}`}</span>}
+              </div>
+            </div>
+            {hasSubtasks && isExpanded && (
               <div className="ml-2 space-y-2">
                 {partitionDoneLast(
                   task.subtasks,
@@ -270,7 +271,7 @@ function LongTermTaskSection({
                       ) : (
                         <button
                           onClick={() => onSelectSubtask(subtask)}
-                          disabled={isPending}
+                          disabled={selectionPending}
                           aria-busy={isPending}
                           className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-700 disabled:opacity-60 dark:text-gray-300"
                         >
@@ -312,6 +313,7 @@ export default function TaskSidebar({
   onSelectTask,
   onToggleTask,
   onSelectSubtask,
+  onSelectLongTermTask,
   onToggleSubtask,
   pendingToggleSubtaskIds = EMPTY_SUBTASK_IDS,
   selectedTaskId,
@@ -320,6 +322,8 @@ export default function TaskSidebar({
   excludedTaskId = null,
 }: TaskSidebarProps) {
   const [pendingSubtaskId, setPendingSubtaskId] = useState<string | null>(null);
+  const [pendingLongTermTaskId, setPendingLongTermTaskId] = useState<string | null>(null);
+  const pendingSelectionRef = useRef(false);
   const selectionRequestRef = useRef(0);
 
   if (!isOpen) return null;
@@ -327,6 +331,8 @@ export default function TaskSidebar({
   const closeSidebar = () => {
     selectionRequestRef.current += 1;
     setPendingSubtaskId(null);
+    setPendingLongTermTaskId(null);
+    pendingSelectionRef.current = false;
     onClose();
   };
 
@@ -339,7 +345,8 @@ export default function TaskSidebar({
   // 구체화가 끝나 tasks 행이 실제로 선택된 뒤에만 드로어를 닫는다.
   // 실패하면 드로어를 열어둔 채 에러 토스트를 띄운다.
   const selectSubtaskAndClose = async (subtask: LongTermSubtaskItem) => {
-    if (selectionDisabled || pendingSubtaskId !== null) return;
+    if (selectionDisabled || pendingSelectionRef.current) return;
+    pendingSelectionRef.current = true;
     const request = ++selectionRequestRef.current;
     setPendingSubtaskId(subtask.id);
     try {
@@ -353,7 +360,33 @@ export default function TaskSidebar({
       if (selected) closeSidebar();
       else toast.error('챕터를 오늘 할 일로 가져오지 못했어요. 다시 시도해주세요.');
     } finally {
-      if (request === selectionRequestRef.current) setPendingSubtaskId(null);
+      if (request === selectionRequestRef.current) {
+        setPendingSubtaskId(null);
+        pendingSelectionRef.current = false;
+      }
+    }
+  };
+
+  const selectLongTermTaskAndClose = async (task: LongTermTaskItem) => {
+    if (selectionDisabled || pendingSelectionRef.current) return;
+    pendingSelectionRef.current = true;
+    const request = ++selectionRequestRef.current;
+    setPendingLongTermTaskId(task.id);
+    try {
+      let selected: TaskItem | null = null;
+      try {
+        selected = await onSelectLongTermTask(task);
+      } catch (error) {
+        console.error('Error selecting long-term task:', error);
+      }
+      if (request !== selectionRequestRef.current) return;
+      if (selected) closeSidebar();
+      else toast.error('장기 과제를 선택하지 못했어요. 다시 시도해주세요.');
+    } finally {
+      if (request === selectionRequestRef.current) {
+        setPendingLongTermTaskId(null);
+        pendingSelectionRef.current = false;
+      }
     }
   };
 
@@ -364,11 +397,13 @@ export default function TaskSidebar({
   const excludedSubtaskId = tasks.find((task) => task.id === excludedTaskId)?.sourceSubtaskId;
   const availableTasks = (items: TaskItem[]) => items.filter((task) =>
     task.id !== excludedTaskId && (!choosingNextTask || task.status !== 'done'));
+  const unavailableParentIds = new Set(tasks.flatMap(task => task.sourceLongTermTaskId &&
+    (task.id === excludedTaskId || (choosingNextTask && task.status === 'done')) ? [task.sourceLongTermTaskId] : []));
   const availableLongTermTasks = longTermTasks.map((task) => ({
     ...task,
     subtasks: task.subtasks.filter((subtask) => subtask.id !== excludedSubtaskId &&
       (!choosingNextTask || subtask.completed_at === null)),
-  })).filter((task) => !choosingNextTask || task.subtasks.length > 0);
+  })).filter((task) => !unavailableParentIds.has(task.id) || task.subtasks.length > 0);
   const hasNextTask = availableTasks(tasks).length + availableTasks(weeklyPlans).length +
     availableTasks(monthlyPlans).length + availableLongTermTasks.length > 0;
 
@@ -459,7 +494,10 @@ export default function TaskSidebar({
               items={availableLongTermTasks}
               materializedSubtaskIds={materializedSubtaskIds}
               pendingSubtaskId={pendingSubtaskId}
+              pendingLongTermTaskId={pendingLongTermTaskId}
+              unavailableParentIds={unavailableParentIds}
               pendingToggleSubtaskIds={pendingToggleSubtaskIds}
+              onSelectLongTermTask={(task) => { void selectLongTermTaskAndClose(task); }}
               onSelectSubtask={(subtask) => {
                 void selectSubtaskAndClose(subtask);
               }}

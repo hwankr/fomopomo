@@ -48,6 +48,7 @@ interface Task {
   duration?: number;
   position: number;
   source_subtask_id: string | null;
+  source_long_term_task_id?: string | null;
   parentTitle?: string;
 }
 
@@ -66,6 +67,7 @@ type TaskRow = {
   estimated_pomodoros: number | null;
   position: number | null;
   source_subtask_id: string | null;
+  source_long_term_task_id?: string | null;
 };
 
 type SubtaskParentRow = {
@@ -100,6 +102,7 @@ const normalizeTaskRows = (rows: TaskRow[] | null | undefined): Task[] =>
     estimated_pomodoros: row.estimated_pomodoros ?? 0,
     position: row.position ?? 0,
     source_subtask_id: row.source_subtask_id ?? null,
+    source_long_term_task_id: row.source_long_term_task_id ?? null,
     subject_id: row.subject_id ?? null,
   }));
 
@@ -440,7 +443,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
       .select(
-        'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
+        'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
       )
       .eq('user_id', userId)
       .eq('due_date', selectedDateKey)
@@ -481,7 +484,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         .from('tasks')
         .insert(newTaskPayload)
         .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
+          'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
         );
 
       if (!isCurrent()) return;
@@ -529,6 +532,33 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           parentTitle: task.source_subtask_id
             ? parentTitleBySubtaskId.get(task.source_subtask_id)
             : undefined,
+        }));
+      }
+    }
+
+    const sourceLongTermTaskIds = [...new Set(taskRows.flatMap((task) =>
+      task.source_long_term_task_id ? [task.source_long_term_task_id] : []
+    ))];
+
+    if (sourceLongTermTaskIds.length > 0) {
+      const { data: parentData, error: parentError } = await supabase
+        .from('long_term_tasks')
+        .select('id, title')
+        .eq('user_id', userId)
+        .in('id', sourceLongTermTaskIds);
+
+      if (!isCurrent()) return;
+      if (parentError) {
+        console.error('Error fetching long-term task titles:', parentError);
+      } else {
+        const parentTitles = new Map(
+          ((parentData ?? []) as Array<{ id: string; title: string }>).map((parent) => [parent.id, parent.title])
+        );
+        taskRows = taskRows.map((task) => ({
+          ...task,
+          parentTitle: task.source_long_term_task_id
+            ? parentTitles.get(task.source_long_term_task_id) ?? task.parentTitle
+            : task.parentTitle,
         }));
       }
     }
@@ -774,7 +804,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           position: maxPosition + 1,
         })
         .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id'
+          'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
         )
         .single();
 

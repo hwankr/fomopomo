@@ -35,6 +35,7 @@ export type LongTermTaskItem = {
   subject_id: string | null;
   position: number;
   subtasks: LongTermSubtaskItem[];
+  durationSeconds?: number;
 };
 
 export type MaterializedTaskRow = {
@@ -45,18 +46,36 @@ export type MaterializedTaskRow = {
   estimated_pomodoros: number | null;
   position: number | null;
   source_subtask_id: string | null;
+  source_long_term_task_id?: string | null;
 };
 
 type MaterializableSubtask = Pick<LongTermSubtaskItem, 'id' | 'title'>;
 type CompletableSubtask = Pick<LongTermSubtaskItem, 'id' | 'completed_at'>;
 
 const MATERIALIZED_TASK_SELECT =
-  'id, title, status, estimated_pomodoros, position, source_subtask_id, subject_id';
+  'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id';
 
 export async function materializeSubtaskForToday(
   userId: string,
   subtask: MaterializableSubtask,
   subjectId: string | null = null
+): Promise<MaterializedTaskRow | null> {
+  return materializeForToday(userId, subtask.title, subjectId, 'source_subtask_id', subtask.id);
+}
+
+export async function materializeLongTermTaskForToday(
+  userId: string,
+  task: Pick<LongTermTaskItem, 'id' | 'title' | 'subject_id'>
+): Promise<MaterializedTaskRow | null> {
+  return materializeForToday(userId, task.title, task.subject_id, 'source_long_term_task_id', task.id);
+}
+
+async function materializeForToday(
+  userId: string,
+  title: string,
+  subjectId: string | null,
+  sourceColumn: 'source_subtask_id' | 'source_long_term_task_id',
+  sourceId: string
 ): Promise<MaterializedTaskRow | null> {
   // tasks.due_date follows the calendar date used by TaskList/useTasks, not
   // the 05:00 study-day boundary used for study-session reporting.
@@ -82,15 +101,15 @@ export async function materializeSubtaskForToday(
     .upsert(
       {
         user_id: userId,
-        title: subtask.title,
+        title,
         due_date: todayKey,
         status: 'todo',
         position,
-        source_subtask_id: subtask.id,
+        [sourceColumn]: sourceId,
         subject_id: subjectId,
       },
       {
-        onConflict: 'source_subtask_id,due_date',
+        onConflict: `${sourceColumn},due_date`,
         ignoreDuplicates: true,
       }
     )
@@ -100,17 +119,29 @@ export async function materializeSubtaskForToday(
   if (error) throw error;
   if (data) return data as MaterializedTaskRow;
 
-  // A zero-row upsert means another caller won the race or this subtask was
+  // A zero-row upsert means another caller won the race or this source was
   // already materialized today. Read and return the unique winning row.
   const { data: existing, error: existingError } = await supabase
     .from('tasks')
     .select(MATERIALIZED_TASK_SELECT)
-    .eq('source_subtask_id', subtask.id)
+    .eq('user_id', userId)
+    .eq(sourceColumn, sourceId)
     .eq('due_date', todayKey)
     .maybeSingle();
 
   if (existingError) throw existingError;
   return (existing as MaterializedTaskRow | null) ?? null;
+}
+
+export async function fetchLongTermTaskDurations(): Promise<Map<string, number>> {
+  const { data, error } = await supabase.rpc('get_long_term_task_durations');
+  if (error) throw error;
+
+  return new Map(
+    ((data ?? []) as Array<{ long_term_task_id: string; duration_seconds: number }>).map(
+      (row) => [row.long_term_task_id, Number(row.duration_seconds)]
+    )
+  );
 }
 
 export async function toggleSubtaskCompletion(

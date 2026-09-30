@@ -7,7 +7,7 @@ import TaskSidebar from './TaskSidebar';
 // Hooks
 import { useSettings, type Settings } from '@/components/timer/hooks/useSettings';
 import { useSound } from '@/components/timer/hooks/useSound';
-import { useTasks, type TaskItem, type LongTermSubtaskItem } from './timer/hooks/useTasks';
+import { useTasks, type TaskItem, type LongTermSubtaskItem, type LongTermTaskItem } from './timer/hooks/useTasks';
 import { useTimerLogic, type TimerMode } from './timer/hooks/useTimerLogic';
 import { useStopwatchLogic } from './timer/hooks/useStopwatchLogic';
 import { getStopwatchSnapshot, type StopwatchSnapshot } from './timer/hooks/stopwatchUtils';
@@ -212,6 +212,7 @@ export default function TimerApp({
     toggleTaskStatus,
     completeTask,
     selectSubtaskForTimer,
+    selectLongTermTaskForTimer,
     toggleSubtask,
     pendingSubtaskIds,
   } = useTasks(isLoggedIn);
@@ -580,20 +581,28 @@ export default function TimerApp({
       false, 0, null, [], currentIntervalStartRef.current, timerDuration);
   };
 
-  const selectTimerSubtask = async (subtask: LongTermSubtaskItem) => {
+  const selectMaterializedTimerTask = async (materialize: () => Promise<TaskItem | null>) => {
     if (selectingTaskRef.current || taskHandoffRef.current?.completionPending) return null;
     selectingTaskRef.current = true;
     const request = ++taskSelectionRequestRef.current;
     const revision = sessionRevisionRef.current;
     try {
-      const row = await selectSubtaskForTimer(subtask, false);
+      const row = await materialize();
       if (!row || request !== taskSelectionRequestRef.current || revision !== sessionRevisionRef.current || getStorageOwner() !== storageOwner) return null;
+      const handoff = taskHandoffRef.current;
+      if (handoff && (handoff.completionPending || row.status === 'done' || row.id === handoff.task.id)) return null;
       selectTimerTask(row);
       return row;
     } finally {
       if (request === taskSelectionRequestRef.current) selectingTaskRef.current = false;
     }
   };
+
+  const selectTimerSubtask = (subtask: LongTermSubtaskItem) =>
+    selectMaterializedTimerTask(() => selectSubtaskForTimer(subtask, false));
+
+  const selectTimerLongTermTask = (task: LongTermTaskItem) =>
+    selectMaterializedTimerTask(() => selectLongTermTaskForTimer(task, false));
 
   // Auto-start must go through the same atomic start transition as a manual
   // start: a bare setIsRunning(true) would reuse the expired endTimeRef, so
@@ -1557,6 +1566,7 @@ export default function TimerApp({
           else void toggleTaskStatus(task);
         }}
         onSelectSubtask={selectTimerSubtask}
+        onSelectLongTermTask={selectTimerLongTermTask}
         onToggleSubtask={(subtask) => {
           if (selectedTaskItem?.sourceSubtaskId === subtask.id && !subtask.completed_at && timerOwnsFocusProgress) handleCompleteTask();
           else void toggleSubtask(subtask);

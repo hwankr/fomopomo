@@ -1,14 +1,14 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TimerApp from '../TimerApp';
-import type { TaskItem } from '../timer/hooks/useTasks';
+import type { LongTermTaskItem, TaskItem } from '../timer/hooks/useTasks';
 
 // Keep the countdown, interval ledger, outbox and RPC serialization real.
 const mocks = vi.hoisted(() => ({
   display: {} as Record<string, unknown>,
   sidebar: {} as Record<string, unknown>,
   rpc: vi.fn(), from: vi.fn(), completeTask: vi.fn(), toggleTaskStatus: vi.fn(),
-  toggleSubtask: vi.fn(), selectSubtask: vi.fn(), fetchTasks: vi.fn(),
+  toggleSubtask: vi.fn(), selectSubtask: vi.fn(), selectLongTermTask: vi.fn(), fetchTasks: vi.fn(),
   getUser: vi.fn(), getSession: vi.fn(), errorToast: vi.fn(),
   tasks: [] as TaskItem[],
   updates: [] as Record<string, unknown>[],
@@ -49,6 +49,7 @@ vi.mock('@/components/timer/hooks/useTasks', async () => {
         completeTask: mocks.completeTask, toggleTaskStatus: mocks.toggleTaskStatus,
         fetchDbTasks: mocks.fetchTasks, toggleSubtask: mocks.toggleSubtask,
         selectSubtaskForTimer: mocks.selectSubtask, pendingSubtaskIds: new Set(),
+        selectLongTermTaskForTimer: mocks.selectLongTermTask,
       };
     },
   };
@@ -124,6 +125,52 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('complete a task and continue the same pomodoro', () => {
+  it('selects a direct project through its daily row during handoff and saves the daily ID and parent subject', async () => {
+    const parent: LongTermTaskItem = { id: 'project', title: '코딩 테스트', subject_id: 'coding', position: 0, subtasks: [] };
+    const daily: TaskItem = { id: 'project-today', title: parent.title, status: 'todo', durationSeconds: 0, kind: 'daily', sourceLongTermTaskId: parent.id, subjectId: 'coding' };
+    mocks.selectLongTermTask.mockResolvedValue(daily);
+    pauseAt(1200);
+    await mount();
+    await act(async () => click('onCompleteTask'));
+    await act(async () => {
+      await (mocks.sidebar.onSelectLongTermTask as (task: LongTermTaskItem) => Promise<TaskItem | null>)(parent);
+    });
+    expect(mocks.selectLongTermTask).toHaveBeenCalledWith(parent, false);
+    expect(mocks.display).toMatchObject({ selectedTaskId: 'project-today', isRunning: true, timeLeft: 300 });
+    await jump(300);
+    expect(payloads()[1]).toMatchObject({ p_task_id: 'project-today', p_task: parent.title, p_subject_id: 'coding' });
+    expect(payloads().some(payload => payload.p_task_id === parent.id)).toBe(false);
+  });
+
+  it('does not apply a parent selection after the drawer closes or a newer task is chosen', async () => {
+    const parent: LongTermTaskItem = { id: 'project', title: '코딩 테스트', subject_id: null, position: 0, subtasks: [] };
+    let resolve!: (task: TaskItem) => void;
+    mocks.selectLongTermTask.mockImplementation(() => new Promise<TaskItem>(done => { resolve = done; }));
+    await mount();
+    let selecting!: Promise<TaskItem | null>;
+    await act(async () => {
+      selecting = (mocks.sidebar.onSelectLongTermTask as (task: LongTermTaskItem) => Promise<TaskItem | null>)(parent);
+      expect(await (mocks.sidebar.onSelectLongTermTask as (task: LongTermTaskItem) => Promise<TaskItem | null>)(parent)).toBeNull();
+    });
+    expect(mocks.selectLongTermTask).toHaveBeenCalledOnce();
+    await act(async () => (mocks.sidebar.onClose as () => void)());
+    await act(async () => choose(mocks.tasks[1]));
+    await act(async () => { resolve({ ...mocks.tasks[0], id: 'project-today' }); expect(await selecting).toBeNull(); });
+    expect(mocks.display.selectedTaskId).toBe('b');
+  });
+
+  it('leaves the handoff paused when the parent daily row is already complete', async () => {
+    const parent: LongTermTaskItem = { id: 'project', title: '코딩 테스트', subject_id: null, position: 0, subtasks: [] };
+    mocks.selectLongTermTask.mockResolvedValue({ ...mocks.tasks[1], status: 'done' });
+    pauseAt(1200);
+    await mount();
+    await act(async () => click('onCompleteTask'));
+    await act(async () => {
+      expect(await (mocks.sidebar.onSelectLongTermTask as (task: LongTermTaskItem) => Promise<TaskItem | null>)(parent)).toBeNull();
+    });
+    expect(mocks.display).toMatchObject({ isRunning: false, timeLeft: 300, selectedTaskId: 'a' });
+  });
+
   it('records A20 + B5 with their own subjects, pauses selection time and advances one cycle', async () => {
     await mount();
     await act(async () => click('onToggleTimer'));

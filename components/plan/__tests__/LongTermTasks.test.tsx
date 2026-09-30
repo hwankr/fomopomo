@@ -28,7 +28,8 @@ vi.mock('@/hooks/useStudySubjects', () => ({
 }));
 
 
-const { supabaseMock, dragHandlers } = vi.hoisted(() => ({
+const { supabaseMock, dragHandlers, fetchDurationsMock } = vi.hoisted(() => ({
+  fetchDurationsMock: vi.fn(),
   dragHandlers: [] as Array<(event: DragEndEvent) => void>,
   supabaseMock: {
     from: vi.fn(),
@@ -39,6 +40,11 @@ const { supabaseMock, dragHandlers } = vi.hoisted(() => ({
 
 vi.mock('@/lib/supabase', () => ({
   supabase: supabaseMock,
+}));
+
+vi.mock('@/lib/longTermTasks', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/longTermTasks')>(),
+  fetchLongTermTaskDurations: fetchDurationsMock,
 }));
 
 vi.mock('@dnd-kit/core', async (importOriginal) => {
@@ -297,6 +303,7 @@ describe('LongTermTasks', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    fetchDurationsMock.mockReset().mockResolvedValue(new Map());
 
     longTermTasks = [{ id: 'task-1', title: '빅데이터분석기사', position: 0 }];
     subtasks = [
@@ -471,6 +478,84 @@ describe('LongTermTasks', () => {
     expect(screen.getByText('1/2')).toBeInTheDocument();
     expect(screen.getByText('챕터 1')).toHaveClass('line-through');
     expect(screen.getByText(/3월 18일/)).toBeInTheDocument();
+  });
+
+  it('shows accumulated time on a parent without subtasks and zero only for a successful empty total', async () => {
+    subtasks = [];
+    longTermTasks.push({ id: 'task-2', title: '영어 읽기', position: 1 });
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 3900]]));
+    renderTasks();
+
+    await screen.findByText('빅데이터분석기사');
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 1h 5m')).toBeInTheDocument();
+    expect(within(getRowForTitle('영어 읽기')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(screen.queryByText('1/2')).not.toBeInTheDocument();
+  });
+
+  it('refreshes cumulative time when a study session changes', async () => {
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 600]]));
+    renderTasks();
+    await screen.findByText('누적 10m 0s');
+
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 1800]]));
+    await fireRealtime('long-term-task-session-updates');
+    expect(await screen.findByText('누적 30m 0s')).toBeInTheDocument();
+    expect(screen.queryByText('누적 10m 0s')).not.toBeInTheDocument();
+  });
+
+  it('keeps tasks visible and shows a failed total instead of inventing zero, then recovers on refresh', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchDurationsMock.mockRejectedValue(new Error('Duration lookup failed'));
+    renderTasks();
+
+    await screen.findByText('빅데이터분석기사');
+    expect(screen.getByText('누적 시간 조회 실패')).toBeInTheDocument();
+    expect(screen.queryByText('누적 0m 0s')).not.toBeInTheDocument();
+
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
+    await fireRealtime('long-term-task-session-updates');
+    expect(await screen.findByText('누적 2m 0s')).toBeInTheDocument();
+    expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
+  });
+
+  it.each(['resolve', 'reject'] as const)('discards a previous owner’s delayed duration %s', async (outcome) => {
+    const oldDurations = createDeferred<Map<string, number>>();
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 60]]));
+    const { rerender } = renderTasks();
+    await screen.findByText('누적 1m 0s');
+    fetchDurationsMock.mockImplementationOnce(() => oldDurations.promise);
+    const oldChannels = [...channelMocks];
+    await fireRealtime('long-term-task-session-updates');
+
+    longTermTasks = [{ id: 'task-1', title: '새 사용자 공부', position: 0 }];
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
+    rerender(<LongTermTasks userId="user-2" />);
+    expect(screen.queryByText('누적 1m 0s')).not.toBeInTheDocument();
+    await screen.findByText('새 사용자 공부');
+    const count = fetchDurationsMock.mock.calls.length;
+    await act(async () => {
+      oldChannels.forEach(channel => channel.handlers.forEach(handler => handler.callback()));
+      if (outcome === 'resolve') oldDurations.resolve(new Map([['task-1', 9999]]));
+      else oldDurations.reject(new Error('Old owner failure'));
+    });
+
+    expect(fetchDurationsMock).toHaveBeenCalledTimes(count);
+    expect(screen.getByText('누적 2m 0s')).toBeInTheDocument();
+    expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
+  });
+
+  it('starts a newly created parent at zero even when existing totals are unavailable', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchDurationsMock.mockRejectedValue(new Error('Duration lookup failed'));
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '코딩테스트' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('코딩테스트');
+
+    expect(within(getRowForTitle('코딩테스트')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 시간 조회 실패')).toBeInTheDocument();
   });
 
   it('adds a new long term task', async () => {
@@ -686,6 +771,7 @@ describe('LongTermTasks', () => {
 
     const taskChannel = getChannelMock('long-term-task-updates');
     const subtaskChannel = getChannelMock('long-term-subtask-updates');
+    const sessionChannel = getChannelMock('long-term-task-session-updates');
 
     expect(taskChannel.on).toHaveBeenCalledWith(
       'postgres_changes',
@@ -709,6 +795,12 @@ describe('LongTermTasks', () => {
     );
     expect(taskChannel.subscribe).toHaveBeenCalled();
     expect(subtaskChannel.subscribe).toHaveBeenCalled();
+    expect(sessionChannel.on).toHaveBeenCalledWith(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'study_sessions', filter: 'user_id=eq.user-1' },
+      expect.any(Function)
+    );
+    expect(sessionChannel.subscribe).toHaveBeenCalled();
 
     // 이벤트 콜백이 refetch로 이어져 다른 탭의 변경이 화면에 나타난다.
     longTermTasks = [
@@ -719,9 +811,10 @@ describe('LongTermTasks', () => {
     expect(await screen.findByText('SQLD')).toBeInTheDocument();
 
     unmount();
-    expect(supabaseMock.removeChannel).toHaveBeenCalledTimes(2);
+    expect(supabaseMock.removeChannel).toHaveBeenCalledTimes(3);
     expect(supabaseMock.removeChannel).toHaveBeenCalledWith(taskChannel);
     expect(supabaseMock.removeChannel).toHaveBeenCalledWith(subtaskChannel);
+    expect(supabaseMock.removeChannel).toHaveBeenCalledWith(sessionChannel);
   });
 
   it('ignores a stale refetch that resolves after a newer one', async () => {
