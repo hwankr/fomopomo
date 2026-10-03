@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
+import AppSelect from '@/components/ui/AppSelect';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import type { CreateTaskInput, TaskItem, TaskKind } from './hooks/useTasks';
@@ -68,15 +69,15 @@ function CreateForm({ userId, onCreateTask, onClose }: TaskCreateFormProps & { o
             placeholder="어떤 일을 계획하고 있나요?" required aria-describedby={error ? `${id}-error` : undefined}
             className="ui-input w-full min-w-0 px-3 py-2 text-sm" />
         </div>
-        <div>
-          <label htmlFor={`${id}-kind`} className="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300">기간</label>
-          <select id={`${id}-kind`} value={kind} onChange={event => setKind(event.target.value as TaskKind)}
-            className="ui-input w-full px-3 py-2 text-sm">
-            <option value="daily">오늘</option>
-            <option value="weekly">이번 주</option>
-            <option value="monthly">이번 달</option>
-          </select>
-        </div>
+        <AppSelect id={`${id}-kind`} label="기간" value={kind} disabled={saving}
+          onValueChange={value => {
+            if (value === 'daily' || value === 'weekly' || value === 'monthly') setKind(value);
+          }}
+          options={[
+            { value: 'daily', label: '오늘' },
+            { value: 'weekly', label: '이번 주' },
+            { value: 'monthly', label: '이번 달' },
+          ]} />
         <SubjectSelect subjects={subjects} value={subjectId} onChange={selectSubject}
           onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} disabled={saving} />
       </fieldset>

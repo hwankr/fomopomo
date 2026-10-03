@@ -81,6 +81,14 @@ function renderSidebar(over: Partial<Parameters<typeof TaskSidebar>[0]> = {}) {
   );
 }
 
+async function choosePeriod(label: string) {
+  const trigger = screen.getByRole('combobox', { name: '기간' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(await screen.findByRole('option', { name: label }));
+  await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+}
+
 describe('TaskSidebar', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -101,7 +109,7 @@ describe('TaskSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
     expect(screen.getByRole('button', { name: '추가' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '  수학 공부  ' } });
-    fireEvent.change(screen.getByLabelText('기간'), { target: { value: 'monthly' } });
+    await choosePeriod('이번 달');
     fireEvent.submit(screen.getByRole('form', { name: '일정 추가' }));
     await waitFor(() => expect(screen.queryByLabelText('일정 제목')).not.toBeInTheDocument());
     expect(onCreateTask).toHaveBeenCalledWith({ title: '수학 공부', kind: 'monthly', subjectId: 'math' });
@@ -109,7 +117,7 @@ describe('TaskSidebar', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
     expect(screen.getByLabelText('일정 제목')).toHaveValue('');
-    expect(screen.getByLabelText('기간')).toHaveValue('daily');
+    expect(screen.getByRole('combobox', { name: '기간' })).toHaveTextContent('오늘');
   });
 
   it('keeps failed input for retry, prevents duplicate submits and clears it on cancel', async () => {
@@ -118,16 +126,17 @@ describe('TaskSidebar', () => {
     renderSidebar({ userId: 'user-1', onCreateTask });
     fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
     fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '수학 복습' } });
-    fireEvent.change(screen.getByLabelText('기간'), { target: { value: 'weekly' } });
+    await choosePeriod('이번 주');
     const form = screen.getByRole('form', { name: '일정 추가' });
     fireEvent.submit(form);
     fireEvent.submit(form);
     expect(onCreateTask).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: '추가 중…' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '기간' })).toBeDisabled();
     await act(async () => resolve(null));
     expect(screen.getByRole('alert')).toHaveTextContent('일정을 추가하지 못했어요');
     expect(screen.getByLabelText('일정 제목')).toHaveValue('수학 복습');
-    expect(screen.getByLabelText('기간')).toHaveValue('weekly');
+    expect(screen.getByRole('combobox', { name: '기간' })).toHaveTextContent('이번 주');
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
     fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
     expect(screen.getByLabelText('일정 제목')).toHaveValue('');
@@ -162,9 +171,9 @@ describe('TaskSidebar', () => {
       ],
     });
 
-    expect(screen.getByText('Today')).toBeInTheDocument();
-    expect(screen.getByText('This week')).toBeInTheDocument();
-    expect(screen.getByText('This month')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '오늘' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '이번 주' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '이번 달' })).toBeInTheDocument();
     expect(screen.getByText('오늘 작업')).toBeInTheDocument();
     expect(screen.getByText('1h 30m')).toBeInTheDocument();
     expect(screen.getByText('10m')).toBeInTheDocument();
@@ -226,13 +235,13 @@ describe('TaskSidebar', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('clears the selection via "Start without a task"', () => {
+  it('clears the selection via "작업 없이 시작"', () => {
     const onSelectTask = vi.fn();
     const onClose = vi.fn();
 
     renderSidebar({ onSelectTask, onClose, selectedTaskId: 't1' });
 
-    fireEvent.click(screen.getByText('Start without a task'));
+    fireEvent.click(screen.getByRole('button', { name: '작업 없이 시작' }));
 
     expect(onSelectTask).toHaveBeenCalledWith(null);
     expect(onClose).toHaveBeenCalled();
@@ -270,7 +279,7 @@ describe('TaskSidebar', () => {
       choosingNextTask: true, selectionDisabled: true, onSelectTask,
     });
     expect(screen.getByRole('button', { name: '작업 B' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Start without a task' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '작업 없이 시작' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('작업 B'));
     expect(onSelectTask).not.toHaveBeenCalled();
   });
@@ -581,8 +590,8 @@ describe('TaskSidebar', () => {
 
       fireEvent.click(screen.getByText('빅데이터분석기사'));
 
-      expect(screen.getAllByText('오늘')).toHaveLength(1);
-      const chip = screen.getByText('오늘');
+      expect(screen.getAllByText('오늘', { selector: 'span' })).toHaveLength(1);
+      const chip = screen.getByText('오늘', { selector: 'span' });
       expect(chip.closest('div')).toContainElement(screen.getAllByText('챕터1')[1]);
     });
   });

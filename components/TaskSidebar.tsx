@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { CheckCircle2, ChevronDown, Circle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Circle, CircleDashed, Play } from 'lucide-react';
 import type {
   CreateTaskInput,
   LongTermSubtaskItem,
@@ -211,11 +211,11 @@ function LongTermTaskSection({
           : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
         return (
           <div key={task.id} className="space-y-2">
-            <div className="rounded-xl border border-transparent px-3 py-2">
+            <div className="rounded-xl border border-gray-100 px-3 py-2 transition-colors hover:border-emerald-100 hover:bg-emerald-50/50 focus-within:border-emerald-200 focus-within:bg-emerald-50/50 dark:border-slate-800 dark:hover:border-emerald-900/60 dark:hover:bg-emerald-950/30 dark:focus-within:border-emerald-800 dark:focus-within:bg-emerald-950/30">
               <div className="flex items-center gap-2">
                 {hasSubtasks ? (
                   <button onClick={() => toggleExpanded(task.id)} aria-expanded={isExpanded}
-                    className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-sm font-medium text-gray-700 dark:text-gray-300">
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md py-1 text-left text-sm font-medium text-gray-700 outline-none transition-colors hover:text-emerald-700 focus-visible:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300 dark:text-gray-300 dark:hover:text-emerald-300 dark:focus-visible:text-emerald-300 dark:focus-visible:ring-emerald-700">
                     <span className="truncate">{task.title}</span>
                     <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>
@@ -225,7 +225,8 @@ function LongTermTaskSection({
                 {!unavailableParentIds.has(task.id) && (
                   <button onClick={() => onSelectLongTermTask(task)} disabled={selectionPending}
                     aria-label={`${task.title} 공부하기`} aria-busy={isPending}
-                    className={`shrink-0 rounded-md px-2 py-1 text-xs font-bold disabled:opacity-60 ${styles.badge}`}>
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 outline-none transition-colors hover:border-emerald-200 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/50 dark:focus-visible:ring-emerald-600 dark:focus-visible:ring-offset-gray-900">
+                    <Play aria-hidden="true" className="h-3 w-3" />
                     {isPending ? '준비 중…' : '공부하기'}
                   </button>
                 )}
@@ -420,11 +421,12 @@ export default function TaskSidebar({
         onClick={closeSidebar}
       />
 
-      <div role="dialog" aria-modal="true" aria-labelledby="task-sidebar-title" className="fixed right-0 top-0 z-50 h-dvh w-80 max-w-full bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
+      {/* Radix Select locks body scrolling; keep this fixed edge aligned with its scrollbar compensation. */}
+      <div role="dialog" aria-modal="true" aria-labelledby="task-sidebar-title" className="right-scroll-bar-position fixed right-0 top-0 z-50 h-dvh w-80 max-w-[calc(100%_-_var(--removed-body-scroll-bar-size,0px))] bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
         <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
           <div className="mb-6 flex shrink-0 items-center justify-between sm:mb-8">
             <h2 id="task-sidebar-title" className="text-xl font-bold text-gray-800 dark:text-white">
-              {choosingNextTask ? '다음 작업 선택' : 'Task list'}
+              {choosingNextTask ? '다음 작업 선택' : '작업 목록'}
             </h2>
             <button
               onClick={closeSidebar}
@@ -459,13 +461,15 @@ export default function TaskSidebar({
             {userId && onCreateTask && <TaskCreateForm key={userId} userId={userId} onCreateTask={onCreateTask} />}
             {!choosingNextTask && <button
               onClick={() => selectAndClose(null)}
-              className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all ${
+              aria-pressed={selectedTaskId === null}
+              className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-rose-300 dark:focus-visible:ring-rose-700 ${
                 selectedTaskId === null
-                  ? 'bg-gray-100 text-gray-900 ring-2 ring-gray-200 dark:bg-gray-800 dark:text-white dark:ring-gray-700'
-                  : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                  ? SECTION_STYLES.rose.selected
+                  : 'border-transparent text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-slate-800/50'
               }`}
             >
-              Start without a task
+              <CircleDashed aria-hidden="true" className="h-5 w-5 shrink-0 opacity-70" />
+              작업 없이 시작
             </button>}
             {choosingNextTask && !hasNextTask && (
               <p className="rounded-xl bg-gray-50 p-4 text-sm leading-relaxed text-gray-500 dark:bg-slate-800 dark:text-gray-400">
@@ -474,7 +478,7 @@ export default function TaskSidebar({
             )}
 
             <TaskSection
-              title="Today"
+              title="오늘"
               items={availableTasks(tasks)}
               color="rose"
               selectedTaskId={selectedTaskId}
@@ -482,7 +486,7 @@ export default function TaskSidebar({
               onToggleTask={onToggleTask}
             />
             <TaskSection
-              title="This week"
+              title="이번 주"
               items={availableTasks(weeklyPlans)}
               color="indigo"
               selectedTaskId={selectedTaskId}
@@ -490,7 +494,7 @@ export default function TaskSidebar({
               onToggleTask={onToggleTask}
             />
             <TaskSection
-              title="This month"
+              title="이번 달"
               items={availableTasks(monthlyPlans)}
               color="purple"
               selectedTaskId={selectedTaskId}
