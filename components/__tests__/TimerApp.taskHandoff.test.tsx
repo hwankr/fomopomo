@@ -1,14 +1,14 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TimerApp from '../TimerApp';
-import type { LongTermTaskItem, TaskItem } from '../timer/hooks/useTasks';
+import type { CreateTaskInput, LongTermTaskItem, TaskItem } from '../timer/hooks/useTasks';
 
 // Keep the countdown, interval ledger, outbox and RPC serialization real.
 const mocks = vi.hoisted(() => ({
   display: {} as Record<string, unknown>,
   sidebar: {} as Record<string, unknown>,
   rpc: vi.fn(), from: vi.fn(), completeTask: vi.fn(), toggleTaskStatus: vi.fn(),
-  toggleSubtask: vi.fn(), selectSubtask: vi.fn(), selectLongTermTask: vi.fn(), fetchTasks: vi.fn(),
+  toggleSubtask: vi.fn(), selectSubtask: vi.fn(), selectLongTermTask: vi.fn(), fetchTasks: vi.fn(), createTask: vi.fn(),
   getUser: vi.fn(), getSession: vi.fn(), errorToast: vi.fn(),
   tasks: [] as TaskItem[],
   updates: [] as Record<string, unknown>[],
@@ -47,7 +47,7 @@ vi.mock('@/components/timer/hooks/useTasks', async () => {
         getSelectedTaskTitle: () => mocks.tasks.find(task => task.id === selectedTaskId)?.title ?? selectedTask,
         getSelectedTaskSubjectId: () => mocks.tasks.find(task => task.id === selectedTaskId)?.subjectId ?? selectedSubjectId,
         completeTask: mocks.completeTask, toggleTaskStatus: mocks.toggleTaskStatus,
-        fetchDbTasks: mocks.fetchTasks, toggleSubtask: mocks.toggleSubtask,
+        fetchDbTasks: mocks.fetchTasks, createTask: mocks.createTask, toggleSubtask: mocks.toggleSubtask,
         selectSubtaskForTimer: mocks.selectSubtask, pendingSubtaskIds: new Set(),
         selectLongTermTaskForTimer: mocks.selectLongTermTask,
       };
@@ -127,6 +127,51 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('complete a task and continue the same pomodoro', () => {
+  it('adds an available task without replacing or pausing the running timer task', async () => {
+    const draft: CreateTaskInput = { title: '새 일정', kind: 'daily', subjectId: 'subject-b' };
+    const created: TaskItem = { ...draft, id: 'created', status: 'todo', durationSeconds: 0 };
+    mocks.createTask.mockResolvedValue(created);
+    await mount();
+    await act(async () => click('onToggleTimer'));
+    await jump(60);
+    await act(async () => click('onOpenTaskSidebar'));
+
+    expect(mocks.sidebar.userId).toBe('user-1');
+    await act(async () => {
+      const create = mocks.sidebar.onCreateTask as (input: CreateTaskInput) => Promise<TaskItem | null>;
+      expect(await create(draft)).toEqual(created);
+    });
+
+    expect(mocks.createTask).toHaveBeenCalledWith(draft);
+    expect(mocks.display).toMatchObject({ selectedTaskId: 'a', isRunning: true, timeLeft: 1440 });
+    expect(mocks.sidebar.isOpen).toBe(true);
+    expect(payloads()).toHaveLength(0);
+    await jump(10);
+    expect(mocks.display.timeLeft).toBe(1430);
+  });
+
+  it('keeps a handoff paused while adding a task and resumes only when it is selected', async () => {
+    const draft: CreateTaskInput = { title: '새 주간 일정', kind: 'weekly', subjectId: 'subject-b' };
+    const created: TaskItem = { ...draft, id: 'created', status: 'todo', durationSeconds: 0 };
+    mocks.createTask.mockResolvedValue(created);
+    pauseAt(1200);
+    await mount();
+    await act(async () => click('onCompleteTask'));
+    await act(async () => {
+      await (mocks.sidebar.onCreateTask as (input: CreateTaskInput) => Promise<TaskItem | null>)(draft);
+    });
+    expect(mocks.display).toMatchObject({ selectedTaskId: 'a', isRunning: false, timeLeft: 300 });
+    expect(mocks.sidebar).toMatchObject({ isOpen: true, choosingNextTask: true });
+    expect(payloads()).toHaveLength(1);
+
+    mocks.tasks.push(created);
+    await act(async () => choose(created));
+    expect(mocks.display).toMatchObject({ selectedTaskId: 'created', isRunning: true, timeLeft: 300 });
+    expect(mocks.sidebar.isOpen).toBe(false);
+    await jump(300);
+    expect(payloads()[1]).toMatchObject({ p_task_id: 'created', p_task: draft.title, p_subject_id: draft.subjectId });
+  });
+
   it('selects a direct project through its daily row during handoff and saves the daily ID and parent subject', async () => {
     const parent: LongTermTaskItem = { id: 'project', title: '코딩 테스트', subject_id: 'coding', position: 0, subtasks: [] };
     const daily: TaskItem = { id: 'project-today', title: parent.title, status: 'todo', durationSeconds: 0, kind: 'daily', sourceLongTermTaskId: parent.id, subjectId: 'coding' };

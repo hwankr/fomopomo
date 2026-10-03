@@ -211,6 +211,7 @@ export default function TimerApp({
     getSelectedTaskTitle,
     getSelectedTaskSubjectId,
     fetchDbTasks,
+    createTask,
     toggleTaskStatus,
     completeTask,
     selectSubtaskForTimer,
@@ -1603,6 +1604,7 @@ export default function TimerApp({
       />
 
       <TaskSidebar
+        userId={isLoggedIn ? getCurrentUserId() : null} onCreateTask={createTask}
         isOpen={isTaskSidebarOpen} onClose={closeTaskSidebar}
         tasks={dbTasks} weeklyPlans={weeklyPlans} monthlyPlans={monthlyPlans} longTermTasks={longTermTasks}
         pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId}

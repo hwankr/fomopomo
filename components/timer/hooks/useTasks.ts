@@ -7,7 +7,7 @@ import {
 } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
-import { STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
+import { notifyStudySubjectsChanged, STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import {
   fetchLongTermTaskDurations,
   materializeLongTermTaskForToday,
@@ -26,6 +26,12 @@ import {
 
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 export type TaskKind = 'daily' | 'weekly' | 'monthly';
+
+export type CreateTaskInput = {
+  title: string;
+  kind: TaskKind;
+  subjectId: string | null;
+};
 
 export type TaskItem = {
   id: string;
@@ -85,9 +91,18 @@ export const useTasks = (isLoggedIn: boolean) => {
   const pendingSubtaskIdsRef = useRef<Set<string>>(new Set());
   const longTermSelectionRequestRef = useRef(0);
   const pendingLongTermSelectionRef = useRef<number | null>(null);
+  const createScopeRef = useRef({ active: true });
+  const pendingCreateRef = useRef<object | null>(null);
   const [pendingSubtaskIds, setPendingSubtaskIds] = useState<Set<string>>(
     () => new Set()
   );
+
+  useLayoutEffect(() => {
+    const scope = { active: true };
+    createScopeRef.current = scope;
+    pendingCreateRef.current = null;
+    return () => { scope.active = false; };
+  }, [taskOwner]);
 
   // Invalidate and clear in a layout effect so an owner transition is applied
   // before paint and before a pending response can commit the previous owner's
@@ -363,6 +378,69 @@ export const useTasks = (isLoggedIn: boolean) => {
 
   // Restore validation: Ensure selected task still exists or keep it anyway?
   // Original logic didn't strictly validate existence on restore, simplified here.
+
+  const createTask = useCallback(async (input: CreateTaskInput): Promise<TaskItem | null> => {
+    const owner = taskOwner;
+    const scope = createScopeRef.current;
+    const title = input.title.trim();
+    if (!title || !isLoggedIn || owner === GUEST_OWNER || !scope.active ||
+      currentOwnerRef.current !== owner || getStorageOwner() !== owner || pendingCreateRef.current) return null;
+
+    const request = {};
+    pendingCreateRef.current = request;
+    const isCurrent = () => scope.active && pendingCreateRef.current === request &&
+      currentOwnerRef.current === owner && getStorageOwner() === owner;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!isCurrent() || user?.id !== owner) return null;
+
+      const now = new Date();
+      let period: Record<string, string | number>;
+      if (input.kind === 'daily') {
+        const dueDate = format(now, 'yyyy-MM-dd');
+        const { data: lastTask, error } = await supabase.from('tasks')
+          .select('position').eq('user_id', owner).eq('due_date', dueDate)
+          .order('position', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+        if (!isCurrent()) return null;
+        if (error) throw error;
+        period = { due_date: dueDate, position: (lastTask?.position ?? -1) + 1 };
+      } else if (input.kind === 'weekly') {
+        period = {
+          start_date: format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+          end_date: format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        };
+      } else {
+        period = { month: now.getMonth() + 1, year: now.getFullYear() };
+      }
+
+      const { data, error } = await supabase.from(TABLE_BY_KIND[input.kind])
+        .insert({ user_id: owner, title, subject_id: input.subjectId, status: 'todo', ...period })
+        .select('id, title, status, subject_id').single();
+      if (!isCurrent()) return null;
+      if (error) throw error;
+      if (!data?.id) throw new Error('Task creation was not confirmed');
+
+      const created: TaskItem = {
+        id: data.id, title: data.title, status: data.status,
+        kind: input.kind, subjectId: data.subject_id ?? null, durationSeconds: 0,
+      };
+      // A list request started before this insert must not hide the confirmed row.
+      fetchGenerationRef.current += 1;
+      const append = (items: TaskItem[]) => [...items.filter(item => item.id !== created.id), created];
+      if (input.kind === 'daily') setDbTasks(append);
+      else if (input.kind === 'weekly') setWeeklyPlans(append);
+      else setMonthlyPlans(append);
+      if (created.subjectId) notifyStudySubjectsChanged();
+      else if (!isTasksLoaded) void fetchDbTasks();
+      return created;
+    } catch (error) {
+      if (isCurrent()) console.error('Error creating timer task:', error);
+      return null;
+    } finally {
+      if (pendingCreateRef.current === request) pendingCreateRef.current = null;
+    }
+  }, [fetchDbTasks, isLoggedIn, isTasksLoaded, taskOwner]);
 
   const toggleTaskStatus = useCallback(
     async (item: TaskItem) => {
@@ -649,6 +727,7 @@ export const useTasks = (isLoggedIn: boolean) => {
     getSelectedTaskTitle,
     getSelectedTaskSubjectId,
     fetchDbTasks,
+    createTask,
     toggleTaskStatus,
     completeTask,
     selectSubtaskForTimer,

@@ -19,6 +19,13 @@ vi.mock('react-hot-toast', () => ({
   default: toastMock,
 }));
 
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({
+    subjects: [{ id: 'math', user_id: 'user-1', name: '수학' }],
+    createSubject: vi.fn(),
+  }),
+}));
+
 import TaskSidebar from '../TaskSidebar';
 import type {
   LongTermSubtaskItem,
@@ -79,6 +86,69 @@ describe('TaskSidebar', () => {
     vi.restoreAllMocks();
     toastMock.error.mockReset();
     cleanup();
+  });
+
+  it('does not offer creation to signed-out users', () => {
+    renderSidebar({ onCreateTask: vi.fn() });
+    expect(screen.queryByRole('button', { name: '일정 추가' })).not.toBeInTheDocument();
+  });
+
+  it('adds an inferred subject and chosen period without selecting a task or closing the sidebar', async () => {
+    const onCreateTask = vi.fn().mockResolvedValue(makeTask({ id: 'new', title: '수학 공부', kind: 'monthly' }));
+    const onSelectTask = vi.fn();
+    const onClose = vi.fn();
+    renderSidebar({ userId: 'user-1', onCreateTask, onSelectTask, onClose });
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    expect(screen.getByRole('button', { name: '추가' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '  수학 공부  ' } });
+    fireEvent.change(screen.getByLabelText('기간'), { target: { value: 'monthly' } });
+    fireEvent.submit(screen.getByRole('form', { name: '일정 추가' }));
+    await waitFor(() => expect(screen.queryByLabelText('일정 제목')).not.toBeInTheDocument());
+    expect(onCreateTask).toHaveBeenCalledWith({ title: '수학 공부', kind: 'monthly', subjectId: 'math' });
+    expect(onSelectTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    expect(screen.getByLabelText('일정 제목')).toHaveValue('');
+    expect(screen.getByLabelText('기간')).toHaveValue('daily');
+  });
+
+  it('keeps failed input for retry, prevents duplicate submits and clears it on cancel', async () => {
+    let resolve!: (value: null) => void;
+    const onCreateTask = vi.fn().mockImplementation(() => new Promise<null>(done => { resolve = done; }));
+    renderSidebar({ userId: 'user-1', onCreateTask });
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '수학 복습' } });
+    fireEvent.change(screen.getByLabelText('기간'), { target: { value: 'weekly' } });
+    const form = screen.getByRole('form', { name: '일정 추가' });
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(onCreateTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '추가 중…' })).toBeDisabled();
+    await act(async () => resolve(null));
+    expect(screen.getByRole('alert')).toHaveTextContent('일정을 추가하지 못했어요');
+    expect(screen.getByLabelText('일정 제목')).toHaveValue('수학 복습');
+    expect(screen.getByLabelText('기간')).toHaveValue('weekly');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    expect(screen.getByLabelText('일정 제목')).toHaveValue('');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('resets the draft on owner changes and ignores an old form response', async () => {
+    let resolve!: (task: TaskItem) => void;
+    const onCreateTask = vi.fn().mockImplementation(() => new Promise<TaskItem>(done => { resolve = done; }));
+    const props = { isOpen: true, onClose: noop, tasks: [], onSelectTask: noop, onToggleTask: noop,
+      onSelectSubtask: noopSelectSubtask, onSelectLongTermTask: noopSelectSubtask, onToggleSubtask: noop, selectedTaskId: null, onCreateTask };
+    const { rerender } = render(<TaskSidebar {...props} userId="user-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: 'old draft' } });
+    fireEvent.submit(screen.getByRole('form', { name: '일정 추가' }));
+    rerender(<TaskSidebar {...props} userId="user-2" />);
+    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: 'new draft' } });
+    await act(async () => resolve(makeTask({ id: 'old', title: 'old draft' })));
+    expect(screen.getByLabelText('일정 제목')).toHaveValue('new draft');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('renders all three sections with duration badges', () => {

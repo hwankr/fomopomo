@@ -4,11 +4,13 @@ import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, ChevronDown, Circle } from 'lucide-react';
 import type {
+  CreateTaskInput,
   LongTermSubtaskItem,
   LongTermTaskItem,
   TaskItem,
 } from '@/components/timer/hooks/useTasks';
 import { formatDuration } from '@/lib/formatDuration';
+import TaskCreateForm from '@/components/timer/TaskCreateForm';
 
 interface TaskSidebarProps {
   isOpen: boolean;
@@ -29,6 +31,8 @@ interface TaskSidebarProps {
   choosingNextTask?: boolean;
   selectionDisabled?: boolean;
   excludedTaskId?: string | null;
+  userId?: string | null;
+  onCreateTask?: (input: CreateTaskInput) => Promise<TaskItem | null>;
 }
 
 type SectionColor = 'rose' | 'indigo' | 'purple' | 'emerald';
@@ -320,6 +324,8 @@ export default function TaskSidebar({
   choosingNextTask = false,
   selectionDisabled = false,
   excludedTaskId = null,
+  userId,
+  onCreateTask,
 }: TaskSidebarProps) {
   const [pendingSubtaskId, setPendingSubtaskId] = useState<string | null>(null);
   const [pendingLongTermTaskId, setPendingLongTermTaskId] = useState<string | null>(null);
@@ -450,6 +456,7 @@ export default function TaskSidebar({
             </p>
           )}
           <fieldset disabled={selectionDisabled} className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain disabled:opacity-60">
+            {userId && onCreateTask && <TaskCreateForm key={userId} userId={userId} onCreateTask={onCreateTask} />}
             {!choosingNextTask && <button
               onClick={() => selectAndClose(null)}
               className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all ${
@@ -462,7 +469,7 @@ export default function TaskSidebar({
             </button>}
             {choosingNextTask && !hasNextTask && (
               <p className="rounded-xl bg-gray-50 p-4 text-sm leading-relaxed text-gray-500 dark:bg-slate-800 dark:text-gray-400">
-                이어서 할 작업이 없어요. 목록을 닫고 할 일을 추가한 뒤 다시 선택해주세요. 남은 시간은 유지돼요.
+                이어서 할 작업이 없어요. 일정을 추가한 뒤 다음 작업으로 선택해주세요. 남은 시간은 유지돼요.
               </p>
             )}
 
