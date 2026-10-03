@@ -531,6 +531,7 @@ with expected_service_role_functions(signature) as (
   values
     ('public.claim_push_notification_event(uuid,uuid,text,integer)'),
     ('public.cleanup_account_groups(uuid)'),
+    ('public.list_account_storage_objects(uuid,uuid,integer)'),
     ('public.complete_push_notification_event(uuid,text)'),
     ('public.feedback_image_path_matches_user(uuid,text)'),
     ('public.is_safe_push_endpoint(text)')

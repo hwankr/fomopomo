@@ -3,11 +3,15 @@ import { NextRequest } from 'next/server';
 
 type OwnedGroup = { id: string; name: string };
 type StorageObject = {
-  metadata?: Record<string, unknown> | null;
+  id: string;
+  bucket_id: string;
   name: string;
-  owner?: string | null;
-  owner_id?: string | null;
+  owner_id: string;
 };
+const ownedObject = (id: number, name: string, ownerId = 'user-1'): StorageObject => ({
+  id: `52000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
+  bucket_id: 'feedback-uploads', name, owner_id: ownerId,
+});
 
 type MockClientOverrides = {
   rowsByTable?: Record<string, Array<Record<string, unknown>>>;
@@ -16,8 +20,8 @@ type MockClientOverrides = {
   groupCleanupError?: unknown;
   profileUpdateError?: unknown;
   authGetUserError?: unknown;
-  storageListErrorAtCall?: number;
-  storagePages?: StorageObject[][];
+  inventoryErrorAtCall?: number;
+  inventoryPages?: StorageObject[][];
   storageRemoveErrorAtCall?: number;
 };
 
@@ -40,7 +44,7 @@ function makeOpaqueServiceRoleKey() {
 }
 
 function createMockClient(overrides: MockClientOverrides = {}) {
-  let storageListCallCount = 0;
+  let inventoryCallCount = 0;
   let storageRemoveCallCount = 0;
   const state = {
     rowsByTable: structuredClone(overrides.rowsByTable ?? {}),
@@ -53,21 +57,24 @@ function createMockClient(overrides: MockClientOverrides = {}) {
       payload: Record<string, unknown>;
     }>,
     deleteUserMock: vi.fn(async () => ({ error: null })),
-    storageListCalls: [] as Array<{ path?: string; options?: Record<string, unknown> }>,
-    storageListMock: vi.fn(async (path?: string, options?: Record<string, unknown>) => {
-      storageListCallCount += 1;
-      state.storageListCalls.push({ path, options });
-      if (overrides.storageListErrorAtCall === storageListCallCount) {
+    operations: [] as string[],
+    inventoryCalls: [] as Array<Record<string, unknown>>,
+    inventoryMock: vi.fn(async (args: Record<string, unknown>) => {
+      inventoryCallCount += 1;
+      state.inventoryCalls.push(args);
+      state.operations.push('inventory');
+      if (overrides.inventoryErrorAtCall === inventoryCallCount) {
         return { data: null, error: { message: 'list failed' } };
       }
 
       return {
-        data: overrides.storagePages?.[storageListCallCount - 1] ?? [],
+        data: overrides.inventoryPages?.[inventoryCallCount - 1] ?? [],
         error: null,
       };
     }),
     storageRemoveMock: vi.fn(async (paths: string[]) => {
       storageRemoveCallCount += 1;
+      state.operations.push('storage-remove');
       if (overrides.storageRemoveErrorAtCall === storageRemoveCallCount) {
         return { data: null, error: { message: 'remove failed' } };
       }
@@ -77,12 +84,16 @@ function createMockClient(overrides: MockClientOverrides = {}) {
   };
 
   const client = {
-    rpc: vi.fn(async () => ({
-      data: overrides.groupCleanupError ? null : overrides.blockedGroups?.length
-        ? { status: 'leader', groups: overrides.blockedGroups }
-        : { status: 'ready' },
-      error: overrides.groupCleanupError ?? null,
-    })),
+    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'list_account_storage_objects') return state.inventoryMock(args);
+      if (name !== 'cleanup_account_groups') throw new Error(`Unexpected RPC ${name}`);
+      return {
+        data: overrides.groupCleanupError ? null : overrides.blockedGroups?.length
+          ? { status: 'leader', groups: overrides.blockedGroups }
+          : { status: 'ready' },
+        error: overrides.groupCleanupError ?? null,
+      };
+    }),
     auth: {
       getUser: vi.fn(async () => ({
         data: { user: overrides.authGetUserError ? null : { id: 'user-1' } },
@@ -116,6 +127,7 @@ function createMockClient(overrides: MockClientOverrides = {}) {
           }
 
           if (mode === 'delete') {
+            state.operations.push('data-delete');
             state.deleteEqCalls.push({ table, column, value });
             if (overrides.deleteErrors?.[table]) {
               return { error: overrides.deleteErrors[table] };
@@ -150,7 +162,7 @@ function createMockClient(overrides: MockClientOverrides = {}) {
     }),
     storage: {
       from: vi.fn(() => ({
-        list: state.storageListMock,
+        list: vi.fn(() => { throw new Error('Storage list has no ownership information'); }),
         remove: state.storageRemoveMock,
       })),
     },
@@ -328,13 +340,11 @@ describe('account-reset route', () => {
     expect(createClientMock).not.toHaveBeenCalled();
   });
 
-  it('returns 200, skips unverified objects, and resets the profile instead of deleting the auth user', async () => {
+  it('returns 200, verifies Storage cleanup, and resets the profile instead of deleting the auth user', async () => {
     const { client, state } = createMockClient({
-      storagePages: [[
-        { name: '123e4567-e89b-42d3-a456-426614174000.webp', owner: 'user-1' },
-        { name: 'legacy-photo.gif', owner_id: 'user-1' },
-        { name: 'other-user.png', owner: 'user-2' },
-        { name: 'nested\\\\path.png', owner: 'user-1' },
+      inventoryPages: [[
+        ownedObject(1, 'user-1/123e4567-e89b-42d3-a456-426614174000.webp'),
+        ownedObject(2, 'user-1/legacy-photo.gif'),
       ]],
     });
     const { POST } = await loadPostHandler(client);
@@ -362,6 +372,8 @@ describe('account-reset route', () => {
         status: 'offline',
         current_task: null,
         study_start_time: null,
+        study_session_id: null,
+        study_session_offset: 0,
         total_stopwatch_time: 0,
         timer_type: 'stopwatch',
         timer_mode: 'focus',
@@ -370,16 +382,12 @@ describe('account-reset route', () => {
       }),
     });
     expect(state.deleteUserMock).not.toHaveBeenCalled();
-    expect(state.storageListCalls).toEqual([
-      {
-        path: 'user-1',
-        options: {
-          limit: 100,
-          offset: 0,
-          sortBy: { column: 'name', order: 'asc' },
-        },
-      },
+    expect(state.inventoryCalls).toEqual([
+      { p_user_id: 'user-1', p_after_id: null, p_limit: 100 },
+      { p_user_id: 'user-1', p_after_id: null, p_limit: 1 },
     ]);
+    expect(state.operations.indexOf('storage-remove')).toBeLessThan(state.operations.lastIndexOf('inventory'));
+    expect(state.operations.lastIndexOf('inventory')).toBeLessThan(state.operations.indexOf('data-delete'));
     expect(state.storageRemoveMock).toHaveBeenCalledWith([
       'user-1/123e4567-e89b-42d3-a456-426614174000.webp',
       'user-1/legacy-photo.gif',
@@ -403,8 +411,8 @@ describe('account-reset route', () => {
 
   it('returns 500 and stops before database cleanup when storage removal fails', async () => {
     const { client, state } = createMockClient({
-      storagePages: [[
-        { name: '123e4567-e89b-42d3-a456-426614174000.webp', owner: 'user-1' },
+      inventoryPages: [[
+        ownedObject(1, 'user-1/123e4567-e89b-42d3-a456-426614174000.webp'),
       ]],
       storageRemoveErrorAtCall: 1,
     });
@@ -535,8 +543,41 @@ describe('account-reset route', () => {
     expect(response.status).toBe(500);
     expect(state.deleteInCalls).toEqual([]);
     expect(state.deleteEqCalls).toEqual([]);
-    expect(state.storageListMock).not.toHaveBeenCalled();
+    expect(state.inventoryMock).not.toHaveBeenCalled();
     expect(state.profileUpdateCalls).toEqual([]);
     expect(state.deleteUserMock).not.toHaveBeenCalled();
   });
+  it('blocks database cleanup for user-owned legacy files outside the namespace', async () => {
+    const { client, state } = createMockClient({
+      inventoryPages: [[ownedObject(1, 'legacy-outside-user-namespace.png')]],
+    });
+    const { POST } = await loadPostHandler(client);
+    const response = await POST(new NextRequest('http://localhost/api/account-reset', {
+      method: 'POST', headers: { authorization: 'Bearer valid-token' },
+    }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      retryable: false, storageCleanup: { status: 'storage_unverified_objects' },
+    });
+    expect(state.storageRemoveMock).not.toHaveBeenCalled();
+    expect(state.deleteEqCalls).toEqual([]);
+    expect(state.deleteUserMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks database cleanup if Storage reports success but an owned object remains', async () => {
+    const file = ownedObject(1, 'user-1/legacy.png');
+    const { client, state } = createMockClient({ inventoryPages: [[file], [file]] });
+    const { POST } = await loadPostHandler(client);
+    const response = await POST(new NextRequest('http://localhost/api/account-reset', {
+      method: 'POST', headers: { authorization: 'Bearer valid-token' },
+    }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      retryable: true, storageCleanup: { status: 'storage_objects_remaining' },
+    });
+    expect(state.storageRemoveMock).toHaveBeenCalledWith(['user-1/legacy.png']);
+    expect(state.deleteEqCalls).toEqual([]);
+    expect(state.deleteUserMock).not.toHaveBeenCalled();
+  });
+
 });

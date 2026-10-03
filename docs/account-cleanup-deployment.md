@@ -29,6 +29,58 @@ rollback, retry, profile/Auth rollback, and long-term cascades. The publication
 tests cover both friend update streams. Route tests additionally inject a
 temporary Auth failure and a cleanup RPC failure.
 
+## Storage ownership inventory — 2026-10-03
+
+Apply `20261003050327_account_storage_cleanup_inventory.sql` before deploying
+the updated account routes. It adds
+`public.list_account_storage_objects(uuid, uuid, integer)`, callable only by
+`service_role`. The function also checks the JWT role, fixes its search path to
+empty, and only reads `storage.objects`; it never changes metadata or blobs.
+The migration does not delete, rename, or backfill existing uploads.
+
+Storage `list()` does not return `owner` and only lists one folder level. The
+account routes now use this RPC to enumerate actual ownership with UUID keyset
+pagination. A nonempty `owner_id` takes precedence, with legacy `owner` used only
+when `owner_id` is missing or empty. Neither a filename prefix, feedback URL,
+nor custom object metadata establishes ownership.
+
+Before removing any blob, the helper validates the complete inventory. Only
+owned objects in `feedback-uploads` under a safe `<userId>/` path can be removed;
+safe nested and legacy filenames within that namespace are supported. A file
+under that prefix owned by another account is never selected. An owned file
+outside that namespace, in another bucket, or with an unsafe path blocks cleanup
+with `storage_unverified_objects` (`retryable: false`). Such legacy files require
+explicit operational review; they are not silently skipped or automatically
+moved/deleted. No paths or ownership identifiers are included in the error body.
+
+Validated objects are deleted through the Storage API in batches of 100. A final
+inventory probe must find zero owned objects before account-table cleanup can
+proceed. RPC/Storage failures and remaining objects produce retryable failures;
+an HTTP success from Storage alone is insufficient. The existing group cleanup
+still runs first, so a later Storage failure does not restore solo groups already
+removed. Storage, group cleanup, per-table deletion, and Auth deletion remain
+separate transactions; concurrent uploads after the final probe and later Auth
+errors cannot be rolled back as one operation.
+
+Run `supabase/tests/account_storage_cleanup.test.sql` in the isolated SQL harness
+for ownership precedence, all-bucket discovery, pagination, argument validation,
+fixed search path, and role checks. The TypeScript helper/route tests additionally
+cover the real ownerless Storage list shape, nested paths, ownership mismatch,
+partial deletion and retry, silent no-op removal, final verification failure,
+and stopping before account-table deletion. The exact RPC allowlists in the
+authorization tests and read-only postflight include the new service-only RPC.
+
+The reset route also clears `profiles.study_session_id` and
+`study_session_offset` after applying
+`20261003050354_shared_timer_session_progress.sql`. Private progress tombstones
+remain intact so delayed requests from another device cannot recreate erased
+study time; the next timer starts with a fresh logical session identity.
+
+References: [Storage list](https://supabase.com/docs/reference/javascript/file-buckets-list),
+[Storage ownership](https://supabase.com/docs/guides/storage/security/ownership),
+[Storage deletion](https://supabase.com/docs/guides/storage/management/delete-objects),
+[Auth user deletion](https://supabase.com/docs/guides/auth/managing-user-data).
+
 ## Production migration record — 2026-09-07
 
 Both migrations were applied to the active production project `fomopomo`

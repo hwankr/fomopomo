@@ -49,6 +49,7 @@ interface Task {
   position: number;
   source_subtask_id: string | null;
   source_long_term_task_id?: string | null;
+  source_pinned_task_id: string | null;
   parentTitle?: string;
 }
 
@@ -68,6 +69,7 @@ type TaskRow = {
   position: number | null;
   source_subtask_id: string | null;
   source_long_term_task_id?: string | null;
+  source_pinned_task_id: string | null;
 };
 
 type SubtaskParentRow = {
@@ -103,6 +105,7 @@ const normalizeTaskRows = (rows: TaskRow[] | null | undefined): Task[] =>
     position: row.position ?? 0,
     source_subtask_id: row.source_subtask_id ?? null,
     source_long_term_task_id: row.source_long_term_task_id ?? null,
+    source_pinned_task_id: row.source_pinned_task_id ?? null,
     subject_id: row.subject_id ?? null,
   }));
 
@@ -345,10 +348,9 @@ const createRequestScope = () => ({
   active: true,
   taskRequest: 0,
   taskReadPending: false,
-  pinnedRequest: 0,
   mutations: 0,
   refreshTasks: false,
-  refreshPinned: false,
+  pinMutations: new Set<string>(),
 });
 
 function ScopedTaskList({ selectedDateKey, userId }: {
@@ -362,7 +364,6 @@ function ScopedTaskList({ selectedDateKey, userId }: {
   const { subjectId: newSubjectId, isAutomatic, selectSubject, resetSubject } = useSuggestedSubject(newTaskTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const [pinnedTasks, setPinnedTasks] = useState<PinnedTask[]>([]);
   const scopeRef = useRef<ReturnType<typeof createRequestScope> | null>(null);
 
   useLayoutEffect(() => {
@@ -379,35 +380,6 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
-
-  const fetchPinnedTasks = useCallback(async () => {
-    const scope = scopeRef.current;
-    if (!scope?.active) return;
-    if (scope.mutations > 0) {
-      scope.refreshPinned = true;
-      return;
-    }
-    const request = ++scope.pinnedRequest;
-    const isCurrent = () => scope.active && request === scope.pinnedRequest;
-    if (!userId) {
-      setPinnedTasks([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('pinned_tasks')
-      .select('id, title, position, subject_id')
-      .eq('user_id', userId)
-      .order('position', { ascending: true });
-
-    if (!isCurrent()) return;
-    if (error) {
-      console.error('Error fetching pinned tasks:', error);
-      return;
-    }
-
-    setPinnedTasks(normalizePinnedTaskRows(data as PinnedTaskRow[]));
-  }, [userId]);
 
   const fetchTasks = useCallback(async () => {
     const scope = scopeRef.current;
@@ -443,7 +415,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
       .select(
-        'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
+        'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, source_pinned_task_id, subject_id'
       )
       .eq('user_id', userId)
       .eq('due_date', selectedDateKey)
@@ -460,42 +432,25 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
     let taskRows = normalizeTaskRows(taskData as TaskRow[]);
     const todayKey = format(new Date(), 'yyyy-MM-dd');
-    const existingTitles = new Set(taskRows.map((task) => task.title));
-    const pinnedToCreate = pinnedRows.filter(
-      (pinnedTask) => !existingTitles.has(pinnedTask.title)
-    );
+    const existingPinIds = new Set(taskRows.map((task) => task.source_pinned_task_id));
+    const missingPins = pinnedRows.filter((pin) => !existingPinIds.has(pin.id));
 
-    if (selectedDateKey >= todayKey && pinnedToCreate.length > 0) {
-      const maxPosition =
-        taskRows.length > 0
-          ? Math.max(...taskRows.map((task) => task.position))
-          : -1;
-
-      const newTaskPayload = pinnedToCreate.map((pinnedTask, index) => ({
-        user_id: userId,
-        title: pinnedTask.title,
-        subject_id: pinnedTask.subject_id,
-        due_date: selectedDateKey,
-        status: 'todo' as const,
-        position: maxPosition + 1 + index,
-      }));
-
-      const { data: insertedTasks, error: insertError } = await supabase
-        .from('tasks')
-        .insert(newTaskPayload)
-        .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
-        );
-
+    if (selectedDateKey >= todayKey && missingPins.length > 0) {
+      // The database owns source/date uniqueness. Two tabs can both observe a
+      // missing occurrence, but the RPC returns the same winning daily task.
+      const { data: materialized, error: insertError } = await supabase.rpc(
+        'materialize_pinned_tasks',
+        { p_user_id: userId, p_due_date: selectedDateKey }
+      );
       if (!isCurrent()) return;
       if (insertError) {
         console.error('Error auto-creating pinned tasks:', insertError);
       } else {
-        taskRows = [
-          ...taskRows,
-          ...normalizeTaskRows(insertedTasks as TaskRow[]),
-        ];
-        if (pinnedToCreate.some((task) => task.subject_id)) notifyStudySubjectsChanged();
+        const canonical = normalizeTaskRows(materialized as TaskRow[]);
+        const merged = new Map(taskRows.map((task) => [task.id, task]));
+        for (const task of canonical) merged.set(task.id, task);
+        taskRows = [...merged.values()].sort((a, b) => a.position - b.position);
+        if (missingPins.some((pin) => pin.subject_id)) notifyStudySubjectsChanged();
       }
     }
 
@@ -599,7 +554,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     setLoading(false);
   }, [selectedDateKey, userId]);
 
-  const beginMutation = (changesPins = false) => {
+  const beginMutation = () => {
     const scope = scopeRef.current;
     if (!scope?.active) return null;
     // Reads already in flight cannot overwrite local changes. Realtime
@@ -607,10 +562,6 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     scope.taskRequest += 1;
     scope.refreshTasks ||= scope.taskReadPending;
     scope.taskReadPending = false;
-    if (changesPins) {
-      scope.pinnedRequest += 1;
-      scope.refreshPinned = true;
-    }
     scope.mutations += 1;
     setLoading(false);
     return scope;
@@ -624,10 +575,6 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       scope.refreshTasks = false;
       void fetchTasks();
     }
-    if (scope.refreshPinned) {
-      scope.refreshPinned = false;
-      void fetchPinnedTasks();
-    }
   };
 
   useEffect(() => {
@@ -636,7 +583,6 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     const initialFetch = setTimeout(() => {
       if (!scope.active) return;
       void fetchTasks();
-      void fetchPinnedTasks();
     }, 0);
 
     if (!userId) return () => clearTimeout(initialFetch);
@@ -675,67 +621,56 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       )
       .subscribe();
 
+    const pinnedChannel = supabase
+      .channel('task-list-pinned-updates')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'pinned_tasks', filter: `user_id=eq.${userId}`,
+      }, () => {
+        if (!scope.active) return;
+        void fetchTasks();
+      })
+      .subscribe();
+
     return () => {
       clearTimeout(initialFetch);
       supabase.removeChannel(taskChannel);
       supabase.removeChannel(sessionChannel);
+      supabase.removeChannel(pinnedChannel);
     };
-  }, [fetchPinnedTasks, fetchTasks, userId]);
+  }, [fetchTasks, userId]);
 
   const pinTaskFromTask = async (task: Task) => {
-    if (!userId) return;
-    const scope = beginMutation(true);
+    if (!userId || scopeRef.current?.pinMutations.has(task.id)) return;
+    const scope = beginMutation();
     if (!scope) return;
+    scope.pinMutations.add(task.id);
 
     try {
-      const existingPinned = pinnedTasks.find(
-        (pinnedTask) => pinnedTask.title === task.title
-      );
-
-      if (existingPinned) {
-        const { error } = await supabase
-          .from('pinned_tasks')
-          .delete()
-          .eq('id', existingPinned.id);
-
+      if (task.source_pinned_task_id) {
+        const pinId = task.source_pinned_task_id;
+        const { error } = await supabase.from('pinned_tasks').delete()
+          .eq('id', pinId).eq('user_id', userId);
         if (!scope.active) return;
         if (error) throw error;
-
-        setPinnedTasks((currentPinnedTasks) =>
-          currentPinnedTasks.filter(
-            (pinnedTask) => pinnedTask.id !== existingPinned.id
-          )
-        );
-        return;
+        // The FK performs the same unlink for every date without deleting work.
+        setTasks((current) => current.map((row) => row.source_pinned_task_id === pinId
+          ? { ...row, source_pinned_task_id: null } : row));
+      } else {
+        const { data, error } = await supabase.rpc('pin_daily_task', { p_task_id: task.id }).single();
+        if (!scope.active) return;
+        if (error || !data) throw error ?? new Error('No pinned task returned');
+        const pin = normalizePinnedTaskRows([data as PinnedTaskRow])[0];
+        setTasks((current) => current.map((row) => row.id === task.id
+          ? { ...row, source_pinned_task_id: pin.id } : row));
       }
-
-      const maxPosition =
-        pinnedTasks.length > 0
-          ? Math.max(...pinnedTasks.map((pinnedTask) => pinnedTask.position))
-          : -1;
-
-      const { data, error } = await supabase
-        .from('pinned_tasks')
-        .insert({
-          user_id: userId,
-          title: task.title,
-          subject_id: task.subject_id,
-          position: maxPosition + 1,
-        })
-        .select('id, title, position, subject_id')
-        .single();
-
-      if (!scope.active) return;
-      if (error) throw error;
-
-      const createdPinnedTask = normalizePinnedTaskRows([data as PinnedTaskRow])[0];
-      setPinnedTasks((currentPinnedTasks) => [
-        ...currentPinnedTasks,
-        createdPinnedTask,
-      ]);
     } catch (error) {
-      if (scope.active) console.error('Error changing pinned task:', error);
+      if (scope.active) {
+        console.error('Error changing pinned task:', error);
+        toast.error('작업 고정을 변경하지 못했습니다. 다시 시도해주세요.');
+        scope.refreshTasks = true;
+      }
     } finally {
+      scope.pinMutations.delete(task.id);
       finishMutation(scope);
     }
   };
@@ -804,7 +739,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           position: maxPosition + 1,
         })
         .select(
-          'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, subject_id'
+          'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, source_pinned_task_id, subject_id'
         )
         .single();
 
@@ -854,43 +789,28 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
   const updateTask = async (taskId: string, title: string, subjectId: string | null) => {
     const originalTask = tasks.find((task) => task.id === taskId);
-    const pinnedTask = originalTask && pinnedTasks.find((pinned) => pinned.title === originalTask.title);
-    const scope = beginMutation(!!pinnedTask);
+    const scope = beginMutation();
     if (!scope) return;
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.id === taskId ? { ...task, title, subject_id: subjectId } : task
-      )
-    );
+    setTasks((currentTasks) => currentTasks.map((task) =>
+      task.id === taskId ? { ...task, title, subject_id: subjectId } : task
+    ));
 
-    let taskSaved = false;
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ title, subject_id: subjectId })
-        .eq('id', taskId);
+      // The RPC uses the current stored source link and commits the daily task
+      // and its template together, including when another tab just pinned it.
+      const { data, error } = await supabase.rpc('update_daily_task_with_pin', {
+        p_task_id: taskId, p_title: title, p_subject_id: subjectId,
+      }).single();
       if (!scope.active) return;
-      if (error) throw error;
-      taskSaved = true;
-      // Keep the reusable pinned template aligned with this task's edits.
+      if (error || !data) throw error ?? new Error('No updated task returned');
+      const savedTask = normalizeTaskRows([data as TaskRow])[0];
+      setTasks((current) => current.map((task) => task.id === taskId
+        ? { ...task, ...savedTask } : task));
       if ((originalTask?.subject_id ?? null) !== subjectId) notifyStudySubjectsChanged();
-      if (pinnedTask) {
-        const { error: pinError } = await supabase
-          .from('pinned_tasks')
-          .update({ title, subject_id: subjectId })
-          .eq('id', pinnedTask.id);
-        if (!scope.active) return;
-        if (pinError) throw pinError;
-        setPinnedTasks((current) => current.map((pinned) =>
-          pinned.id === pinnedTask.id ? { ...pinned, title, subject_id: subjectId } : pinned
-        ));
-      }
     } catch (error) {
       if (!scope.active) return;
       console.error('Error updating task:', error);
-      toast.error(taskSaved
-        ? '할 일은 저장했지만 고정 작업은 저장하지 못했습니다. 이후 자동 추가에는 이전 설정이 적용됩니다.'
-        : '할 일을 저장하지 못했습니다. 다시 시도해주세요.');
+      toast.error('할 일을 저장하지 못했습니다. 다시 시도해주세요.');
       scope.refreshTasks = true;
     } finally {
       finishMutation(scope);
@@ -961,9 +881,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
                   pinTask={pinTaskFromTask}
                   subjects={subjects}
                   createSubject={createSubject}
-                  isPinned={pinnedTasks.some(
-                    (pinnedTask) => pinnedTask.title === task.title
-                  )}
+                  isPinned={Boolean(task.source_pinned_task_id)}
                 />
               ))}
             </SortableContext>

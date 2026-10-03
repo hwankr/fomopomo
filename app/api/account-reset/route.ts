@@ -180,6 +180,10 @@ export async function POST(request: NextRequest) {
   const storageCleanup = await cleanupUserFeedbackStorage({
     storage: supabaseAdmin.storage,
     userId: user.id,
+    listOwnedObjects: ({ userId, afterId, limit }) => supabaseAdmin.rpc(
+      'list_account_storage_objects',
+      { p_user_id: userId, p_after_id: afterId, p_limit: limit }
+    ),
   });
 
   if (!storageCleanup.ok) {
@@ -191,6 +195,9 @@ export async function POST(request: NextRequest) {
       {
         error: 'Feedback storage cleanup failed',
         retryable: storageCleanup.retryable,
+        ...(storageCleanup.status === 'storage_unverified_objects' ? {
+          message: '계정에 자동으로 정리할 수 없는 업로드 파일이 있습니다. 관리자에게 문의해 주세요.',
+        } : {}),
         storageCleanup,
       },
       { status: 500 }
@@ -238,6 +245,8 @@ export async function POST(request: NextRequest) {
         current_task: null,
         last_active_at: new Date().toISOString(),
         study_start_time: null,
+        study_session_id: null,
+        study_session_offset: 0,
         total_stopwatch_time: 0,
         timer_type: 'stopwatch',
         timer_mode: 'focus',

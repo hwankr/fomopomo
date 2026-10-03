@@ -268,3 +268,11 @@ Edge Function 검증은 Deno runtime에서 `fmt --check`, `test`, `check`를 수
 - authenticated에만 허용된 `SECURITY DEFINER` RPC 9개의 WARN은 각 함수 내부 authorization, 빈 고정 `search_path`, 명시적 ACL을 postflight로 확인한 allowlist다.
 - leaked-password protection 비활성화 WARN과 기존 Performance Advisor 항목은 이번 DB 권한/VAPID 회전 범위 밖이다. 따라서 운영 Advisor 경고가 0건이라고 주장하지 않는다.
 - 비밀값, JWT, VAPID private key, 전체 push endpoint, 사용자 이메일은 이 기록에 포함하지 않았다.
+
+## 의존성 보안 업데이트 — 2026-10-03
+
+- Next.js와 `eslint-config-next`를 함께 `16.3.8`로 올렸다. [공식 릴리스](https://github.com/vercel/next.js/releases/tag/v16.3.8)에 포함된 보안 패치를 적용한다.
+- 잠금 파일의 `brace-expansion`을 각각 `1.1.21`, `5.0.12`로 갱신했다.
+- `npm audit --omit=dev`는 취약점 0건이다. 전체 감사에는 개발 도구 경로의 `braces` 경고가 남는다. `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces` 전파를 포함해 high 5건으로 표시되지만, 원인 advisory는 [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) 한 건이다.
+- 확인 시점에 `braces` 최신 버전은 `3.0.3`이고 upstream 수정 버전이 없다. `npm audit fix --force`가 제안하는 구형 Next ESLint 설정으로의 다운그레이드는 적용하지 않았다.
+- 취약 경로는 매우 깊게 중첩된 glob 패턴 처리다. 현재 `eslint.config.mjs`에는 `settings.next.rootDir` glob 설정이 없고, Next ESLint 플러그인은 기본 작업 디렉터리를 그대로 사용한다. 이 경로로 사용자 입력을 전달하지 않는다. 신뢰할 수 없는 glob을 추가하지 말고, upstream 패치가 나오면 해당 잠금 파일 경로를 갱신한다. 이 설명은 전체 개발 의존성 감사가 통과했다는 의미가 아니다.

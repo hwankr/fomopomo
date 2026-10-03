@@ -23,7 +23,10 @@ with expected_authenticated_functions(signature) as (
     ('public.is_group_leader(uuid)'),
     ('public.is_safe_push_endpoint(text)'),
     ('public.join_group_by_code(text)'),
-    ('public.record_study_session_batch(uuid,text,text,uuid,jsonb,uuid)'),
+    ('public.record_study_session_batch(uuid,text,text,uuid,jsonb,uuid,uuid,bigint)'),
+    ('public.pin_daily_task(uuid)'),
+    ('public.materialize_pinned_tasks(uuid,date)'),
+    ('public.update_daily_task_with_pin(uuid,text,uuid)'),
     ('public.classify_study_sessions(bigint[],uuid)'),
     ('public.send_friend_request(text)'),
     ('public.transfer_group_leadership(uuid,uuid)')
@@ -32,6 +35,7 @@ expected_service_role_functions(signature) as (
   values
     ('public.claim_push_notification_event(uuid,uuid,text,integer)'),
     ('public.cleanup_account_groups(uuid)'),
+    ('public.list_account_storage_objects(uuid,uuid,integer)'),
     ('public.complete_push_notification_event(uuid,text)'),
     ('public.feedback_image_path_matches_user(uuid,text)'),
     ('public.is_safe_push_endpoint(text)')

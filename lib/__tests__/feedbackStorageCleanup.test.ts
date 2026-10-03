@@ -1,187 +1,171 @@
 import { describe, expect, it, vi } from 'vitest';
-
+import type { FileObject } from '@supabase/storage-js';
 import {
   cleanupUserFeedbackStorage,
   FEEDBACK_STORAGE_BUCKET,
+  type OwnedStorageObject,
 } from '../server/feedbackStorageCleanup';
 
-type StorageObject = {
-  metadata?: Record<string, unknown> | null;
-  name: string;
-  owner?: string | null;
-  owner_id?: string | null;
-};
+const USER = '51000000-0000-4000-8000-000000000001';
+const OTHER_USER = '51000000-0000-4000-8000-000000000002';
+const object = (index: number, overrides: Partial<OwnedStorageObject> = {}): OwnedStorageObject => ({
+  id: `52000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+  bucket_id: FEEDBACK_STORAGE_BUCKET,
+  name: `${USER}/image-${index}.png`,
+  owner_id: USER,
+  ...overrides,
+});
 
-function createStorage(overrides: {
-  pages?: StorageObject[][];
+function createStorage(objects: OwnedStorageObject[] = [], overrides: {
   listErrorAtCall?: number;
+  listThrowAtCall?: number;
   removeErrorAtCall?: number;
+  removeThrow?: boolean;
+  retainOnRemove?: boolean;
+  extraAfterRemove?: OwnedStorageObject;
 } = {}) {
-  const pages = overrides.pages ?? [[]];
-  let listCallCount = 0;
-  let removeCallCount = 0;
-
-  const list = vi.fn(async () => {
-    listCallCount += 1;
-    if (overrides.listErrorAtCall === listCallCount) {
-      return { data: null, error: { message: 'list failed' } };
-    }
-
+  let remaining = [...objects];
+  let listCalls = 0;
+  let removeCalls = 0;
+  const listOwnedObjects = vi.fn(async ({ userId, afterId, limit }: {
+    userId: string; afterId: string | null; limit: number;
+  }) => {
+    listCalls += 1;
+    if (overrides.listThrowAtCall === listCalls) throw new Error('network failed');
+    if (overrides.listErrorAtCall === listCalls) return { data: null, error: { message: 'list failed' } };
     return {
-      data: pages[listCallCount - 1] ?? [],
+      data: remaining.filter(row => row.owner_id === userId && (!afterId || row.id > afterId))
+        .sort((a, b) => a.id.localeCompare(b.id)).slice(0, limit),
       error: null,
     };
   });
-
+  // Real List V1 responses have neither owners nor recursive folder contents.
+  const listPayload: FileObject[] = [{
+    name: 'image-1.png', id: object(1).id, created_at: null, updated_at: null,
+    last_accessed_at: null, metadata: {
+      size: 10, mimetype: 'image/png', eTag: 'etag', cacheControl: '3600',
+      lastModified: '2026-10-03T00:00:00Z', contentLength: 10, httpStatusCode: 200,
+    },
+  }, { name: 'nested', id: null, created_at: null, updated_at: null,
+    last_accessed_at: null, metadata: null }];
+  const list = vi.fn(async () => ({ data: listPayload, error: null }));
   const remove = vi.fn(async (paths: string[]) => {
-    removeCallCount += 1;
-    if (overrides.removeErrorAtCall === removeCallCount) {
-      return { data: null, error: { message: 'remove failed' } };
-    }
-
+    removeCalls += 1;
+    if (overrides.removeThrow) throw new Error('network failed');
+    if (overrides.removeErrorAtCall === removeCalls) return { data: null, error: { message: 'remove failed' } };
+    if (!overrides.retainOnRemove) remaining = remaining.filter(row => !paths.includes(row.name));
+    if (overrides.extraAfterRemove) remaining.push(overrides.extraAfterRemove);
     return { data: paths, error: null };
   });
-
-  return {
-    bucket: { list, remove },
-    storage: {
-      from: vi.fn((bucketId: string) => {
-        expect(bucketId).toBe(FEEDBACK_STORAGE_BUCKET);
-        return { list, remove };
-      }),
-    },
-  };
+  const storage = { from: vi.fn(() => ({ list, remove })) };
+  return { storage, listOwnedObjects, list, remove, remaining: () => remaining };
 }
 
 describe('feedbackStorageCleanup', () => {
-  it('removes only verified user-owned canonical and safe legacy paths', async () => {
-    const { storage, bucket } = createStorage({
-      pages: [[
-        { name: '123e4567-e89b-42d3-a456-426614174000.png', owner: 'user-1' },
-        { name: 'legacy-image.png', owner_id: 'user-1' },
-        { name: 'legacy-image.png', owner: 'user-1' },
-        { name: 'other-user.png', owner: 'user-2' },
-        { name: '..%2Fescape.png', owner: 'user-1' },
-        { name: 'nested\\\\path.png', owner: 'user-1' },
-      ]],
-    });
-
-    const result = await cleanupUserFeedbackStorage({
-      storage,
-      userId: 'user-1',
-    });
-
-    expect(result).toEqual({
-      counts: {
-        eligible: 2,
-        listed: 6,
-        pages: 1,
-        removeRequests: 1,
-        removed: 2,
-        skipped: 3,
-      },
-      ok: true,
-      retryable: false,
-      status: 'success',
-    });
-    expect(bucket.remove).toHaveBeenCalledWith([
-      'user-1/123e4567-e89b-42d3-a456-426614174000.png',
-      'user-1/legacy-image.png',
+  it('uses authoritative ownership instead of ownerless Storage list, including nested legacy objects', async () => {
+    const other = object(4, { name: `${USER}/other-user.png`, owner_id: OTHER_USER });
+    const input = createStorage([
+      object(1), object(2, { name: `${USER}/legacy/nested photo.gif` }),
+      object(3, { name: `${USER}/legacy-upload.png` }), other,
     ]);
+    const result = await cleanupUserFeedbackStorage({ ...input, userId: USER });
+    expect(result).toMatchObject({ ok: true, counts: { eligible: 3, removed: 3, skipped: 0 } });
+    expect(input.list).not.toHaveBeenCalled();
+    expect(input.storage.from).toHaveBeenCalledWith(FEEDBACK_STORAGE_BUCKET);
+    expect(input.remove).toHaveBeenCalledWith([
+      `${USER}/image-1.png`, `${USER}/legacy/nested photo.gif`, `${USER}/legacy-upload.png`,
+    ]);
+    expect(input.remaining()).toEqual([other]);
+    expect(input.listOwnedObjects).toHaveBeenLastCalledWith({ userId: USER, afterId: null, limit: 1 });
   });
 
-  it('chunks deletes into batches of 100', async () => {
-    const firstPage = Array.from({ length: 100 }, (_, index) => ({
-      name: `image-${index}.png`,
-      owner: 'user-1',
-    }));
-    const secondPage = Array.from({ length: 25 }, (_, index) => ({
-      name: `image-${index + 100}.png`,
-      owner: 'user-1',
-    }));
-    const { storage, bucket } = createStorage({
-      pages: [firstPage, secondPage],
+  it('enumerates keyset pages before chunked removal, without offset skipping', async () => {
+    const input = createStorage(Array.from({ length: 225 }, (_, i) => object(i + 1)));
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({
+      ok: true, counts: { eligible: 225, listed: 225, pages: 3, removeRequests: 3, removed: 225 },
     });
-
-    const result = await cleanupUserFeedbackStorage({
-      storage,
-      userId: 'user-1',
-    });
-
-    expect(result.counts).toMatchObject({
-      eligible: 125,
-      listed: 125,
-      pages: 2,
-      removeRequests: 2,
-      removed: 125,
-      skipped: 0,
-    });
-    expect(bucket.remove).toHaveBeenNthCalledWith(
-      1,
-      Array.from({ length: 100 }, (_, index) => `user-1/image-${index}.png`)
-    );
-    expect(bucket.remove).toHaveBeenNthCalledWith(
-      2,
-      Array.from({ length: 25 }, (_, index) => `user-1/image-${index + 100}.png`)
-    );
+    expect(input.listOwnedObjects.mock.calls.slice(0, 3)).toEqual([
+      [{ userId: USER, afterId: null, limit: 100 }],
+      [{ userId: USER, afterId: object(100).id, limit: 100 }],
+      [{ userId: USER, afterId: object(200).id, limit: 100 }],
+    ]);
+    expect(input.remove.mock.calls.map(([paths]) => paths.length)).toEqual([100, 100, 25]);
+    expect(input.remaining()).toEqual([]);
   });
 
-  it('returns a retryable failure when listing fails', async () => {
-    const { storage, bucket } = createStorage({
-      pages: [[{ name: 'image-1.png', owner: 'user-1' }]],
-      listErrorAtCall: 1,
+  it.each([
+    { name: 'legacy-outside-user-namespace.png' },
+    { name: `${OTHER_USER}/owned-but-foreign-namespace.png` },
+    { name: `${USER}/../escape.png` },
+    { name: `${USER}/..%2Fescape.png` },
+    { name: `${USER}/nested\\path.png` },
+    { name: `${USER}/folder/` },
+    { bucket_id: 'different-bucket' },
+  ])('fails before any removal for unresolved owned object %j', async (overrides) => {
+    const input = createStorage([object(1), object(2, overrides)]);
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({
+      ok: false, retryable: false, status: 'storage_unverified_objects',
     });
-
-    const result = await cleanupUserFeedbackStorage({
-      storage,
-      userId: 'user-1',
-    });
-
-    expect(result).toEqual({
-      counts: {
-        eligible: 0,
-        listed: 0,
-        pages: 0,
-        removeRequests: 0,
-        removed: 0,
-        skipped: 0,
-      },
-      ok: false,
-      retryable: true,
-      status: 'storage_list_failed',
-    });
-    expect(bucket.remove).not.toHaveBeenCalled();
+    expect(input.remove).not.toHaveBeenCalled();
+    expect(input.remaining()).toHaveLength(2);
   });
 
-  it('returns a retryable failure when removal fails after partial progress', async () => {
-    const { storage } = createStorage({
-      pages: [
-        Array.from({ length: 100 }, (_, index) => ({
-          name: `image-${index}.png`,
-          owner: 'user-1',
-        })),
-        [{ name: 'image-100.png', owner: 'user-1' }],
-      ],
-      removeErrorAtCall: 2,
+  it('fails closed if inventory returns a different owner under the user prefix', async () => {
+    const input = createStorage();
+    input.listOwnedObjects.mockResolvedValueOnce({ data: [object(1, { owner_id: OTHER_USER })], error: null });
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({
+      ok: false, retryable: false, status: 'storage_unverified_objects',
     });
+    expect(input.remove).not.toHaveBeenCalled();
+  });
 
-    const result = await cleanupUserFeedbackStorage({
-      storage,
-      userId: 'user-1',
-    });
+  it.each([{ listErrorAtCall: 1 }, { listThrowAtCall: 1 }, { listErrorAtCall: 2 }])(
+    'fails closed on inventory errors before removing files: %j', async (overrides) => {
+      const input = createStorage(Array.from({ length: 101 }, (_, i) => object(i + 1)), overrides);
+      expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({
+        ok: false, retryable: true, status: 'storage_list_failed',
+      });
+      expect(input.remove).not.toHaveBeenCalled();
+    }
+  );
 
-    expect(result).toEqual({
-      counts: {
-        eligible: 101,
-        listed: 101,
-        pages: 2,
-        removeRequests: 2,
-        removed: 100,
-        skipped: 0,
-      },
-      ok: false,
-      retryable: true,
-      status: 'storage_remove_failed',
+  it('rejects a non-advancing inventory cursor rather than looping forever', async () => {
+    const input = createStorage();
+    input.listOwnedObjects.mockResolvedValueOnce({ data: [object(1), object(1)], error: null });
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: false, status: 'storage_list_failed' });
+    expect(input.remove).not.toHaveBeenCalled();
+  });
+
+  it('returns a retryable failure after partial deletion and succeeds on retry', async () => {
+    const input = createStorage(Array.from({ length: 101 }, (_, i) => object(i + 1)), { removeErrorAtCall: 2 });
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({
+      ok: false, retryable: true, status: 'storage_remove_failed', counts: { removed: 100, removeRequests: 2 },
     });
+    expect(input.remaining()).toHaveLength(1);
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: true, counts: { removed: 1 } });
+    expect(input.remaining()).toEqual([]);
+  });
+
+  it('reports a thrown Storage removal failure', async () => {
+    const input = createStorage([object(1)], { removeThrow: true });
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: false, retryable: true, status: 'storage_remove_failed' });
+  });
+
+  it.each([{ retainOnRemove: true }, { extraAfterRemove: object(2) }])(
+    'rejects false success when removal leaves objects or another upload arrives: %j', async (overrides) => {
+      const input = createStorage([object(1)], overrides);
+      expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: false, retryable: true, status: 'storage_objects_remaining' });
+    }
+  );
+
+  it('fails if final verification is unavailable', async () => {
+    const input = createStorage([object(1)], { listErrorAtCall: 2 });
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: false, retryable: true, status: 'storage_list_failed' });
+  });
+
+  it('verifies an empty account without issuing removal', async () => {
+    const input = createStorage();
+    expect(await cleanupUserFeedbackStorage({ ...input, userId: USER })).toMatchObject({ ok: true, counts: { removed: 0 } });
+    expect(input.remove).not.toHaveBeenCalled();
   });
 });

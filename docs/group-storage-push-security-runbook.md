@@ -59,7 +59,7 @@ GitHub의 읽기 전용 deployment 기록에서는 `origin/main`의 현재 커�
 | 새 object key | 원본 파일명/임의 경로 가능 | `<auth.uid()>/<generated-uuid>.<validated-extension>`만 허용 |
 | Storage INSERT/UPDATE/DELETE | authenticated면 bucket 어느 경로든 INSERT; owner UPDATE/DELETE 정책 없음 | MIME/크기 제한 + 사용자 namespace와 `owner_id` 일치. 다른 사용자 object 쓰기/수정/삭제 차단 |
 | Storage SELECT | bucket 전체 public | private bucket과 signed URL 흐름. 소유자 또는 허용된 canonical attachment만 조회 |
-| account reset/delete | feedback URL 문자열에서 경로를 잘라 service role로 삭제 | `userId/` namespace를 list하고 object owner를 재검증한 뒤 dedupe/chunk 삭제. 임의 URL은 권한 근거로 사용하지 않음 |
+| account reset/delete | feedback URL 문자열에서 경로를 잘라 service role로 삭제 | service-role 전용 RPC로 실제 소유 객체를 조회하고 `userId/` namespace를 검증한 뒤 Storage API로 chunk 삭제. 잔존 객체가 없음을 다시 확인하며 임의 URL은 권한 근거로 사용하지 않음 |
 | `push-notification` 인증 | secret 누락 시 503, 정확한 custom header 사용(기존 보완 완료) | 기존 fail-closed 계약 유지 + method/body/schema/size 엄격 검증. user JWT만으로 호출 불가 |
 | Push 이벤트 | body의 profile/transition을 신뢰, dedup 없음 | event UUID를 원자적으로 claim하고 실제 profile 상태를 DB에서 재조회. 동일 event 및 짧은 status flap 억제 |
 | Push 수신자 | 발신자 방향 friendship을 조회하고 opt-out 무시 | `friend_id = actor`, `user_id = recipient`, `is_notification_enabled = true` 방향만 사용 |
@@ -227,7 +227,9 @@ Edge 배포 입력은 `push-notification` 이름, `index.ts`, `helpers.ts`, `den
 - 기존 `feedbacks.images`와 `feedback_replies.images`는 읽기 호환용으로만 남기고 새 client write 권한을 철회한다.
 - URL 문자열만으로 object 삭제 또는 ownership 결정을 하지 않는다.
 - 새 upload는 모두 canonical `feedback_images` row와 사용자 namespace를 사용한다.
-- cleanup은 `userId/` prefix를 Storage API로 list한 뒤 각 object의 owner가 user ID와 같은 경우만 삭제한다.
+- cleanup은 `list_account_storage_objects(uuid,uuid,integer)` RPC로 `storage.objects`의 실제 소유권을 조회한다. Storage `list()`는 owner를 반환하지 않으므로 소유권 근거로 사용하지 않는다. 비어 있지 않은 `owner_id`를 우선하며 누락 시에만 legacy `owner`를 사용한다.
+- 전체 소유 객체를 확인한 뒤 `feedback-uploads`의 안전한 `userId/` namespace 안에 있는 파일만 Storage API로 삭제한다. 다른 사용자 소유 파일은 경로가 일치해도 삭제하지 않는다. 소유 파일이 다른 bucket/namespace에 있거나 경로가 안전하지 않으면 파일 삭제 전에 실패하며 별도 운영 검토가 필요하다.
+- 삭제 후 소유 객체가 남지 않았음을 RPC로 재확인한다. 자세한 선행 migration과 실패·재시도 계약은 [account cleanup 배포 문서](account-cleanup-deployment.md#storage-ownership-inventory--2026-10-03)를 따른다.
 - 정확한 project host/bucket/path와 Storage owner가 모두 확인되는 legacy object만 별도 승인된 backfill 대상으로 분류한다.
 - 소유권 미확인, 외부 host, 다른 project/bucket, traversal/encoded separator가 포함된 URL은 자동 backfill·자동 삭제하지 않는다.
 - legacy backfill은 별도 dry-run 보고서(대상/건너뜀/충돌 건수)를 만든 뒤 승인받아 실행한다. 전체 path나 사용자 식별자는 운영 로그에 남기지 않는다.

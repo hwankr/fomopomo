@@ -85,9 +85,13 @@ type Profile = {
   timer_duration: number;
   last_active_at: string;
   is_task_public: boolean;
+  study_session_id: string | null;
+  study_session_offset: number;
 };
 type RpcParams = {
   p_batch_id: string;
+  p_source_session_id: string;
+  p_progress_start: number;
   p_segments: { duration: number; ended_at: string }[];
 };
 const STATE_KEY = 'fomopomo_full_state::user-1';
@@ -110,10 +114,13 @@ const pausedProfile = (overrides: Partial<Profile> = {}): Profile => ({
   id: 'user-1', status: 'paused', study_start_time: null,
   total_stopwatch_time: 600, timer_type: 'timer', timer_mode: 'focus',
   timer_duration: 1500, last_active_at: new Date().toISOString(),
-  is_task_public: true, ...overrides,
+  is_task_public: true,
+  study_session_id: '11111111-1111-4111-8111-111111111111', study_session_offset: 0,
+  ...overrides,
 });
 const seedLocal = (elapsed: number, loggedSeconds: number, lastUpdated: number, duration?: number) => {
   window.localStorage.setItem(STATE_KEY, JSON.stringify({
+    sessionIdentity: { id: '11111111-1111-4111-8111-111111111111', progressStart: loggedSeconds },
     ownerUserId: 'user-1', activeTab: 'timer',
     timer: {
       mode: 'focus', duration, isRunning: false, timeLeft: (duration ?? 1500) - elapsed,
@@ -167,6 +174,8 @@ beforeEach(() => {
     let columns = '';
     const filters: ((row: Profile) => boolean)[] = [];
     const query = {
+      setHeader: vi.fn(() => query),
+      or: vi.fn(() => query),
       select: vi.fn((value: string) => { columns = value; return query; }),
       update: vi.fn((value: Partial<Profile>) => { patch = value; mocks.profileUpdates.push(value); return query; }),
       eq: vi.fn((key: keyof Profile, value: unknown) => { filters.push(row => row[key] === value); return query; }),
@@ -199,12 +208,13 @@ describe('TimerApp stopwatch continuous-run auto-pause', () => {
   it('imports only B remaining portion after A was already recorded by a source-device handoff', async () => {
     // Source: a25min pomodoro saved A20min, then ran B1min. Its public
     // duration/start now describe only B5min; A never enters this ledger.
-    profile = pausedProfile({ timer_duration: 300, total_stopwatch_time: 60 });
+    profile = pausedProfile({ timer_duration: 300, total_stopwatch_time: 60, study_session_offset: 1200 });
     await mount();
     expect(lastProps()).toMatchObject({ timeLeft: 240, isRunning: false });
     await act(async () => clickTimer('onToggleTimer'));
     await jumpStopwatch(240_000);
     expect(savedSeconds()).toBe(300);
+    expect(lastRpc()).toMatchObject({ p_source_session_id: profile!.study_session_id, p_progress_start: 1200 });
     expect(persisted().timer).toMatchObject({ mode: 'shortBreak', cycleCount: 1 });
   });
 
@@ -631,6 +641,7 @@ describe('TimerApp cross-device focus handoff', () => {
     await act(async () => clickTimer('onSaveTimer'));
     // 15 elapsed - 5 already consumed + 1 new minute.
     expect(savedSeconds()).toBe(660);
+    expect(lastRpc()).toMatchObject({ p_progress_start: 300, p_source_session_id: '11111111-1111-4111-8111-111111111111' });
   });
 
   it('saves the whole imported session once when the countdown completes', async () => {
@@ -680,4 +691,93 @@ describe('TimerApp cross-device focus handoff', () => {
     await act(async () => clickTimer('onSaveTimer'));
     expect(savedSeconds()).toBe(60);
   });
+});
+
+describe('shared clock identity across devices', () => {
+  it.each([
+    ['stopwatch', 0], ['stopwatch', 30], ['timer', 0], ['timer', 30],
+  ] as const)('keeps one progress axis when B saves and the original %s device adds %s seconds', async (kind, additionalSeconds) => {
+    const accepted: number[] = [];
+    const consumed = new Map<string, number>();
+    // The database range-union contract is tested with pgTAP and concurrent
+    // connections. This adapter makes the UI consume its accepted totals.
+    mocks.rpc.mockImplementation(async (_: string, args: RpcParams) => {
+      const previous = consumed.get(args.p_source_session_id) ?? 0;
+      const end = args.p_progress_start + args.p_segments.reduce((sum, segment) => sum + segment.duration, 0);
+      const added = Math.max(0, end - Math.max(previous, args.p_progress_start));
+      consumed.set(args.p_source_session_id, Math.max(previous, end));
+      accepted.push(added);
+      return { data: { status: added ? 'saved' : 'already_recorded', total_seconds: added }, error: null };
+    });
+    profile = pausedProfile({ status: 'online', timer_type: kind, total_stopwatch_time: 0, study_session_id: null });
+    const a = await mount();
+    if (kind === 'stopwatch') await act(async () => a.getByRole('button', { name: /^스톱워치$/ }).click());
+    const toggle = () => kind === 'timer' ? clickTimer('onToggleTimer') : clickStopwatch('onToggleStopwatch');
+    const save = () => kind === 'timer' ? clickTimer('onSaveTimer') : clickStopwatch('onSaveStopwatch');
+    await act(async () => toggle());
+    await jumpStopwatch(60_000);
+    await act(async () => toggle());
+    const sourceState = localStorage.getItem(STATE_KEY)!;
+    const sourceId = persisted().sessionIdentity.id;
+    expect(profile!.study_session_id).toBe(sourceId);
+    a.unmount();
+    localStorage.removeItem(STATE_KEY); // independent device B storage
+    const b = await mount();
+    expect(persisted().sessionIdentity).toMatchObject({ id: sourceId, progressStart: 0 });
+    await act(async () => save());
+    expect(lastRpc()).toMatchObject({ p_source_session_id: sourceId, p_progress_start: 0 });
+    const bBatch = lastRpc().p_batch_id;
+    b.unmount();
+    localStorage.setItem(STATE_KEY, sourceState);
+    await mount();
+    if (additionalSeconds > 0) {
+      await act(async () => toggle());
+      await jumpStopwatch(additionalSeconds * 1000);
+      await act(async () => toggle());
+    }
+    await act(async () => save());
+    expect(lastRpc()).toMatchObject({ p_source_session_id: sourceId, p_progress_start: 0 });
+    expect(lastRpc().p_batch_id).not.toBe(bBatch);
+    expect(savedSeconds()).toBe(60 + additionalSeconds);
+    expect(accepted).toEqual([60, additionalSeconds]);
+  });
+
+  it('refuses an anonymous legacy remote snapshot instead of inventing an unrelated identity', async () => {
+    profile = pausedProfile({ study_session_id: null, total_stopwatch_time: 600 });
+    await mount();
+    expect(lastProps().timeLeft).toBe(1500);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STATE_KEY)).toBeNull();
+  });
+
+  it('starts a fresh identity after a stopwatch save while its offline draft keeps the old one', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'offline' } });
+    const view = await startFreshStopwatch();
+    await jumpStopwatch(60_000);
+    const oldId = persisted().sessionIdentity.id;
+    await act(async () => clickStopwatch('onSaveStopwatch'));
+    const pending = JSON.parse(localStorage.getItem('fomopomo_pending_sessions')!);
+    expect(Object.values(pending)).toEqual([expect.objectContaining({ sourceSessionId: oldId, progressStart: 0 })]);
+    await act(async () => clickStopwatch('onToggleStopwatch'));
+    expect(persisted().sessionIdentity.id).not.toBe(oldId);
+    expect(persisted().sessionIdentity.progressStart).toBe(0);
+    view.unmount();
+  });
+});
+
+it.each([true, false])('keeps stopwatch ownership when timer mode is clicked with stopwatch running=%s', async running => {
+  const view = await startFreshStopwatch();
+  await jumpStopwatch(60_000);
+  if (!running) await act(async () => clickStopwatch('onToggleStopwatch'));
+  const before = persisted();
+  await act(async () => view.getByRole('button', { name: /^타이머$/ }).click());
+  await act(async () => (lastProps().onChangeMode as (mode: string) => void)('shortBreak'));
+  expect(persisted()).toEqual(before);
+  expect(lastProps().timerMode).toBe('focus');
+  await act(async () => view.getByRole('button', { name: /^스톱워치$/ }).click());
+  expect(lastStopwatchProps().stopwatchTime).toBe(60);
+  expect(lastStopwatchProps().isStopwatchRunning).toBe(running);
+  await act(async () => clickStopwatch('onSaveStopwatch'));
+  expect(lastRpc().p_source_session_id).toBe(before.sessionIdentity.id);
+  expect(savedSeconds()).toBe(60);
 });

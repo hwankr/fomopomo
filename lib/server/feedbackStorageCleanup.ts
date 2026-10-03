@@ -3,35 +3,27 @@ export const FEEDBACK_STORAGE_BUCKET = 'feedback-uploads';
 const LIST_PAGE_SIZE = 100;
 const REMOVE_CHUNK_SIZE = 100;
 const ENCODED_SEPARATOR_PATTERN = /%(2f|5c)/i;
-const CANONICAL_OBJECT_NAME_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(gif|jpe?g|png|webp)$/i;
-
 type StorageErrorLike = {
   message?: string;
 };
 
-type StorageListItem = {
-  metadata?: Record<string, unknown> | null;
+export type OwnedStorageObject = {
+  id: string;
+  bucket_id: string;
   name: string;
-  owner?: string | null;
-  owner_id?: string | null;
+  owner_id: string;
 };
 
+type ListOwnedObjects = (input: {
+  userId: string;
+  afterId: string | null;
+  limit: number;
+}) => PromiseLike<{
+  data: OwnedStorageObject[] | null;
+  error: StorageErrorLike | null;
+}>;
+
 type FeedbackStorageBucketClient = {
-  list(
-    path?: string,
-    options?: {
-      limit?: number;
-      offset?: number;
-      sortBy?: {
-        column?: string;
-        order?: string;
-      };
-    }
-  ): Promise<{
-    data: StorageListItem[] | null;
-    error: StorageErrorLike | null;
-  }>;
   remove(paths: string[]): Promise<{
     data?: unknown;
     error: StorageErrorLike | null;
@@ -53,7 +45,8 @@ export type FeedbackStorageCleanupResult = {
   };
   ok: boolean;
   retryable: boolean;
-  status: 'success' | 'storage_list_failed' | 'storage_remove_failed';
+  status: 'success' | 'storage_list_failed' | 'storage_remove_failed'
+    | 'storage_unverified_objects' | 'storage_objects_remaining';
 };
 
 const isSafePathComponent = (component: string) => {
@@ -66,35 +59,12 @@ const isSafePathComponent = (component: string) => {
   return !/[\u0000-\u001F]/.test(component);
 };
 
-const getObjectOwner = (object: StorageListItem) => {
-  const metadata = object.metadata ?? {};
-  const candidates = [
-    object.owner,
-    object.owner_id,
-    typeof metadata.owner === 'string' ? metadata.owner : null,
-    typeof metadata.owner_id === 'string' ? metadata.owner_id : null,
-  ];
-
-  return candidates.find((candidate): candidate is string => !!candidate) ?? null;
-};
-
-const classifyObjectPath = ({
-  name,
-  userId,
-}: {
-  name: string;
-  userId: string;
-}) => {
-  const components = name.split('/');
-  if (components.some((component) => !isSafePathComponent(component))) {
-    return null;
-  }
-
-  const objectPath = `${userId}/${components.join('/')}`;
-  return {
-    objectPath,
-    type: CANONICAL_OBJECT_NAME_PATTERN.test(name) ? 'canonical' : 'legacy',
-  } as const;
+const isRemovableObject = (object: OwnedStorageObject, userId: string) => {
+  if (object.owner_id !== userId || object.bucket_id !== FEEDBACK_STORAGE_BUCKET ||
+      typeof object.name !== 'string') return false;
+  const components = object.name.split('/');
+  return components.length >= 2 && components[0] === userId &&
+    components.every(isSafePathComponent);
 };
 
 const emptyCounts = () => ({
@@ -109,9 +79,11 @@ const emptyCounts = () => ({
 export async function cleanupUserFeedbackStorage({
   storage,
   userId,
+  listOwnedObjects,
 }: {
   storage: FeedbackStorageClient;
   userId: string;
+  listOwnedObjects: ListOwnedObjects;
 }): Promise<FeedbackStorageCleanupResult> {
   if (!isSafePathComponent(userId)) {
     return {
@@ -125,42 +97,40 @@ export async function cleanupUserFeedbackStorage({
   const bucket = storage.from(FEEDBACK_STORAGE_BUCKET);
   const counts = emptyCounts();
   const removablePaths = new Set<string>();
+  const fail = (
+    status: FeedbackStorageCleanupResult['status'],
+    retryable = true
+  ): FeedbackStorageCleanupResult => ({ counts, ok: false, retryable, status });
 
-  for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
-    const { data, error } = await bucket.list(userId, {
-      limit: LIST_PAGE_SIZE,
-      offset,
-      sortBy: { column: 'name', order: 'asc' },
-    });
+  // Storage list() has neither owner fields nor recursive folder contents.
+  // The service-only RPC reads actual object ownership, including legacy owner,
+  // across all buckets. Never infer ownership from a URL, prefix, or metadata.
+  let afterId: string | null = null;
+  try {
+    for (;;) {
+      const { data, error } = await listOwnedObjects({ userId, afterId, limit: LIST_PAGE_SIZE });
 
-    if (error) {
-      return {
-        counts,
-        ok: false,
-        retryable: true,
-        status: 'storage_list_failed',
-      };
-    }
+      if (error || !Array.isArray(data)) return fail('storage_list_failed');
 
-    const page = data ?? [];
-    counts.pages += 1;
-    counts.listed += page.length;
+      counts.pages += 1;
+      counts.listed += data.length;
 
-    for (const object of page) {
-      const owner = getObjectOwner(object);
-      const classified = classifyObjectPath({ name: object.name, userId });
+      for (const object of data) {
+        if (!object || typeof object.id !== 'string' || !object.id ||
+            (afterId !== null && object.id <= afterId)) return fail('storage_list_failed');
+        afterId = object.id;
 
-      if (!owner || owner !== userId || !classified) {
-        counts.skipped += 1;
-        continue;
+        if (!isRemovableObject(object, userId)) {
+          counts.skipped += 1;
+          return fail('storage_unverified_objects', false);
+        }
+        removablePaths.add(object.name);
       }
 
-      removablePaths.add(classified.objectPath);
+      if (data.length < LIST_PAGE_SIZE) break;
     }
-
-    if (page.length < LIST_PAGE_SIZE) {
-      break;
-    }
+  } catch {
+    return fail('storage_list_failed');
   }
 
   const paths = Array.from(removablePaths);
@@ -172,19 +142,25 @@ export async function cleanupUserFeedbackStorage({
       continue;
     }
 
-    const { error } = await bucket.remove(chunk);
     counts.removeRequests += 1;
-
-    if (error) {
-      return {
-        counts,
-        ok: false,
-        retryable: true,
-        status: 'storage_remove_failed',
-      };
+    try {
+      const { error } = await bucket.remove(chunk);
+      if (error) return fail('storage_remove_failed');
+    } catch {
+      return fail('storage_remove_failed');
     }
 
     counts.removed += chunk.length;
+  }
+
+  // remove() can report no error while removing zero rows. Also catch files
+  // added during cleanup instead of falsely confirming account reset/deletion.
+  try {
+    const { data, error } = await listOwnedObjects({ userId, afterId: null, limit: 1 });
+    if (error || !Array.isArray(data)) return fail('storage_list_failed');
+    if (data.length > 0) return fail('storage_objects_remaining');
+  } catch {
+    return fail('storage_list_failed');
   }
 
   return {

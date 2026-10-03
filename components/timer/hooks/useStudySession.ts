@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { getDayStart, splitIntervalAtStudyDayBoundary } from '@/lib/dateUtils';
 import { getCurrentUserId } from '@/lib/userScopedStorage';
 import toast from 'react-hot-toast';
+import { newStudySessionIdentity, type StudySessionIdentity } from './sessionIdentity';
 
 type ProfileStatusUpdate = {
   status: 'studying' | 'paused' | 'online' | 'offline';
@@ -13,6 +14,8 @@ type ProfileStatusUpdate = {
   timer_mode: 'focus' | 'shortBreak' | 'longBreak';
   timer_duration: number;
   total_stopwatch_time?: number;
+  study_session_id?: string | null;
+  study_session_offset?: number;
 };
 
 // Helper to generate UUID
@@ -76,6 +79,8 @@ type PendingSessionDraftV2 = {
   task: string | null;
   taskId: string | null;
   subjectId?: string | null;
+  sourceSessionId?: string;
+  progressStart?: number;
   // Labels supplied at creation never had an unlabeled twin. A conflict for
   // these drafts is a real payload conflict, not a popup/recovery race.
   labelsLocked?: boolean;
@@ -202,6 +207,24 @@ export const clearPendingSessionsForUser = (userId: string) => {
 // StrictMode double-mount cannot fire two RPC calls for the same draft.
 // (The server-side idempotency contract still covers cross-tab races.)
 const recoveringSessionIds = new Set<string>();
+// Shared across hook instances in this tab. An older operation must never
+// overtake a pause/reset, including when auth/privacy lookups are slow.
+const statusQueues = new Map<string, Promise<void>>();
+const statusVersions = new Map<string, number>();
+const queueProfileWrite = (owner: string, send: (isLatest: () => boolean) => Promise<void>) => {
+  const version = (statusVersions.get(owner) ?? 0) + 1;
+  statusVersions.set(owner, version);
+  const queued = (statusQueues.get(owner) ?? Promise.resolve())
+    .then(() => send(() => statusVersions.get(owner) === version));
+  statusQueues.set(owner, queued);
+  void queued.finally(() => {
+    if (statusQueues.get(owner) === queued) {
+      statusQueues.delete(owner);
+      statusVersions.delete(owner);
+    }
+  });
+  return queued;
+};
 
 const callRecordBatchRpc = async (draft: {
   sessionId: string;
@@ -210,6 +233,8 @@ const callRecordBatchRpc = async (draft: {
   task: string | null;
   taskId: string | null;
   subjectId?: string | null;
+  sourceSessionId?: string;
+  progressStart?: number;
   segments: SessionSegment[];
 }, isCurrent: () => boolean = () => true) => {
   const { data: { session }, error } = await supabase.auth.getSession();
@@ -229,6 +254,10 @@ const callRecordBatchRpc = async (draft: {
     p_task_id: draft.taskId,
     p_segments: draft.segments,
     ...(draft.subjectId ? { p_subject_id: draft.subjectId } : {}),
+    ...(draft.sourceSessionId ? {
+      p_source_session_id: draft.sourceSessionId,
+      p_progress_start: draft.progressStart,
+    } : {}),
   }).setHeader('Authorization', `Bearer ${session.access_token}`);
 };
 
@@ -365,6 +394,8 @@ export type PendingStudyRecord = {
   forcedEndTime: number;
   segments: SessionSegment[];
   subjectId?: string | null;
+  sourceSessionId?: string;
+  progressStart?: number;
   labels?: {
     task: string | null;
     taskId: string | null;
@@ -385,6 +416,7 @@ interface UseStudySessionProps {
   onRecordSaved: () => void;
   selectedTaskTitle: string;
   selectedSubjectId?: string | null;
+  sessionIdentityRef?: React.MutableRefObject<StudySessionIdentity | null>;
 }
 
 export const useStudySession = ({
@@ -392,9 +424,12 @@ export const useStudySession = ({
   onRecordSaved,
   selectedTaskTitle,
   selectedSubjectId = null,
+  sessionIdentityRef,
 }: UseStudySessionProps) => {
   const ownerId = isLoggedIn ? getCurrentUserId() : null;
   const ownerIdRef = useRef(ownerId);
+  const ownerGenerationRef = useRef(0);
+  if (ownerIdRef.current !== ownerId) ownerGenerationRef.current += 1;
   ownerIdRef.current = ownerId;
   const [isSaving, setIsSaving] = useState(false);
   const [intervals, setIntervals] = useState<{ start: number; end: number }[]>([]);
@@ -411,36 +446,54 @@ export const useStudySession = ({
     subjectId: string | null;
   }>());
 
-  const updateStatus = useCallback(async (status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0, activityTime?: number) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  const updateStatus = useCallback((status: 'studying' | 'paused' | 'online' | 'offline', task?: string, startTime?: string, elapsedTime?: number, timerType: 'timer' | 'stopwatch' = 'stopwatch', timerMode: 'focus' | 'shortBreak' | 'longBreak' = 'focus', timerDuration: number = 0, activityTime?: number) => {
+    const requestedOwner = getCurrentUserId();
+    if (!requestedOwner || requestedOwner !== ownerIdRef.current) return Promise.resolve();
+    const eventTime = activityTime ?? Date.now();
+    const ownerGeneration = ownerGenerationRef.current;
+    const taskTitle = task !== undefined ? task : selectedTaskTitle;
+    const identity = sessionIdentityRef?.current ? { ...sessionIdentityRef.current } : null;
+    // Begin token capture at invocation, not after waiting in the write queue.
+    const credentials = supabase.auth.getSession().catch(error => ({ data: { session: null }, error }));
+    const send = async (isLatest: () => boolean) => {
+      const isCurrent = () => getCurrentUserId() === requestedOwner && ownerIdRef.current === requestedOwner
+        && ownerGenerationRef.current === ownerGeneration && isLatest();
+      try {
+        const { data: { session }, error: authError } = await credentials;
+        if (authError) throw authError;
+        if (!session || session.user.id !== requestedOwner || !isCurrent()) return;
+        const authorization = `Bearer ${session.access_token}`;
+        const { data, error: privacyError } = await supabase.from('profiles')
+          .select('is_task_public').eq('id', requestedOwner)
+          .setHeader('Authorization', authorization).single();
+        if (privacyError) throw privacyError;
+        if (!isCurrent()) return;
+        const updateData: ProfileStatusUpdate = {
+          status,
+          current_task: data?.is_task_public ? taskTitle : null,
+          last_active_at: new Date(eventTime).toISOString(),
+          study_start_time: startTime || null,
+          timer_type: timerType,
+          timer_mode: timerMode,
+          timer_duration: timerDuration,
+          ...(sessionIdentityRef ? {
+            study_session_id: identity?.id ?? null,
+            study_session_offset: identity?.progressStart ?? 0,
+          } : {}),
+        };
 
-      const taskTitle = task !== undefined ? task : selectedTaskTitle;
+        if (elapsedTime !== undefined) updateData.total_stopwatch_time = elapsedTime;
 
-      // Check privacy setting
-      const { data } = await supabase.from('profiles').select('is_task_public').eq('id', user.id).single();
-      const isPublic = data?.is_task_public ?? true;
-
-      const updateData: ProfileStatusUpdate = {
-        status,
-        current_task: isPublic ? taskTitle : null,
-        last_active_at: new Date(activityTime ?? Date.now()).toISOString(),
-        study_start_time: startTime || null,
-        timer_type: timerType,
-        timer_mode: timerMode,
-        timer_duration: timerDuration,
-      };
-
-      if (elapsedTime !== undefined) {
-        updateData.total_stopwatch_time = elapsedTime;
+        const { error } = await supabase.from('profiles').update(updateData).eq('id', requestedOwner)
+          .or(`last_active_at.is.null,last_active_at.lte.${updateData.last_active_at}`)
+          .setHeader('Authorization', authorization);
+        if (error) throw error;
+      } catch (error) {
+        console.error('Failed to update status', error);
       }
-
-      await supabase.from('profiles').update(updateData).eq('id', user.id);
-    } catch (e) {
-      console.error('Failed to update status', e);
-    }
-  }, [selectedTaskTitle]);
+    };
+    return queueProfileWrite(requestedOwner, send);
+  }, [selectedTaskTitle, sessionIdentityRef]);
 
   // Creates one logical study record SYNCHRONOUSLY: freezes the segments from
   // the live interval state, consumes that state, and parks the record as an
@@ -472,6 +525,8 @@ export const useStudySession = ({
         subjectId?: string | null;
         task?: string | null;
         taskId?: string | null;
+        sourceSessionId?: string;
+        progressStart?: number;
       }
     ): PendingStudyRecord | null => {
       const ownerId = getCurrentUserId();
@@ -487,6 +542,9 @@ export const useStudySession = ({
       const labels = contentOverride && ('task' in contentOverride || 'taskId' in contentOverride)
         ? { task: contentOverride.task?.trim() || null, taskId: contentOverride.taskId ?? null, subjectId }
         : undefined;
+      if (sessionIdentityRef && !sessionIdentityRef.current) {
+        sessionIdentityRef.current = newStudySessionIdentity();
+      }
       const record: PendingStudyRecord = {
         sessionId: contentOverride?.sessionId ?? generateUUID(),
         ownerId,
@@ -496,7 +554,21 @@ export const useStudySession = ({
         segments: buildSessionSegments(sourceIntervals, sourceStart, endTime, duration),
         subjectId,
         ...(labels ? { labels } : {}),
+        ...(contentOverride?.sourceSessionId ? {
+          sourceSessionId: contentOverride.sourceSessionId,
+          progressStart: contentOverride.progressStart ?? 0,
+        } : sessionIdentityRef?.current ? {
+          sourceSessionId: sessionIdentityRef.current.id,
+          progressStart: sessionIdentityRef.current.progressStart,
+        } : {}),
       };
+
+      if (!overridesIntervals && sessionIdentityRef?.current) {
+        sessionIdentityRef.current = {
+          ...sessionIdentityRef.current,
+          progressStart: sessionIdentityRef.current.progressStart + duration,
+        };
+      }
 
       if (!overridesIntervals) {
         // Content ownership moves to the record atomically: the live interval
@@ -519,6 +591,7 @@ export const useStudySession = ({
         task: labels?.task ?? null,
         taskId: labels?.taskId ?? null,
         subjectId: record.subjectId,
+        ...(record.sourceSessionId ? { sourceSessionId: record.sourceSessionId, progressStart: record.progressStart } : {}),
         ...(labels ? { labelsLocked: true } : {}),
         segments: record.segments,
         failedAt: Date.now(),
@@ -526,7 +599,7 @@ export const useStudySession = ({
 
       return record;
     },
-    [intervals, selectedSubjectId]
+    [intervals, selectedSubjectId, sessionIdentityRef]
   );
 
   // Saves a created record, attaching the given label. Retries call this again
@@ -549,6 +622,7 @@ export const useStudySession = ({
         ...labels,
         ...(record.labels ? { labelsLocked: true } : {}),
         segments: record.segments,
+        ...(record.sourceSessionId ? { sourceSessionId: record.sourceSessionId, progressStart: record.progressStart } : {}),
       };
       // Freeze and persist labels BEFORE waiting for an earlier record. A
       // refresh while A saves must also retain the queued B record's label.
@@ -597,7 +671,7 @@ export const useStudySession = ({
                 ? data.total_seconds
                 : sumSegmentSeconds(payload.segments);
             if (isCurrentOwner()) {
-              toast.success(`${formatKoreanDuration(savedSeconds)} 기록 저장 완료!`, { id: toastId });
+              toast.success(savedSeconds > 0 ? `${formatKoreanDuration(savedSeconds)} 기록 저장 완료!` : '이 시간은 다른 기기에서 이미 저장했어요.', { id: toastId });
               onRecordSaved();
             } else {
               toast.dismiss(toastId);
@@ -804,21 +878,34 @@ export const useStudySession = ({
 
   // Set online on mount / offline on unmount
   useEffect(() => {
-    const setOnline = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('profiles').update({
-          status: 'online',
-          last_active_at: new Date().toISOString(),
-        }).eq('id', user.id)
+    const requestedOwner = getCurrentUserId();
+    const generation = ownerGenerationRef.current;
+    const eventTime = new Date().toISOString();
+    let cancelled = false;
+    if (requestedOwner && requestedOwner === ownerIdRef.current) {
+      const credentials = supabase.auth.getSession().catch(error => ({ data: { session: null }, error }));
+      void queueProfileWrite(requestedOwner, async isLatest => {
+        try {
+          const { data: { session }, error: authError } = await credentials;
+          if (authError) throw authError;
+          if (!session || session.user.id !== requestedOwner || cancelled || !isLatest()
+            || getCurrentUserId() !== requestedOwner || ownerGenerationRef.current !== generation) return;
+          const { error } = await supabase.from('profiles').update({
+            status: 'online', last_active_at: eventTime,
+          }).eq('id', requestedOwner)
           // Do not overwrite the source device's running state or the
           // timestamp anchoring its paused study time before hydration reads it.
           .in('status', ['online', 'offline'])
           .is('study_start_time', null)
-          .eq('total_stopwatch_time', 0);
-      }
-    };
-    setOnline();
+          .eq('total_stopwatch_time', 0)
+          .or(`last_active_at.is.null,last_active_at.lte.${eventTime}`)
+          .setHeader('Authorization', `Bearer ${session.access_token}`);
+          if (error) throw error;
+        } catch (error) {
+          console.error('Failed to set online status', error);
+        }
+      });
+    }
 
     const handleUnload = () => {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -846,6 +933,7 @@ export const useStudySession = ({
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => {
+      cancelled = true;
       window.removeEventListener('beforeunload', handleUnload);
     }
   }, []);
@@ -866,7 +954,7 @@ export const useStudySession = ({
 
         const { data } = await supabase
           .from('profiles')
-          .select('status, study_start_time, total_stopwatch_time, timer_type, timer_mode, timer_duration, last_active_at')
+          .select('status, study_start_time, total_stopwatch_time, timer_type, timer_mode, timer_duration, last_active_at, study_session_id, study_session_offset')
           .eq('id', user.id)
           .single();
 

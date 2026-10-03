@@ -67,7 +67,7 @@ vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), {
   loading: vi.fn(() => 'save'), success: vi.fn(), error: mocks.errorToast, dismiss: vi.fn(),
 }) }));
 
-type Payload = { p_batch_id: string; p_task: string; p_task_id: string; p_subject_id: string; p_segments: { duration: number }[] };
+type Payload = { p_batch_id: string; p_source_session_id: string; p_progress_start: number; p_task: string; p_task_id: string; p_subject_id: string; p_segments: { duration: number }[] };
 const stateKey = 'fomopomo_full_state::user-1';
 const state = () => JSON.parse(localStorage.getItem(stateKey)!);
 const payloads = () => mocks.rpc.mock.calls.map(call => call[1] as Payload);
@@ -113,6 +113,8 @@ beforeEach(() => {
   mocks.from.mockImplementation(() => {
     let columns = '';
     const query = {
+      setHeader: vi.fn(() => query),
+      or: vi.fn(() => query),
       select: vi.fn((value: string) => { columns = value; return query; }),
       update: vi.fn((patch: Record<string, unknown>) => { mocks.updates.push(patch); return query; }),
       eq: vi.fn(() => query), in: vi.fn(() => query), is: vi.fn(() => query),
@@ -190,11 +192,15 @@ describe('complete a task and continue the same pomodoro', () => {
     const resumed = mocks.updates.findLast(update => update.status === 'studying')!;
     expect(resumed.timer_duration).toBe(300);
     expect(resumed.current_task).toBe('B');
+    expect(resumed.study_session_id).toBe(payloads()[0].p_source_session_id);
+    expect(resumed.study_session_offset).toBe(1200);
     expect(new Date(resumed.study_start_time as string).getTime()).toBe(Date.now());
     await jump(300);
     expect(payloads()).toHaveLength(2);
     expect(payloads()[1]).toMatchObject({ p_task: 'B', p_task_id: 'b', p_subject_id: 'subject-b' });
     expect(seconds(payloads()[1])).toBe(300);
+    expect(payloads()[1]).toMatchObject({ p_source_session_id: payloads()[0].p_source_session_id, p_progress_start: 1200 });
+    expect(payloads()[0].p_progress_start).toBe(0);
     expect(state().timer).toMatchObject({ mode: 'shortBreak', cycleCount: 1, timeLeft: 300, loggedSeconds: 0 });
     expect(state().taskHandoff).toBeNull();
   });

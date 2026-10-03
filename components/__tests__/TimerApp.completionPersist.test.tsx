@@ -670,6 +670,7 @@ describe('TimerApp completion persistence', () => {
         'fomopomo_task_state',
         JSON.stringify({ taskId: 't1', taskTitle: '독서' })
       );
+      const storageWrites = vi.spyOn(window.localStorage, 'setItem');
 
       render(
         <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={true} />
@@ -681,6 +682,14 @@ describe('TimerApp completion persistence', () => {
       // interval evidence (5min closed + 10min open = 15min — never the full
       // pomoTime), and keeps the persisted label.
       expect(mocks.createPendingRecord).toHaveBeenCalledTimes(1);
+      const sourceSessionId = mocks.createPendingRecord.mock.calls[0][3].sourceSessionId as string;
+      expect(sourceSessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      const upgradedSnapshot = storageWrites.mock.calls
+        .filter(([key]) => key === 'fomopomo_full_state')
+        .map(([, value]) => JSON.parse(value))
+        .find(state => state.timer.mode === 'focus' && state.sessionIdentity);
+      expect(upgradedSnapshot.sessionIdentity).toEqual({ id: sourceSessionId, progressStart: 0 });
+      storageWrites.mockRestore();
       expect(mocks.createPendingRecord).toHaveBeenCalledWith(
         'pomo',
         15 * 60,
@@ -689,6 +698,8 @@ describe('TimerApp completion persistence', () => {
           intervals: [closedInterval],
           currentStart: openStart,
           sessionId: expiredBatchId(targetTime),
+          sourceSessionId,
+          progressStart: 0,
           subjectId: null,
           task: '독서',
           taskId: 't1',

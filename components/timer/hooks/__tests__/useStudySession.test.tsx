@@ -128,6 +128,8 @@ describe('useStudySession study records', () => {
       },
     }));
     const profileUpdate = {
+      or: vi.fn().mockReturnThis(),
+      setHeader: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       in: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),

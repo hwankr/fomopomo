@@ -21,7 +21,7 @@ vi.mock('@/hooks/useStudySubjects', () => ({
 
 import TaskList from '../TaskList';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn() }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), channel: vi.fn(), removeChannel: vi.fn() }));
 vi.mock('@/lib/supabase', () => ({ supabase: mocks }));
 
 type Row = Record<string, unknown>;
@@ -53,11 +53,11 @@ const selectRows = (query: Query) => structuredClone((rows[query.table] ?? []).f
 const success = (data: Result['data']): Result => ({ data, error: null });
 const task = (id: string, title: string, userId = 'user-1', day = '2026-09-06', source: string | null = null): Row => ({
   id, title, user_id: userId, due_date: day, source_subtask_id: source,
-  status: 'todo', position: 0, estimated_pomodoros: 0,
+  status: 'todo', position: 0, estimated_pomodoros: 0, source_pinned_task_id: null,
 });
 const mount = (date = DAY_A, userId = 'user-1') => render(<TaskList selectedDate={date} userId={userId} />);
 const view = (date = DAY_A, userId = 'user-1') => <TaskList selectedDate={date} userId={userId} />;
-const emit = async (channel = channels.at(-2)!) => {
+const emit = async (channel = channels.findLast(item => item.topic === 'task-list-updates')!) => {
   await act(async () => { channel.callbacks.forEach(callback => callback()); });
 };
 const addTask = (title: string) => {
@@ -96,11 +96,24 @@ beforeEach(() => {
       if (intercepted) return intercepted;
       if (request.action === 'insert') {
         const payloads = Array.isArray(request.payload) ? request.payload : [request.payload!];
-        const inserted = payloads.map(payload => ({ id: `inserted-${++nextId}`, ...payload }));
-        rows[table] = [...(rows[table] ?? []), ...inserted];
+        const inserted = payloads.map(payload => {
+          // Model the unique source/date key; SQL tests exercise the real constraint.
+          const existing = typeof payload.source_pinned_task_id === 'string'
+            ? (rows[table] ?? []).find(row => row.source_pinned_task_id === payload.source_pinned_task_id && row.due_date === payload.due_date)
+            : undefined;
+          if (existing) return existing;
+          const created = { id: `inserted-${++nextId}`, ...payload };
+          rows[table] = [...(rows[table] ?? []), created];
+          return created;
+        });
         return success(request.single ? inserted[0] : inserted);
       }
       if (request.action === 'delete') {
+        if (table === 'pinned_tasks') {
+          const deletedIds = (rows[table] ?? []).filter(row => matches(row, request)).map(row => row.id);
+          rows.tasks = rows.tasks.map(row => deletedIds.includes(row.source_pinned_task_id)
+            ? { ...row, source_pinned_task_id: null } : row);
+        }
         rows[table] = (rows[table] ?? []).filter(row => !matches(row, request));
         return success(null);
       }
@@ -122,6 +135,46 @@ beforeEach(() => {
       then: (resolve: (result: Result) => void, reject: (error: unknown) => void) => execute().then(resolve, reject),
     };
     return query;
+  });
+  mocks.rpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+    const run = async (): Promise<Result> => {
+      if (name === 'materialize_pinned_tasks') {
+        for (const pin of rows.pinned_tasks.filter(pin => pin.user_id === args.p_user_id)) {
+          if (rows.tasks.some(row => row.source_pinned_task_id === pin.id && row.due_date === args.p_due_date)) continue;
+          const result = await mocks.from('tasks').insert({
+            user_id: args.p_user_id, due_date: args.p_due_date, title: pin.title,
+            subject_id: pin.subject_id ?? null, source_pinned_task_id: pin.id,
+            status: 'todo', position: rows.tasks.length,
+          }).select();
+          if (result.error) return result;
+        }
+        return success(structuredClone(rows.tasks.filter(row => row.user_id === args.p_user_id
+          && row.due_date === args.p_due_date && row.source_pinned_task_id)));
+      }
+      const row = rows.tasks.find(row => row.id === args.p_task_id);
+      if (!row) return { data: null, error: { message: 'Task not found' } };
+      if (name === 'pin_daily_task') {
+        if (row.source_pinned_task_id) return success(rows.pinned_tasks.find(pin => pin.id === row.source_pinned_task_id)!);
+        const result = await mocks.from('pinned_tasks').insert({
+          user_id: row.user_id, title: row.title, subject_id: row.subject_id ?? null, position: rows.pinned_tasks.length,
+        }).select().single();
+        if (!result.error && result.data) row.source_pinned_task_id = result.data.id;
+        return result;
+      }
+      if (name === 'update_daily_task_with_pin') {
+        const previous = structuredClone(rows);
+        const payload = { title: args.p_title, subject_id: args.p_subject_id };
+        const taskResult = await mocks.from('tasks').update(payload).eq('id', row.id);
+        if (taskResult.error) return taskResult;
+        if (row.source_pinned_task_id) {
+          const pinResult = await mocks.from('pinned_tasks').update(payload).eq('id', row.source_pinned_task_id);
+          if (pinResult.error) { rows = previous; return pinResult; }
+        }
+        return success(structuredClone(rows.tasks.find(task => task.id === row.id)!));
+      }
+      throw new Error(`Unexpected RPC ${name}`);
+    };
+    return { single: run, then: (resolve: (result: Result) => void, reject: (error: unknown) => void) => run().then(resolve, reject) };
   });
 });
 
@@ -265,11 +318,12 @@ describe('TaskList request ownership', () => {
     expect(toastError).toHaveBeenCalledWith('할 일을 저장하지 못했습니다. 다시 시도해주세요.');
   });
 
-  it('reports a pinned-template failure while preserving the saved daily subject', async () => {
+  it('rolls back the daily subject when its pinned-template update fails', async () => {
     const toastError = vi.spyOn(toast, 'error').mockReturnValue('pin-error');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     rows.tasks[0].subject_id = 'subject-db';
     rows.pinned_tasks = [{ id: 'pin-a', user_id: 'user-1', title: '9월 6일 작업', position: 0, subject_id: 'subject-db' }];
+    rows.tasks[0].source_pinned_task_id = 'pin-a';
     const { rerender } = mount();
     await screen.findByText('9월 6일 작업');
     intercept = query => query.table === 'pinned_tasks' && query.action === 'update'
@@ -278,11 +332,11 @@ describe('TaskList request ownership', () => {
     await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(
-      '할 일은 저장했지만 고정 작업은 저장하지 못했습니다. 이후 자동 추가에는 이전 설정이 적용됩니다.'
+      '할 일을 저장하지 못했습니다. 다시 시도해주세요.'
     ));
     await waitFor(() => expect(queries.filter((query) => query.table === 'tasks' && query.action === 'select').length).toBeGreaterThan(1));
-    expect(rows.tasks.find((row) => row.id === 'a-task')?.subject_id).toBe('subject-blockchain');
-    expect(within(taskRow('9월 6일 작업')).getByText('블록체인')).toBeInTheDocument();
+    expect(rows.tasks.find((row) => row.id === 'a-task')?.subject_id).toBe('subject-db');
+    expect(within(taskRow('9월 6일 작업')).getByText('데이터베이스')).toBeInTheDocument();
     expect(rows.pinned_tasks[0].subject_id).toBe('subject-db');
     rerender(view(DAY_B));
     await screen.findByText('9월 6일 작업');
@@ -529,7 +583,7 @@ describe('TaskList request ownership', () => {
     intercept = query => query.table === 'pinned_tasks' && query.filters.some(([column, values]) => column === 'user_id' && values.includes('user-1'))
       ? pending.promise : undefined;
     const { rerender } = mount();
-    await waitFor(() => expect(queries.filter(query => query.table === 'pinned_tasks')).toHaveLength(2));
+    await waitFor(() => expect(queries.filter(query => query.table === 'pinned_tasks')).toHaveLength(1));
     rerender(view(DAY_A, 'user-2'));
     await screen.findByText('공통 작업');
     await act(async () => pending.resolve(success([oldPin])));
@@ -620,5 +674,126 @@ describe('TaskList request ownership', () => {
     });
     expect(await screen.findByText('다른 탭에서 추가한 작업')).toBeInTheDocument();
     expect(screen.getByText('9월 6일 작업')).toHaveClass('line-through');
+  });
+});
+
+
+describe('pinned template identity and materialization', () => {
+  it('pins same-title tasks from different subjects independently', async () => {
+    rows.tasks = [
+      { ...task('db', 'Review'), subject_id: 'subject-db', source_pinned_task_id: 'pin-db' },
+      { ...task('bc', 'Review'), subject_id: 'subject-blockchain' },
+    ];
+    rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', subject_id: 'subject-db', position: 0 }];
+    mount();
+    await screen.findAllByText('Review');
+    const blockchainRow = screen.getByText('블록체인').closest('.group') as HTMLElement;
+    fireEvent.click(within(blockchainRow).getByTitle('작업 고정'));
+    await waitFor(() => expect(rows.pinned_tasks).toHaveLength(2));
+    expect(rows.pinned_tasks.find(row => row.id === 'pin-db')).toMatchObject({ subject_id: 'subject-db' });
+    expect(rows.tasks.find(row => row.id === 'bc')?.source_pinned_task_id).not.toBe('pin-db');
+    expect(screen.getAllByTitle('작업 고정 해제')).toHaveLength(2);
+  });
+
+  it('does not treat an unrelated same-title and same-subject task as a pinned occurrence', async () => {
+    rows.tasks = [{ ...task('manual', 'Review'), subject_id: 'subject-db' }];
+    rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', subject_id: 'subject-db', position: 0 }];
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Review')).toHaveLength(2));
+    expect(rows.tasks.find(row => row.id === 'manual')?.source_pinned_task_id).toBeNull();
+    expect(rows.tasks.filter(row => row.source_pinned_task_id === 'pin-db')).toHaveLength(1);
+    expect(screen.getAllByTitle('작업 고정')).toHaveLength(1);
+    expect(screen.getAllByTitle('작업 고정 해제')).toHaveLength(1);
+  });
+
+  it('unpins only the selected template and preserves daily tasks and recorded time', async () => {
+    rows.tasks = [
+      { ...task('db', 'Review'), subject_id: 'subject-db', source_pinned_task_id: 'pin-db' },
+      { ...task('bc', 'Review'), subject_id: 'subject-blockchain', source_pinned_task_id: 'pin-bc' },
+    ];
+    rows.pinned_tasks = [
+      { id: 'pin-db', user_id: 'user-1', title: 'Review', subject_id: 'subject-db', position: 0 },
+      { id: 'pin-bc', user_id: 'user-1', title: 'Review', subject_id: 'subject-blockchain', position: 1 },
+    ];
+    rows.study_sessions = [{ id: 'session', user_id: 'user-1', task_id: 'bc', duration: 600 }];
+    mount();
+    await screen.findAllByText('Review');
+    fireEvent.click(within(screen.getByText('블록체인').closest('.group') as HTMLElement).getByTitle('작업 고정 해제'));
+    await waitFor(() => expect(rows.pinned_tasks.map(row => row.id)).toEqual(['pin-db']));
+    expect(rows.tasks).toHaveLength(2);
+    expect(rows.tasks.find(row => row.id === 'db')?.source_pinned_task_id).toBe('pin-db');
+    expect(rows.tasks.find(row => row.id === 'bc')?.source_pinned_task_id).toBeNull();
+    expect(rows.study_sessions[0]).toMatchObject({ task_id: 'bc', duration: 600 });
+  });
+
+  it('editing an unpinned same-title task cannot overwrite another subject template', async () => {
+    rows.tasks = [
+      { ...task('db', 'Review'), subject_id: 'subject-db', source_pinned_task_id: 'pin-db' },
+      { ...task('bc', 'Review'), subject_id: 'subject-blockchain' },
+    ];
+    rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', subject_id: 'subject-db', position: 0 }];
+    mount();
+    await screen.findAllByText('Review');
+    fireEvent.click(within(screen.getByText('블록체인').closest('.group') as HTMLElement).getByRole('button', { name: 'Review 수정' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '작업 제목' }), { target: { value: 'Blockchain review' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
+    await screen.findByText('Blockchain review');
+    expect(rows.pinned_tasks[0]).toMatchObject({ id: 'pin-db', title: 'Review', subject_id: 'subject-db' });
+    expect(rows.tasks.find(row => row.id === 'bc')?.source_pinned_task_id).toBeNull();
+  });
+
+  it('deduplicates the canonical occurrence returned to two simultaneous views', async () => {
+    rows.tasks = [];
+    rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', subject_id: 'subject-db', position: 0 }];
+    const reads: Array<ReturnType<typeof deferred>> = [];
+    intercept = query => {
+      if (query.table === 'tasks' && query.action === 'select' && reads.length < 2) {
+        const read = deferred(); reads.push(read); return read.promise;
+      }
+    };
+    render(<><TaskList selectedDate={DAY_A} userId="user-1" /><TaskList selectedDate={DAY_A} userId="user-1" /></>);
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => { reads.forEach(read => read.resolve(success([]))); });
+    await waitFor(() => expect(screen.getAllByText('Review')).toHaveLength(2));
+    expect(rows.tasks.filter(row => row.source_pinned_task_id === 'pin-db')).toHaveLength(1);
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'materialize_pinned_tasks')).toEqual([
+      ['materialize_pinned_tasks', { p_user_id: 'user-1', p_due_date: '2026-09-06' }],
+      ['materialize_pinned_tasks', { p_user_id: 'user-1', p_due_date: '2026-09-06' }],
+    ]);
+  });
+
+  it('does not repopulate a viewed past date from current pinned templates', async () => {
+    rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', position: 0 }];
+    mount(new Date(2026, 8, 5));
+    await screen.findByText('오늘은 작업이 없어요.');
+    expect(mocks.rpc.mock.calls.some(([name]) => name === 'materialize_pinned_tasks')).toBe(false);
+  });
+
+  it('ignores repeated pin clicks until the pending transaction settles', async () => {
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const pending = deferred();
+    intercept = query => query.table === 'pinned_tasks' && query.action === 'insert' ? pending.promise : undefined;
+    const button = screen.getByTitle('작업 고정');
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(queries.filter(query => query.table === 'pinned_tasks' && query.action === 'insert')).toHaveLength(1));
+    const pin = { id: 'pin-a', title: '9월 6일 작업', user_id: 'user-1', position: 0 };
+    rows.pinned_tasks.push(pin);
+    await act(async () => pending.resolve(success(pin)));
+    expect(screen.getByTitle('작업 고정 해제')).toBeInTheDocument();
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'pin_daily_task')).toHaveLength(1);
+  });
+
+  it('refreshes source links when another tab removes a template', async () => {
+    rows.tasks[0].source_pinned_task_id = 'pin-a';
+    rows.pinned_tasks = [{ id: 'pin-a', user_id: 'user-1', title: '9월 6일 작업', position: 0 }];
+    mount();
+    await screen.findByTitle('작업 고정 해제');
+    rows.pinned_tasks = [];
+    rows.tasks[0].source_pinned_task_id = null;
+    await emit(channels.find(channel => channel.topic === 'task-list-pinned-updates')!);
+    expect(await screen.findByTitle('작업 고정')).toBeInTheDocument();
+    expect(screen.getByText('9월 6일 작업')).toBeInTheDocument();
   });
 });
