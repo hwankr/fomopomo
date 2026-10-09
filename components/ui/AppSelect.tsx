@@ -84,14 +84,16 @@ export default function AppSelect({
             onMouseDown={event => event.stopPropagation()}
             className="ui-popover z-[80] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-sm text-slate-700 shadow-lg shadow-slate-900/10 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:shadow-black/25"
             style={{
-              maxHeight: 'var(--radix-select-content-available-height)',
+              // Cap the first measurement too, and keep scroll buttons inside that cap
+              // so mounting them cannot resize the popup or flip its placement.
+              maxHeight: 'min(18rem, var(--radix-select-content-available-height, 18rem))',
               transformOrigin: 'var(--radix-select-content-transform-origin)',
             }}
           >
             <Select.ScrollUpButton className="flex h-6 items-center justify-center text-slate-400">
               <ChevronUp aria-hidden="true" className="h-4 w-4" />
             </Select.ScrollUpButton>
-            <Select.Viewport className="max-h-72 p-0.5">
+            <Select.Viewport className="min-h-0 p-0.5">
               {options.map(option => (
                 <Select.Item
                   key={option.value}
