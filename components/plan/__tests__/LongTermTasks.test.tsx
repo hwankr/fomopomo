@@ -18,17 +18,17 @@ async function chooseSubject(name: string) {
 
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({
-    subjects: [
-      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
-      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' },
-    ],
-    createSubject: vi.fn(async () => null),
+    subjects: subjectsMock,
+    createSubject: createSubjectMock,
     loading: false, error: null,
   }),
 }));
 
 
-const { supabaseMock, dragHandlers, fetchDurationsMock } = vi.hoisted(() => ({
+const { supabaseMock, dragHandlers, fetchDurationsMock, subjectsMock, createSubjectMock, toastErrorMock } = vi.hoisted(() => ({
+  subjectsMock: [] as Array<{ id: string; user_id: string; name: string }>,
+  createSubjectMock: vi.fn(),
+  toastErrorMock: vi.fn(),
   fetchDurationsMock: vi.fn(),
   dragHandlers: [] as Array<(event: DragEndEvent) => void>,
   supabaseMock: {
@@ -37,6 +37,8 @@ const { supabaseMock, dragHandlers, fetchDurationsMock } = vi.hoisted(() => ({
     removeChannel: vi.fn(),
   },
 }));
+
+vi.mock('react-hot-toast', () => ({ default: { error: toastErrorMock } }));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: supabaseMock,
@@ -67,6 +69,7 @@ type TaskRow = {
   id: string;
   title: string;
   subject_id?: string | null;
+  parent_task_id?: string | null;
   position: number;
 };
 
@@ -89,7 +92,7 @@ let subtaskUpdateResultFactories: Array<() => Promise<UpdateResult>>;
 
 // long_term_tasks.insert 결과를 한 번 가로채기 위한 훅 (중복 생성 테스트용).
 let nextTaskInsert:
-  | (() => Promise<{ data: TaskRow; error: null }>)
+  | (() => Promise<{ data: TaskRow | null; error: { code?: string; message: string } | null }>)
   | null;
 
 // true면 fetch(order()) 응답을 pendingFetchResolvers로 미뤄서
@@ -304,6 +307,15 @@ describe('LongTermTasks', () => {
   beforeEach(() => {
     window.localStorage.clear();
     fetchDurationsMock.mockReset().mockResolvedValue(new Map());
+    subjectsMock.splice(0, subjectsMock.length,
+      { id: 'subject-db', user_id: 'user-1', name: '데이터베이스' },
+      { id: 'subject-blockchain', user_id: 'user-1', name: '블록체인' });
+    createSubjectMock.mockReset().mockImplementation(async (name: string) => {
+      const created = { id: 'subject-new', user_id: 'user-1', name };
+      subjectsMock.push(created);
+      return created;
+    });
+    toastErrorMock.mockReset();
 
     longTermTasks = [{ id: 'task-1', title: '빅데이터분석기사', position: 0 }];
     subtasks = [
@@ -358,7 +370,7 @@ describe('LongTermTasks', () => {
         })),
       })),
       insert: vi.fn(
-        (payload: { user_id: string; title: string; position: number; subject_id: string | null }) => ({
+        (payload: { user_id: string; title: string; position: number; subject_id: string | null; parent_task_id?: string | null }) => ({
           select: vi.fn(() => ({
             single: vi.fn(async () => {
               if (nextTaskInsert) {
@@ -370,6 +382,7 @@ describe('LongTermTasks', () => {
                 id: `task-${longTermTasks.length + 1}`,
                 title: payload.title,
                 subject_id: payload.subject_id,
+                parent_task_id: payload.parent_task_id ?? null,
                 position: payload.position,
               };
               longTermTasks = [...longTermTasks, created];
@@ -388,9 +401,10 @@ describe('LongTermTasks', () => {
       })),
       delete: vi.fn(() => ({
         eq: vi.fn(async (_field: string, id: string) => {
-          longTermTasks = longTermTasks.filter((task) => task.id !== id);
+          const deletedIds = new Set(longTermTasks.filter((task) => task.id === id || task.parent_task_id === id).map((task) => task.id));
+          longTermTasks = longTermTasks.filter((task) => !deletedIds.has(task.id));
           subtasks = subtasks.filter(
-            (subtask) => subtask.long_term_task_id !== id
+            (subtask) => !deletedIds.has(subtask.long_term_task_id)
           );
           return { error: null };
         }),
@@ -467,6 +481,205 @@ describe('LongTermTasks', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     cleanup();
+  });
+
+  const addCourseFixture = (overrides: Partial<TaskRow> = {}) => {
+    const child = { id: 'course-1', title: '데이터베이스', subject_id: 'subject-db', parent_task_id: 'task-1', position: 0, ...overrides };
+    longTermTasks.push(child);
+    return child;
+  };
+
+  const chooseGroupSubject = async (name: string) => {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: '추가할 과목' }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name }));
+  };
+
+  it('creates a name-only project with no required subject or details', async () => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '코딩테스트' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('코딩테스트');
+    expect(tasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ title: '코딩테스트', subject_id: null, parent_task_id: null }));
+    expect(within(getRowForTitle('코딩테스트')).queryByText(/\d+\/\d+/)).not.toBeInTheDocument();
+  });
+
+  it('nests subject rows only once, combines direct and subject progress, and uses the rolled-up duration once', async () => {
+    addCourseFixture();
+    subtasks.push({ id: 'course-subtask', long_term_task_id: 'course-1', title: '정규화 복습', position: 0, completed_at: null });
+    fetchDurationsMock.mockResolvedValue(new Map([['task-1', 1800], ['course-1', 600]]));
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    const courses = screen.getByRole('group', { name: '빅데이터분석기사 과목' });
+    expect(within(courses).getByText('데이터베이스')).toBeInTheDocument();
+    expect(screen.getAllByText('데이터베이스')).toHaveLength(1);
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('1/3')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 30m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('데이터베이스')).getByText('누적 10m 0s')).toBeInTheDocument();
+    expect(within(courses).queryByRole('button', { name: '과목 추가' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '데이터베이스 접기' }));
+    expect(screen.getByText('정규화 복습')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '데이터베이스 펼치기' }));
+    fireEvent.click(within(getRowForTitle('정규화 복습')).getAllByRole('button')[SUBTASK_TOGGLE]);
+    await waitFor(() => expect(within(getRowForTitle('빅데이터분석기사')).getByText('2/3')).toBeInTheDocument());
+  });
+
+  it('adds an empty subject group and later adds a detail inside it', async () => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    expect(screen.getByRole('button', { name: '과목 추가' })).toBeDisabled();
+    await chooseGroupSubject('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await screen.findByRole('button', { name: '데이터베이스 접기' });
+    expect(tasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ title: '데이터베이스', subject_id: 'subject-db', parent_task_id: 'task-1', position: 0 }));
+    expect(within(getRowForTitle('데이터베이스')).queryByText(/\d+\/\d+/)).not.toBeInTheDocument();
+    const group = screen.getByRole('group', { name: '빅데이터분석기사 과목' });
+    fireEvent.click(within(group).getByRole('button', { name: '세부 할 일 추가' }));
+    fireEvent.change(screen.getByPlaceholderText('세부 할 일을 입력하세요'), { target: { value: 'SQL 문제 풀이' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    expect(await screen.findByText('SQL 문제 풀이')).toBeInTheDocument();
+    expect(subtasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ title: 'SQL 문제 풀이', long_term_task_id: 'task-2' }));
+  });
+
+  it('creates a shared subject inline before linking it to the project', async () => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ 새 과목' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '새 과목 이름' }), { target: { value: '알고리즘' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '추가할 과목' })).toHaveTextContent('알고리즘'));
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await screen.findByRole('button', { name: '알고리즘 접기' });
+    expect(createSubjectMock).toHaveBeenCalledWith('알고리즘');
+    expect(tasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ subject_id: 'subject-new', parent_task_id: 'task-1' }));
+  });
+
+  it('rejects duplicate subjects within one project but allows the same subject in another project', async () => {
+    addCourseFixture();
+    longTermTasks.push({ id: 'exam-2', title: '기말고사', position: 1 });
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getAllByRole('button', { name: '과목 추가' })[0]);
+    await chooseGroupSubject('데이터베이스');
+    fireEvent.click(screen.getAllByRole('button', { name: '과목 추가' })[0]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('이미 이 장기 과제에 추가된 과목입니다.');
+    expect(tasksTable.insert).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '과목 추가' })[1]);
+    await chooseGroupSubject('데이터베이스');
+    fireEvent.click(screen.getAllByRole('button', { name: '과목 추가' })[1]);
+    await waitFor(() => expect(longTermTasks.filter((task) => task.subject_id === 'subject-db')).toHaveLength(2));
+    expect(tasksTable.insert).toHaveBeenCalledWith(expect.objectContaining({ subject_id: 'subject-db', parent_task_id: 'exam-2' }));
+  });
+
+  it('keeps a failed subject draft available for retry and prevents duplicate pending writes', async () => {
+    const pending = createDeferred<{ data: TaskRow | null; error: { code: string; message: string } | null }>();
+    nextTaskInsert = () => pending.promise;
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await chooseGroupSubject('데이터베이스');
+    const add = screen.getByRole('button', { name: '과목 추가' });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    expect(tasksTable.insert).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '추가 중…' })).toBeDisabled();
+    await act(async () => pending.resolve({ data: null, error: { code: '23505', message: 'duplicate' } }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('이미 이 장기 과제에 추가된 과목입니다.');
+    expect(screen.getByRole('combobox', { name: '추가할 과목' })).toHaveTextContent('데이터베이스');
+    await chooseGroupSubject('블록체인');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await screen.findByRole('button', { name: '블록체인 접기' });
+  });
+
+  it('preserves a newly created subject group against a stale refetch', async () => {
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await chooseGroupSubject('데이터베이스');
+    deferFetch = true;
+    await fireRealtime('long-term-task-updates');
+    // Loading hides the list, so finish the write started from the form before the stale read.
+    const snapshot = pendingFetchResolvers.shift()!;
+    await act(async () => snapshot());
+    await screen.findByText('빅데이터분석기사');
+    const inserted = createDeferred<{ data: TaskRow; error: null }>();
+    nextTaskInsert = () => inserted.promise;
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await fireRealtime('long-term-task-updates');
+    await act(async () => inserted.resolve({ data: { id: 'course-new', title: '데이터베이스', subject_id: 'subject-db', parent_task_id: 'task-1', position: 0 }, error: null }));
+    await screen.findByRole('button', { name: '데이터베이스 접기' });
+    await act(async () => pendingFetchResolvers.splice(0).forEach((resolve) => resolve()));
+    expect(screen.getByRole('button', { name: '데이터베이스 접기' })).toBeInTheDocument();
+  });
+
+  it('drops an old subject insert and preserves the next owner form after A to B to A', async () => {
+    const pending = createDeferred<{ data: TaskRow; error: null }>();
+    nextTaskInsert = () => pending.promise;
+    const { rerender } = renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await chooseGroupSubject('데이터베이스');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    rerender(<LongTermTasks userId="user-2" />);
+    await screen.findByText('빅데이터분석기사');
+    rerender(<LongTermTasks userId="user-1" />);
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '과목 추가' }));
+    await chooseGroupSubject('블록체인');
+    await act(async () => pending.resolve({ data: { id: 'old-course', title: '데이터베이스', subject_id: 'subject-db', parent_task_id: 'task-1', position: 0 }, error: null }));
+    expect(screen.queryByRole('button', { name: '데이터베이스 접기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '추가할 과목' })).toHaveTextContent('블록체인');
+    expect(screen.getByRole('button', { name: '과목 추가' })).toBeEnabled();
+  });
+
+  it('prevents changing a subject row to unclassified or a duplicate sibling', async () => {
+    addCourseFixture();
+    addCourseFixture({ id: 'course-2', title: '블록체인', subject_id: 'subject-blockchain', position: 1 });
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '데이터베이스 수정' }));
+    await chooseSubject('미분류');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 저장' }));
+    expect(toastErrorMock).toHaveBeenLastCalledWith('과목 항목에는 과목을 지정해주세요.');
+    await chooseSubject('블록체인');
+    fireEvent.click(screen.getByRole('button', { name: '장기 과제 저장' }));
+    expect(toastErrorMock).toHaveBeenLastCalledWith('이미 이 장기 과제에 추가된 과목입니다.');
+    expect(tasksTable.update).not.toHaveBeenCalled();
+  });
+
+  it('confirms descendant counts and removes a project with its subjects and details', async () => {
+    addCourseFixture();
+    subtasks.push({ id: 'course-subtask', long_term_task_id: 'course-1', title: '정규화 복습', position: 0, completed_at: null });
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '빅데이터분석기사 삭제' }));
+    expect(screen.getByText(/포함된 과목 1개와 세부 할 일 3개도 함께 삭제됩니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.queryByText('빅데이터분석기사')).not.toBeInTheDocument());
+    expect(screen.queryByText('데이터베이스')).not.toBeInTheDocument();
+    expect(screen.queryByText('정규화 복습')).not.toBeInTheDocument();
+    expect(longTermTasks).toHaveLength(0);
+  });
+
+  it('removes only the chosen subject and leaves its project and sibling intact', async () => {
+    addCourseFixture();
+    addCourseFixture({ id: 'course-2', title: '블록체인', subject_id: 'subject-blockchain', position: 1 });
+    subtasks.push({ id: 'course-subtask', long_term_task_id: 'course-1', title: '정규화 복습', position: 0, completed_at: null });
+    renderTasks();
+    await screen.findByText('빅데이터분석기사');
+    fireEvent.click(screen.getByRole('button', { name: '데이터베이스 삭제' }));
+    expect(screen.getByText('과목 항목 삭제')).toBeInTheDocument();
+    expect(screen.getByText(/포함된 세부 할 일 1개도 함께 삭제됩니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.queryByText('데이터베이스')).not.toBeInTheDocument());
+    expect(screen.getByText('빅데이터분석기사')).toBeInTheDocument();
+    expect(screen.getByText('블록체인')).toBeInTheDocument();
+    expect(screen.getByText('챕터 1')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('1/2')).toBeInTheDocument();
   });
 
   it('renders long term tasks with chapter progress', async () => {
@@ -619,7 +832,7 @@ describe('LongTermTasks', () => {
 
     expect(
       screen.getByText(
-        '이 장기 과제를 삭제할까요? 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
+        '이 장기 과제를 삭제할까요? 포함된 세부 할 일 2개도 함께 삭제됩니다. 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
       )
     ).toBeInTheDocument();
 
@@ -640,7 +853,7 @@ describe('LongTermTasks', () => {
 
     expect(
       screen.getByText(
-        '이 장기 과제를 삭제할까요? 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
+        '이 장기 과제를 삭제할까요? 포함된 세부 할 일 2개도 함께 삭제됩니다. 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
       )
     ).toBeInTheDocument();
 
@@ -648,7 +861,7 @@ describe('LongTermTasks', () => {
 
     expect(
       screen.queryByText(
-        '이 장기 과제를 삭제할까요? 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
+        '이 장기 과제를 삭제할까요? 포함된 세부 할 일 2개도 함께 삭제됩니다. 이미 만들어진 일일 작업과 공부 기록은 남습니다.'
       )
     ).not.toBeInTheDocument();
     expect(screen.getByText('빅데이터분석기사')).toBeInTheDocument();

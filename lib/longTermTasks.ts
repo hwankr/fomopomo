@@ -25,6 +25,7 @@ export type LongTermTaskRow = {
   id: string;
   title: string;
   subject_id: string | null;
+  parent_task_id?: string | null;
   position: number | null;
   long_term_subtasks: LongTermSubtaskSelectRow[] | null;
 };
@@ -33,10 +34,50 @@ export type LongTermTaskItem = {
   id: string;
   title: string;
   subject_id: string | null;
+  parent_task_id?: string | null;
   position: number;
   subtasks: LongTermSubtaskItem[];
   durationSeconds?: number;
 };
+
+// Keep the fetched list flat so existing mutations and timer materialization
+// continue to address a task by its stable ID. Only presentation is hierarchical.
+export function getLongTermTaskRoots(tasks: readonly LongTermTaskItem[]): LongTermTaskItem[] {
+  return tasks.filter((task) => !task.parent_task_id);
+}
+
+export function getLongTermTaskChildren(
+  tasks: readonly LongTermTaskItem[],
+  parentId: string
+): LongTermTaskItem[] {
+  return tasks.filter((task) => task.parent_task_id === parentId);
+}
+
+export function getLongTermTaskBreadcrumb(
+  task: LongTermTaskItem,
+  tasks: readonly LongTermTaskItem[]
+): string {
+  const parent = task.parent_task_id
+    ? tasks.find((item) => item.id === task.parent_task_id)
+    : undefined;
+  return parent ? `${parent.title} › ${task.title}` : task.title;
+}
+
+export function getLongTermTaskProgress(
+  task: LongTermTaskItem,
+  tasks: readonly LongTermTaskItem[]
+): { completedCount: number; totalCount: number } {
+  const items = task.parent_task_id
+    ? [task]
+    : [task, ...getLongTermTaskChildren(tasks, task.id)];
+  let completedCount = 0;
+  let totalCount = 0;
+  for (const item of items) {
+    totalCount += item.subtasks.length;
+    completedCount += item.subtasks.filter((subtask) => subtask.completed_at !== null).length;
+  }
+  return { completedCount, totalCount };
+}
 
 export type MaterializedTaskRow = {
   id: string;

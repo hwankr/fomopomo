@@ -42,6 +42,9 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
 import {
   fetchLongTermTaskDurations,
+  getLongTermTaskChildren,
+  getLongTermTaskProgress,
+  getLongTermTaskRoots,
   toggleSubtaskCompletion,
   type LongTermSubtaskItem,
   type LongTermTaskItem,
@@ -53,7 +56,7 @@ interface LongTermTasksProps {
   userId: string;
 }
 
-const TASK_SELECT = 'id, title, position, subject_id';
+const TASK_SELECT = 'id, title, position, subject_id, parent_task_id';
 const SUBTASK_SELECT = 'id, title, position, completed_at';
 
 const normalizeTaskRows = (
@@ -63,6 +66,7 @@ const normalizeTaskRows = (
     id: row.id,
     title: row.title,
     subject_id: row.subject_id ?? null,
+    parent_task_id: row.parent_task_id ?? null,
     position: row.position ?? 0,
     subtasks: (row.long_term_subtasks ?? [])
       .map((subtask) => ({ ...subtask, position: subtask.position ?? 0 }))
@@ -295,6 +299,12 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     null
   );
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [addingSubjectTaskId, setAddingSubjectTaskId] = useState<string | null>(null);
+  const [newGroupSubjectId, setNewGroupSubjectId] = useState<string | null>(null);
+  const [subjectGroupError, setSubjectGroupError] = useState<string | null>(null);
+  const [isAddingSubject, setIsAddingSubject] = useState(false);
+  const pendingSubjectRef = useRef(false);
+  const [collapsedSubjectIds, setCollapsedSubjectIds] = useState<Set<string>>(() => new Set());
   // 요청 세대 번호. 늦게 도착한 이전 refetch 응답이 더 새로운 상태를
   // 덮어쓰지 못하도록 fetchTasks가 응답 적용 전에 최신 세대인지 확인한다.
   // 로컬 변경(생성·이름 변경·삭제·토글·정렬)을 커밋하는 쪽도 커밋 시점에
@@ -331,6 +341,12 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     setEditedSubjectId(null);
     setAddingSubtaskTaskId(null);
     setNewSubtaskTitle('');
+    setAddingSubjectTaskId(null);
+    setNewGroupSubjectId(null);
+    setSubjectGroupError(null);
+    setIsAddingSubject(false);
+    pendingSubjectRef.current = false;
+    setCollapsedSubjectIds(new Set());
     pendingSubtaskIdsRef.current = new Set();
     setPendingSubtaskIds(new Set());
   }
@@ -476,8 +492,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
       return;
     }
 
+    const roots = getLongTermTaskRoots(tasks);
     const maxPosition =
-      tasks.length > 0 ? Math.max(...tasks.map((task) => task.position)) : -1;
+      roots.length > 0 ? Math.max(...roots.map((task) => task.position)) : -1;
 
     const { data, error } = await supabase
       .from('long_term_tasks')
@@ -485,6 +502,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         user_id: userId,
         title: newTaskTitle.trim(),
         subject_id: newSubjectId,
+        parent_task_id: null,
         position: maxPosition + 1,
       })
       .select(TASK_SELECT)
@@ -500,9 +518,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     const createdRow = data as Pick<
       LongTermTaskRow,
-      'id' | 'title' | 'position' | 'subject_id'
+      'id' | 'title' | 'position' | 'subject_id' | 'parent_task_id'
     >;
-    const createdTask = { ...createdRow, subject_id: createdRow.subject_id ?? null, position: createdRow.position ?? 0 };
+    const createdTask = { ...createdRow, subject_id: createdRow.subject_id ?? null, parent_task_id: createdRow.parent_task_id ?? null, position: createdRow.position ?? 0 };
     if (createdTask.subject_id) notifyStudySubjectsChanged();
     // 진행 중인 이전 refetch가 방금 만든 과제를 지우지 못하게 세대를 올리고,
     // 실시간 refetch가 이미 반영했을 수 있으니 id 기준으로 업서트한다.
@@ -518,6 +536,68 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     setNewTaskTitle('');
     resetSubject();
     setIsAdding(false);
+  };
+
+  const addSubjectGroup = async (event: React.FormEvent, parentId: string) => {
+    event.preventDefault();
+    const generation = lifecycleGenerationRef.current;
+    if (!isCurrentScope(generation) || pendingSubjectRef.current || !userId) return;
+    const subject = subjects.find((item) => item.id === newGroupSubjectId);
+    const parent = tasks.find((task) => task.id === parentId && !task.parent_task_id);
+    if (!subject || !parent) {
+      setSubjectGroupError('추가할 과목을 선택해주세요.');
+      return;
+    }
+    const children = getLongTermTaskChildren(tasks, parentId);
+    if (children.some((task) => task.subject_id === subject.id)) {
+      setSubjectGroupError('이미 이 장기 과제에 추가된 과목입니다.');
+      return;
+    }
+    pendingSubjectRef.current = true;
+    setIsAddingSubject(true);
+    setSubjectGroupError(null);
+    try {
+      const { data, error } = await supabase
+        .from('long_term_tasks')
+        .insert({
+          user_id: userId,
+          title: subject.name,
+          subject_id: subject.id,
+          parent_task_id: parentId,
+          position: children.length ? Math.max(...children.map((task) => task.position)) + 1 : 0,
+        })
+        .select(TASK_SELECT)
+        .single();
+      if (!isCurrentScope(generation)) return;
+      if (error) {
+        setSubjectGroupError(error.code === '23505'
+          ? '이미 이 장기 과제에 추가된 과목입니다.'
+          : '과목을 추가하지 못했습니다. 다시 시도해주세요.');
+        return;
+      }
+      const created = normalizeTaskRows([{ ...data, long_term_subtasks: [] } as LongTermTaskRow])[0];
+      fetchEpochRef.current += 1;
+      setTasks((current) => {
+        // A parent can be removed by a concurrent realtime update while this write settles.
+        if (!current.some((task) => task.id === parentId)) return current;
+        return current.some((task) => task.id === created.id)
+          ? current.map((task) => task.id === created.id ? { ...task, ...created, subtasks: task.subtasks } : task)
+          : [...current, { ...created, durationSeconds: 0 }];
+      });
+      setLoading(false);
+      setAddingSubjectTaskId(null);
+      setNewGroupSubjectId(null);
+      notifyStudySubjectsChanged();
+    } catch (error) {
+      if (!isCurrentScope(generation)) return;
+      console.error('Error adding long term subject group:', error);
+      setSubjectGroupError('과목을 추가하지 못했습니다. 다시 시도해주세요.');
+    } finally {
+      if (isCurrentScope(generation)) {
+        pendingSubjectRef.current = false;
+        setIsAddingSubject(false);
+      }
+    }
   };
 
   const startEditing = (task: LongTermTaskItem) => {
@@ -542,6 +622,18 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     const nextTitle = editedTitle.trim();
     const originalTask = tasks.find((task) => task.id === editingTaskId);
+    if (originalTask?.parent_task_id) {
+      if (!editedSubjectId) {
+        toast.error('과목 항목에는 과목을 지정해주세요.');
+        return;
+      }
+      if (getLongTermTaskChildren(tasks, originalTask.parent_task_id).some(
+        (task) => task.id !== originalTask.id && task.subject_id === editedSubjectId
+      )) {
+        toast.error('이미 이 장기 과제에 추가된 과목입니다.');
+        return;
+      }
+    }
     if (originalTask?.title === nextTitle && originalTask.subject_id === editedSubjectId) {
       cancelEditing();
       return;
@@ -569,7 +661,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     if (error) {
       console.error('Error updating long term task:', error);
-      toast.error('장기 과제를 저장하지 못했습니다. 다시 시도해주세요.');
+      toast.error(error.code === '23505'
+        ? '이미 이 장기 과제에 추가된 과목입니다.'
+        : '장기 과제를 저장하지 못했습니다. 다시 시도해주세요.');
       void fetchTasks(generation);
     } else if (originalTask?.subject_id !== nextSubjectId) {
       notifyStudySubjectsChanged();
@@ -591,13 +685,14 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     if (error) {
       console.error('Error deleting long term task:', error);
+      toast.error('장기 과제를 삭제하지 못했습니다. 다시 시도해주세요.');
       return;
     }
 
     // 삭제 전에 시작된 refetch가 지운 과제를 되살리지 못하게 한다.
     fetchEpochRef.current += 1;
     setTasks((currentTasks) =>
-      currentTasks.filter((task) => task.id !== taskId)
+      currentTasks.filter((task) => task.id !== taskId && task.parent_task_id !== taskId)
     );
     setLoading(false);
   };
@@ -830,6 +925,244 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     }
   };
 
+  const renderTask = (task: LongTermTaskItem, nested = false): React.ReactNode => {
+    const { totalCount, completedCount } = getLongTermTaskProgress(task, tasks);
+    const children = nested ? [] : getLongTermTaskChildren(tasks, task.id);
+    const isCollapsed = nested && collapsedSubjectIds.has(task.id);
+    const progressPercent =
+      totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
+    return (
+      <div
+        key={task.id}
+        data-long-term-task={task.id}
+        className={nested
+          ? 'min-w-0 border-l-2 border-emerald-200 py-2 pl-3 dark:border-emerald-800'
+          : 'min-w-0 rounded-xl border border-transparent bg-emerald-50 p-3 transition-all hover:border-emerald-200 dark:bg-emerald-900/20 dark:hover:border-emerald-800'}
+      >
+        <div className="group flex items-center gap-3 max-sm:flex-wrap max-sm:gap-2">
+          {editingTaskId === task.id ? (
+            <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 max-sm:basis-full max-sm:justify-end">
+              <input
+                type="text"
+                aria-label="장기 과제 제목"
+                value={editedTitle}
+                onChange={(event) =>
+                  setEditedTitle(event.target.value)
+                }
+                onKeyDown={handleEditKeyDown}
+                className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                autoFocus
+              />
+              <div className="min-w-0 max-w-full max-sm:basis-full">
+                <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
+              </div>
+              <button
+                onClick={() => void updateTask()}
+                aria-label="장기 과제 저장"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+              >
+                <Check className="h-4 w-4" />
+              </button>
+              <button
+                onClick={cancelEditing}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <span className="min-w-0 flex-1 text-sm font-bold text-gray-700 max-sm:basis-full dark:text-gray-200">
+              {nested ? (
+                <button
+                  type="button"
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`long-term-details-${task.id}`}
+                  aria-label={`${task.title} ${isCollapsed ? '펼치기' : '접기'}`}
+                  onClick={() => setCollapsedSubjectIds((current) => {
+                    const next = new Set(current);
+                    if (next.has(task.id)) next.delete(task.id);
+                    else next.add(task.id);
+                    return next;
+                  })}
+                  className="flex max-w-full items-start gap-1.5 text-left"
+                >
+                  <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 transition-transform', isCollapsed && '-rotate-90')} />
+                  <span title={task.title} className="min-w-0 break-words">{task.title}</span>
+                </button>
+              ) : <span title={task.title} className="block break-words max-sm:line-clamp-2">{task.title}</span>}
+              {(!nested || subjects.find((subject) => subject.id === task.subject_id)?.name !== task.title) && <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
+                {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
+              </span>}
+              <span className="mt-1 block text-xs font-normal text-emerald-700 dark:text-emerald-300">
+                {task.durationSeconds === undefined
+                  ? '누적 시간 조회 실패'
+                  : `누적 ${formatDuration(task.durationSeconds)}`}
+              </span>
+            </span>
+          )}
+
+          <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:gap-2">
+            {totalCount > 0 && (
+              <span className="whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
+                {`${completedCount}/${totalCount}`}
+              </span>
+            )}
+
+            {editingTaskId !== task.id && (
+              <button
+                onClick={() => startEditing(task)}
+                aria-label={`${task.title} 수정`}
+                className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
+
+            <button
+              onClick={() => setDeletingTaskId(task.id)}
+              aria-label={`${task.title} 삭제`}
+              className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {totalCount > 0 && (
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        )}
+
+        <div id={`long-term-details-${task.id}`} hidden={isCollapsed}>
+          {task.subtasks.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(event) =>
+                  void handleSubtaskDragEnd(task.id, event)
+                }
+              >
+                <SortableContext
+                  items={task.subtasks.map((subtask) => subtask.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {task.subtasks.map((subtask) => (
+                    <SortableSubtaskItem
+                      key={subtask.id}
+                      subtask={subtask}
+                      isTogglePending={pendingSubtaskIds.has(
+                        subtask.id
+                      )}
+                      toggleSubtask={(currentSubtask) =>
+                        void toggleSubtask(currentSubtask)
+                      }
+                      updateSubtask={(subtaskId, title) =>
+                        void updateSubtask(subtaskId, title)
+                      }
+                      deleteSubtask={(subtaskId) =>
+                        setDeletingSubtaskId(subtaskId)
+                      }
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+            </div>
+          )}
+
+          {children.length > 0 && (
+            <div className="mt-3 space-y-2" role="group" aria-label={`${task.title} 과목`}>
+              {children.map((child) => renderTask(child, true))}
+            </div>
+          )}
+
+          <div className="mt-3">
+            {addingSubtaskTaskId === task.id ? (
+              <form
+                onSubmit={(event) => void addSubtask(event, task.id)}
+                className="flex min-w-0 flex-col gap-2"
+              >
+                <input
+                  type="text"
+                  value={newSubtaskTitle}
+                  onChange={(event) =>
+                    setNewSubtaskTitle(event.target.value)
+                  }
+                  placeholder="세부 할 일을 입력하세요"
+                  className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddingSubtaskTaskId(null)}
+                    className="rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newSubtaskTitle.trim()}
+                    className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    추가
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => {
+                  setAddingSubtaskTaskId(task.id);
+                  setNewSubtaskTitle('');
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-200 py-2 text-xs font-medium text-gray-400 transition-all hover:border-emerald-300 hover:text-emerald-500 dark:border-emerald-800 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                세부 할 일 추가
+              </button>
+            )}
+          </div>
+          {!nested && (
+            addingSubjectTaskId === task.id ? (
+              <form onSubmit={(event) => void addSubjectGroup(event, task.id)} className="mt-3 min-w-0 space-y-2">
+                <SubjectSelect
+                  subjects={subjects}
+                  value={newGroupSubjectId}
+                  onChange={(id) => { setNewGroupSubjectId(id); setSubjectGroupError(null); }}
+                  onCreate={createSubject}
+                  disabled={isAddingSubject}
+                  label="추가할 과목"
+                />
+                {subjectGroupError && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{subjectGroupError}</p>}
+                <div className="flex justify-end gap-2">
+                  <button type="button" disabled={isAddingSubject}
+                    onClick={() => { setAddingSubjectTaskId(null); setNewGroupSubjectId(null); setSubjectGroupError(null); }}
+                    className="rounded-lg px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-800">취소</button>
+                  <button type="submit" disabled={!newGroupSubjectId || isAddingSubject}
+                    className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
+                    {isAddingSubject ? '추가 중…' : '과목 추가'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button type="button"
+                disabled={isAddingSubject}
+                onClick={() => { setAddingSubjectTaskId(task.id); setNewGroupSubjectId(null); setSubjectGroupError(null); }}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-emerald-600 hover:bg-emerald-100 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
+                <Plus className="h-3.5 w-3.5" />과목 추가
+              </button>
+            )
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex min-w-0 flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 sm:p-6 dark:border-gray-700 dark:bg-gray-800">
       <div
@@ -842,7 +1175,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
             장기 과제
           </h2>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            기간 없이 꾸준히 할 공부도 등록하세요. 타이머의 Task list에서 장기 과제를 고르면 그날 기록과 누적 시간에 함께 쌓여요.
+            이름만 등록하고 타이머에서 바로 공부하세요. 필요하면 과목과 세부 할 일을 추가할 수 있어요.
           </p>
         </div>
         <div className="text-gray-400 lg:hidden">
@@ -876,184 +1209,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
               )}
             </div>
           ) : (
-            tasks.map((task) => {
-              const totalCount = task.subtasks.length;
-              const completedCount = task.subtasks.filter(
-                (subtask) => subtask.completed_at
-              ).length;
-              const progressPercent =
-                totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-
-              return (
-                <div
-                  key={task.id}
-                  className="rounded-xl border border-transparent bg-emerald-50 p-3 transition-all hover:border-emerald-200 dark:bg-emerald-900/20 dark:hover:border-emerald-800"
-                >
-                  <div className="group flex items-center gap-3 max-sm:flex-wrap max-sm:gap-2">
-                    {editingTaskId === task.id ? (
-                      <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 max-sm:basis-full max-sm:justify-end">
-                        <input
-                          type="text"
-                          aria-label="장기 과제 제목"
-                          value={editedTitle}
-                          onChange={(event) =>
-                            setEditedTitle(event.target.value)
-                          }
-                          onKeyDown={handleEditKeyDown}
-                          className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                          autoFocus
-                        />
-                        <div className="min-w-0 max-w-full max-sm:basis-full">
-                          <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
-                        </div>
-                        <button
-                          onClick={() => void updateTask()}
-                          aria-label="장기 과제 저장"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={cancelEditing}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="min-w-0 flex-1 text-sm font-bold text-gray-700 max-sm:basis-full dark:text-gray-200">
-                        <span title={task.title} className="block break-words max-sm:line-clamp-2">{task.title}</span>
-                        <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
-                          {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
-                        </span>
-                        <span className="mt-1 block text-xs font-normal text-emerald-700 dark:text-emerald-300">
-                          {task.durationSeconds === undefined
-                            ? '누적 시간 조회 실패'
-                            : `누적 ${formatDuration(task.durationSeconds)}`}
-                        </span>
-                      </span>
-                    )}
-
-                    <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:gap-2">
-                      {totalCount > 0 && (
-                        <span className="whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
-                          {`${completedCount}/${totalCount}`}
-                        </span>
-                      )}
-
-                      {editingTaskId !== task.id && (
-                        <button
-                          onClick={() => startEditing(task)}
-                          aria-label={`${task.title} 수정`}
-                          className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setDeletingTaskId(task.id)}
-                        className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {totalCount > 0 && (
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/40">
-                      <div
-                        className="h-full rounded-full bg-emerald-500 transition-all duration-300"
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                  )}
-
-                  {totalCount > 0 && (
-                    <div className="mt-3 space-y-2">
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={(event) =>
-                          void handleSubtaskDragEnd(task.id, event)
-                        }
-                      >
-                        <SortableContext
-                          items={task.subtasks.map((subtask) => subtask.id)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          {task.subtasks.map((subtask) => (
-                            <SortableSubtaskItem
-                              key={subtask.id}
-                              subtask={subtask}
-                              isTogglePending={pendingSubtaskIds.has(
-                                subtask.id
-                              )}
-                              toggleSubtask={(currentSubtask) =>
-                                void toggleSubtask(currentSubtask)
-                              }
-                              updateSubtask={(subtaskId, title) =>
-                                void updateSubtask(subtaskId, title)
-                              }
-                              deleteSubtask={(subtaskId) =>
-                                setDeletingSubtaskId(subtaskId)
-                              }
-                            />
-                          ))}
-                        </SortableContext>
-                      </DndContext>
-                    </div>
-                  )}
-
-                  <div className="mt-3">
-                    {addingSubtaskTaskId === task.id ? (
-                      <form
-                        onSubmit={(event) => void addSubtask(event, task.id)}
-                        className="flex min-w-0 flex-col gap-2"
-                      >
-                        <input
-                          type="text"
-                          value={newSubtaskTitle}
-                          onChange={(event) =>
-                            setNewSubtaskTitle(event.target.value)
-                          }
-                          placeholder="세부 할 일을 입력하세요"
-                          className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                          autoFocus
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setAddingSubtaskTaskId(null)}
-                            className="rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
-                          >
-                            취소
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={!newSubtaskTitle.trim()}
-                            className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            추가
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setAddingSubtaskTaskId(task.id);
-                          setNewSubtaskTitle('');
-                        }}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-200 py-2 text-xs font-medium text-gray-400 transition-all hover:border-emerald-300 hover:text-emerald-500 dark:border-emerald-800 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        세부 할 일 추가
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
+            getLongTermTaskRoots(tasks).map((task) => renderTask(task))
           )}
         </div>
 
@@ -1069,7 +1225,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                 autoFocus
               />
               <SubjectSelect subjects={subjects} value={newSubjectId} onChange={selectSubject} onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} />
-              <p className="text-xs text-gray-500">세부 할 일을 공부할 때 이 과목으로 기록됩니다.</p>
+              <p className="text-xs text-gray-500">과목은 선택 사항이에요. 직접 공부하거나 세부 할 일을 할 때 이 과목으로 기록됩니다.</p>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
@@ -1107,8 +1263,15 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         isOpen={!!deletingTaskId}
         onClose={() => setDeletingTaskId(null)}
         onConfirm={confirmDeleteTask}
-        title="장기 과제 삭제"
-        message="이 장기 과제를 삭제할까요? 이미 만들어진 일일 작업과 공부 기록은 남습니다."
+        title={tasks.find((task) => task.id === deletingTaskId)?.parent_task_id ? '과목 항목 삭제' : '장기 과제 삭제'}
+        message={(() => {
+          const deletingTask = tasks.find((task) => task.id === deletingTaskId);
+          if (!deletingTask) return '';
+          const childCount = getLongTermTaskChildren(tasks, deletingTask.id).length;
+          const { totalCount } = getLongTermTaskProgress(deletingTask, tasks);
+          const contained = [childCount ? `과목 ${childCount}개` : '', totalCount ? `세부 할 일 ${totalCount}개` : ''].filter(Boolean).join('와 ');
+          return `이 ${deletingTask.parent_task_id ? '과목 항목을' : '장기 과제를'} 삭제할까요? ${contained ? `포함된 ${contained}도 함께 삭제됩니다. ` : ''}이미 만들어진 일일 작업과 공부 기록은 남습니다.`;
+        })()}
         confirmText="삭제"
         cancelText="취소"
         isDangerous={true}

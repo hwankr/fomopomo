@@ -22,6 +22,8 @@ insert into public.study_sessions (id, user_id, duration, mode, task_id, created
 drop function public.get_long_term_task_durations();
 drop trigger snapshot_long_term_task_on_study_session_insert on public.study_sessions;
 drop function public.snapshot_study_session_long_term_task();
+-- The newer project rollup snapshot also references the legacy composite key.
+alter table public.study_sessions drop column long_term_project_id;
 alter table public.study_sessions drop column long_term_task_id;
 alter table public.tasks drop column source_long_term_task_id;
 alter table public.long_term_tasks drop constraint long_term_tasks_id_user_id_key;

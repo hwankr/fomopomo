@@ -10,6 +10,7 @@ import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { notifyStudySubjectsChanged, STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import {
   fetchLongTermTaskDurations,
+  getLongTermTaskBreadcrumb,
   materializeLongTermTaskForToday,
   materializeSubtaskForToday,
   toggleSubtaskCompletion,
@@ -184,7 +185,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       const { data: longTermData, error: longTermError } = await supabase
         .from('long_term_tasks')
         .select(
-          'id, title, position, subject_id, long_term_subtasks(id, title, position, completed_at)'
+          'id, title, position, subject_id, parent_task_id, long_term_subtasks(id, title, position, completed_at)'
         )
         .eq('user_id', user.id)
         .is('archived_at', null)
@@ -206,6 +207,7 @@ export const useTasks = (isLoggedIn: boolean) => {
         title: task.title,
         position: task.position ?? 0,
         subject_id: task.subject_id ?? null,
+        parent_task_id: task.parent_task_id ?? null,
         durationSeconds: longTermDurations ? longTermDurations.get(task.id) ?? 0 : undefined,
         subtasks: (task.long_term_subtasks ?? [])
           .map((subtask) => ({
@@ -222,9 +224,10 @@ export const useTasks = (isLoggedIn: boolean) => {
       const parentTitleBySubtaskId = new Map<string, string>();
       const parentTitleByTaskId = new Map<string, string>();
       for (const longTermTask of longTermItems) {
-        parentTitleByTaskId.set(longTermTask.id, longTermTask.title);
+        const breadcrumb = getLongTermTaskBreadcrumb(longTermTask, longTermItems);
+        parentTitleByTaskId.set(longTermTask.id, breadcrumb);
         for (const subtask of longTermTask.subtasks) {
-          parentTitleBySubtaskId.set(subtask.id, longTermTask.title);
+          parentTitleBySubtaskId.set(subtask.id, breadcrumb);
         }
       }
 
@@ -565,7 +568,7 @@ export const useTasks = (isLoggedIn: boolean) => {
           kind: 'daily',
           subjectId: materialized.subject_id ?? null,
           sourceSubtaskId: materialized.source_subtask_id ?? subtask.id,
-          parentTitle: parentTask?.title,
+          parentTitle: parentTask ? getLongTermTaskBreadcrumb(parentTask, longTermTasks) : undefined,
         };
 
         setDbTasks((currentTasks) =>
@@ -611,7 +614,7 @@ export const useTasks = (isLoggedIn: boolean) => {
           subjectId: materialized.subject_id ?? null,
           sourceSubtaskId: null,
           sourceLongTermTaskId: materialized.source_long_term_task_id ?? parent.id,
-          parentTitle: parent.title,
+          parentTitle: getLongTermTaskBreadcrumb(parent, longTermTasks),
         };
         fetchGenerationRef.current += 1;
         setDbTasks(current => [...current.filter(item => item.id !== task.id && item.sourceLongTermTaskId !== parent.id), task]);
@@ -629,7 +632,7 @@ export const useTasks = (isLoggedIn: boolean) => {
         if (pendingLongTermSelectionRef.current === request) pendingLongTermSelectionRef.current = null;
       }
     },
-    [dbTasks, fetchDbTasks, taskOwner]
+    [dbTasks, fetchDbTasks, longTermTasks, taskOwner]
   );
 
   const toggleSubtask = useCallback(

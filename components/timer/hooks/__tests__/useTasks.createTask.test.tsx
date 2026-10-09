@@ -7,7 +7,10 @@ vi.mock('@/lib/userScopedStorage', () => ({
   GUEST_OWNER: 'guest', getStorageOwner: () => mocks.owner,
   readOwnedJson: () => null, getScopedStorageKey: (key: string) => key,
 }));
-vi.mock('@/lib/longTermTasks', () => ({ fetchLongTermTaskDurations: async () => new Map() }));
+vi.mock('@/lib/longTermTasks', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/longTermTasks')>(),
+  fetchLongTermTaskDurations: async () => new Map(),
+}));
 
 import { useTasks, type TaskKind } from '../useTasks';
 

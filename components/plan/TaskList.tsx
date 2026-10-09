@@ -74,8 +74,10 @@ type TaskRow = {
 
 type SubtaskParentRow = {
   id: string;
-  long_term_tasks: { title: string } | { title: string }[] | null;
+  long_term_tasks: LongTermParentTitle | LongTermParentTitle[] | null;
 };
+
+type LongTermParentTitle = { title: string; parent_task_id?: string | null };
 
 type PinnedTaskRow = {
   id: string;
@@ -462,10 +464,11 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       ),
     ];
 
+    const projectIdByTaskId = new Map<string, string>();
     if (sourceSubtaskIds.length > 0) {
       const { data: parentData, error: parentError } = await supabase
         .from('long_term_subtasks')
-        .select('id, long_term_tasks(title)')
+        .select('id, long_term_tasks(title, parent_task_id)')
         .in('id', sourceSubtaskIds);
 
       if (!isCurrent()) return;
@@ -473,6 +476,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         console.error('Error fetching long-term task titles:', parentError);
       } else {
         const parentTitleBySubtaskId = new Map<string, string>();
+        const projectIdBySubtaskId = new Map<string, string>();
         for (const row of (parentData ?? []) as SubtaskParentRow[]) {
           const relation = Array.isArray(row.long_term_tasks)
             ? row.long_term_tasks[0]
@@ -480,14 +484,21 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           if (relation?.title) {
             parentTitleBySubtaskId.set(row.id, relation.title);
           }
+          if (relation?.parent_task_id) {
+            projectIdBySubtaskId.set(row.id, relation.parent_task_id);
+          }
         }
 
-        taskRows = taskRows.map((task) => ({
-          ...task,
-          parentTitle: task.source_subtask_id
-            ? parentTitleBySubtaskId.get(task.source_subtask_id)
-            : undefined,
-        }));
+        taskRows = taskRows.map((task) => {
+          const projectId = task.source_subtask_id && projectIdBySubtaskId.get(task.source_subtask_id);
+          if (projectId) projectIdByTaskId.set(task.id, projectId);
+          return {
+            ...task,
+            parentTitle: task.source_subtask_id
+              ? parentTitleBySubtaskId.get(task.source_subtask_id)
+              : undefined,
+          };
+        });
       }
     }
 
@@ -498,7 +509,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     if (sourceLongTermTaskIds.length > 0) {
       const { data: parentData, error: parentError } = await supabase
         .from('long_term_tasks')
-        .select('id, title')
+        .select('id, title, parent_task_id')
         .eq('user_id', userId)
         .in('id', sourceLongTermTaskIds);
 
@@ -506,15 +517,40 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       if (parentError) {
         console.error('Error fetching long-term task titles:', parentError);
       } else {
-        const parentTitles = new Map(
-          ((parentData ?? []) as Array<{ id: string; title: string }>).map((parent) => [parent.id, parent.title])
+        const parents = new Map(
+          ((parentData ?? []) as Array<LongTermParentTitle & { id: string }>).map((parent) => [parent.id, parent])
         );
-        taskRows = taskRows.map((task) => ({
-          ...task,
-          parentTitle: task.source_long_term_task_id
-            ? parentTitles.get(task.source_long_term_task_id) ?? task.parentTitle
-            : task.parentTitle,
-        }));
+        taskRows = taskRows.map((task) => {
+          const parent = task.source_long_term_task_id && parents.get(task.source_long_term_task_id);
+          if (parent && parent.parent_task_id) projectIdByTaskId.set(task.id, parent.parent_task_id);
+          return { ...task, parentTitle: parent ? parent.title : task.parentTitle };
+        });
+      }
+    }
+
+    if (projectIdByTaskId.size > 0) {
+      const { data: projects, error: projectError } = await supabase
+        .from('long_term_tasks')
+        .select('id, title')
+        .eq('user_id', userId)
+        .in('id', [...new Set(projectIdByTaskId.values())]);
+      if (!isCurrent()) return;
+      if (projectError) {
+        console.error('Error fetching long-term project titles:', projectError);
+      } else {
+        const projectTitles = new Map(
+          ((projects ?? []) as Array<{ id: string; title: string }>).map((project) => [project.id, project.title])
+        );
+        taskRows = taskRows.map((task) => {
+          const projectId = projectIdByTaskId.get(task.id);
+          const projectTitle = projectId ? projectTitles.get(projectId) : undefined;
+          return {
+            ...task,
+            parentTitle: projectTitle && task.parentTitle
+              ? `${projectTitle} › ${task.parentTitle}`
+              : task.parentTitle,
+          };
+        });
       }
     }
 

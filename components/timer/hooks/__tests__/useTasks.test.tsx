@@ -28,7 +28,8 @@ vi.mock('@/lib/supabase', () => ({
   supabase: supabaseMock,
 }));
 
-vi.mock('@/lib/longTermTasks', () => ({
+vi.mock('@/lib/longTermTasks', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/longTermTasks')>(),
   materializeSubtaskForToday: materializeSubtaskForTodayMock,
   materializeLongTermTaskForToday: materializeLongTermTaskForTodayMock,
   fetchLongTermTaskDurations: fetchLongTermTaskDurationsMock,
@@ -58,6 +59,7 @@ type LongTermRow = {
   id: string;
   title: string;
   subject_id?: string | null;
+  parent_task_id?: string | null;
   position: number | null;
   long_term_subtasks: Array<{
     id: string;
@@ -313,6 +315,7 @@ describe('useTasks', () => {
         id: 'lt1',
         title: '자격증 공부',
         subject_id: null,
+        parent_task_id: null,
         durationSeconds: 0,
         position: 0,
         subtasks: [
@@ -335,7 +338,7 @@ describe('useTasks', () => {
       {
         method: 'select',
         columns:
-          'id, title, position, subject_id, long_term_subtasks(id, title, position, completed_at)',
+          'id, title, position, subject_id, parent_task_id, long_term_subtasks(id, title, position, completed_at)',
       },
       { method: 'eq', field: 'user_id', value: 'user-1' },
       { method: 'is', field: 'archived_at', value: null },
@@ -372,6 +375,7 @@ describe('useTasks', () => {
           id: 'lt-null',
           title: '위치 없는 과제',
           subject_id: null,
+          parent_task_id: null,
           durationSeconds: 0,
           position: 0,
           subtasks: [
@@ -438,6 +442,72 @@ describe('useTasks', () => {
     const { result } = renderHook(() => useTasks(true));
     await waitFor(() => expect(result.current.longTermTasks).toHaveLength(1));
     expect(result.current.longTermTasks[0].durationSeconds).toBeUndefined();
+  });
+
+  it('keeps subject groups flat while resolving full project paths and server duration totals', async () => {
+    longTermRows = [
+      { id: 'midterm', title: '중간고사', parent_task_id: null, position: 0, long_term_subtasks: [] },
+      { id: 'midterm-a', title: 'A과목', subject_id: 'subject-a', parent_task_id: 'midterm', position: 0,
+        long_term_subtasks: [{ id: 'chapter-a', title: '기출문제 풀기', position: 0, completed_at: null }] },
+      { id: 'final', title: '기말고사', parent_task_id: null, position: 1, long_term_subtasks: [] },
+      { id: 'final-a', title: 'A과목', subject_id: 'subject-a', parent_task_id: 'final', position: 0, long_term_subtasks: [] },
+    ];
+    taskRows = [
+      { id: 'today-chapter', title: '기출문제 풀기', status: 'todo', source_subtask_id: 'chapter-a', subject_id: 'saved-subject' },
+      { id: 'today-course', title: 'A과목', status: 'todo', source_long_term_task_id: 'final-a', subject_id: 'subject-a' },
+    ];
+    fetchLongTermTaskDurationsMock.mockResolvedValue(new Map([['midterm', 7200], ['midterm-a', 3600]]));
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(4));
+    expect(result.current.longTermTasks[1]).toMatchObject({ parent_task_id: 'midterm', subject_id: 'subject-a', durationSeconds: 3600 });
+    expect(result.current.longTermTasks[0].durationSeconds).toBe(7200);
+    expect(result.current.dbTasks[0]).toMatchObject({ parentTitle: '중간고사 › A과목', subjectId: 'saved-subject' });
+    expect(result.current.dbTasks[1]).toMatchObject({ parentTitle: '기말고사 › A과목' });
+
+    await act(async () => { await result.current.selectSubtaskForTimer(result.current.longTermTasks[1].subtasks[0]); });
+    expect(materializeSubtaskForTodayMock).not.toHaveBeenCalled();
+    expect(result.current.selectedSubjectId).toBe('saved-subject');
+  });
+
+  it('studies an empty course directly using its own subject and the materialized subject snapshot', async () => {
+    longTermRows = [
+      { id: 'exam', title: '중간고사', subject_id: 'parent-default', position: 0, long_term_subtasks: [] },
+      { id: 'course', title: 'A과목', subject_id: 'subject-a', parent_task_id: 'exam', position: 0, long_term_subtasks: [] },
+    ];
+    materializeLongTermTaskForTodayMock.mockImplementation(async () => {
+      const row = { id: 'course-today', title: 'A과목', status: 'todo', subject_id: 'saved-subject', source_long_term_task_id: 'course' };
+      taskRows = [row];
+      return row;
+    });
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(2));
+    const course = result.current.longTermTasks[1];
+    let selected: TaskItem | null = null;
+    await act(async () => { selected = await result.current.selectLongTermTaskForTimer(course); });
+    expect(materializeLongTermTaskForTodayMock).toHaveBeenCalledWith('user-1', course);
+    expect(selected).toMatchObject({ title: 'A과목', parentTitle: '중간고사 › A과목', sourceLongTermTaskId: 'course', subjectId: 'saved-subject' });
+    expect(result.current.selectedSubjectId).toBe('saved-subject');
+  });
+
+  it('materializes a course subtask with the course subject instead of the project default', async () => {
+    longTermRows = [
+      { id: 'exam', title: '중간고사', subject_id: 'parent-default', position: 0, long_term_subtasks: [] },
+      { id: 'course', title: 'A과목', subject_id: 'subject-a', parent_task_id: 'exam', position: 0,
+        long_term_subtasks: [{ id: 'chapter-a', title: '기출문제 풀기', position: 0, completed_at: null }] },
+    ];
+    materializeSubtaskForTodayMock.mockImplementation(async () => {
+      const row = { id: 'chapter-today', title: '기출문제 풀기', status: 'todo', subject_id: 'subject-a', source_subtask_id: 'chapter-a' };
+      taskRows = [row];
+      return row;
+    });
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.longTermTasks).toHaveLength(2));
+    const subtask = result.current.longTermTasks[1].subtasks[0];
+    let selected: TaskItem | null = null;
+    await act(async () => { selected = await result.current.selectSubtaskForTimer(subtask); });
+    expect(materializeSubtaskForTodayMock).toHaveBeenCalledWith('user-1', subtask, 'subject-a');
+    expect(selected).toMatchObject({ parentTitle: '중간고사 › A과목', subjectId: 'subject-a' });
+    expect(result.current.selectedSubjectId).toBe('subject-a');
   });
 
   it('materializes a project without subtasks with its subject, reuses today and resolves a fresh row after midnight', async () => {

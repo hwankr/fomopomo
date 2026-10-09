@@ -399,6 +399,42 @@ describe('TaskList request ownership', () => {
     expect(screen.getByText('9월 7일 작업')).toBeInTheDocument();
   });
 
+  it.each(['direct', 'subtask'])('shows the project and course for a %s study task', async (source) => {
+    rows.long_term_tasks = [
+      { id: 'exam', title: '중간고사', user_id: 'user-1' },
+      { id: 'course', title: 'A과목', parent_task_id: 'exam', user_id: 'user-1' },
+    ];
+    if (source === 'direct') {
+      rows.tasks[0].source_long_term_task_id = 'course';
+    } else {
+      rows.tasks[0].source_subtask_id = 'chapter';
+      rows.long_term_subtasks = [{ id: 'chapter', long_term_tasks: { title: 'A과목', parent_task_id: 'exam' } }];
+    }
+    mount();
+    expect(await screen.findByText('중간고사 › A과목')).toBeInTheDocument();
+    expect(within(taskRow('9월 6일 작업')).getByText('중간고사 › A과목')).toBeInTheDocument();
+    const rootLookup = queries.find(query => query.table === 'long_term_tasks' &&
+      query.filters.some(([column, values]) => column === 'id' && values.includes('exam')));
+    expect(rootLookup?.filters).toContainEqual(['user_id', ['user-1']]);
+  });
+
+  it('discards a nested project lookup when the selected date changes', async () => {
+    rows.tasks[0].source_long_term_task_id = 'course';
+    rows.long_term_tasks = [{ id: 'course', title: 'A과목', parent_task_id: 'exam', user_id: 'user-1' }];
+    const pending = deferred();
+    intercept = query => query.table === 'long_term_tasks' &&
+      query.filters.some(([column, values]) => column === 'id' && values.includes('exam'))
+      ? pending.promise : undefined;
+    const { rerender } = mount();
+    await waitFor(() => expect(queries.some(query => query.table === 'long_term_tasks' &&
+      query.filters.some(([column, values]) => column === 'id' && values.includes('exam')))).toBe(true));
+    rerender(view(DAY_B));
+    await screen.findByText('9월 7일 작업');
+    await act(async () => pending.resolve(success([{ id: 'exam', title: '이전 중간고사' }])));
+    expect(screen.queryByText('이전 중간고사 › A과목')).not.toBeInTheDocument();
+    expect(screen.getByText('9월 7일 작업')).toBeInTheDocument();
+  });
+
   it.each(['tasks', 'long_term_subtasks', 'study_sessions'])('ignores an old date response delayed at %s', async (table) => {
     rows.tasks[0].source_subtask_id = 'sub-a';
     rows.long_term_subtasks = [{ id: 'sub-a', long_term_tasks: { title: '이전 날짜 과제' } }];

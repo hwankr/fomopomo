@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, ChevronDown, Circle, CircleDashed, Play } from 'lucide-react';
 import type {
@@ -10,6 +10,12 @@ import type {
   TaskItem,
 } from '@/components/timer/hooks/useTasks';
 import { formatDuration } from '@/lib/formatDuration';
+import {
+  getLongTermTaskBreadcrumb,
+  getLongTermTaskChildren,
+  getLongTermTaskProgress,
+  getLongTermTaskRoots,
+} from '@/lib/longTermTasks';
 import TaskCreateForm from '@/components/timer/TaskCreateForm';
 
 interface TaskSidebarProps {
@@ -180,7 +186,8 @@ function LongTermTaskSection({
 }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  if (items.length === 0) return null;
+  const roots = getLongTermTaskRoots(items);
+  if (roots.length === 0) return null;
 
   const styles = SECTION_STYLES.emerald;
 
@@ -193,117 +200,122 @@ function LongTermTaskSection({
     });
   };
 
+  const renderTask = (task: LongTermTaskItem): ReactNode => {
+    const isExpanded = expandedIds.has(task.id);
+    const hasSubtasks = task.subtasks.length > 0;
+    const children = task.parent_task_id ? [] : getLongTermTaskChildren(items, task.id);
+    const hasDetails = hasSubtasks || children.length > 0;
+    const progress = getLongTermTaskProgress(task, items);
+    const breadcrumb = getLongTermTaskBreadcrumb(task, items);
+    const isPending = task.id === pendingLongTermTaskId;
+    const selectionPending = pendingSubtaskId !== null || pendingLongTermTaskId !== null;
+    const durationLabel = task.durationSeconds === undefined
+      ? '누적 시간 확인 불가'
+      : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
+    return (
+      <div key={task.id} className="space-y-2">
+        <div className="rounded-xl border border-gray-100 px-3 py-2 transition-colors hover:border-emerald-100 hover:bg-emerald-50/50 focus-within:border-emerald-200 focus-within:bg-emerald-50/50 dark:border-slate-800 dark:hover:border-emerald-900/60 dark:hover:bg-emerald-950/30 dark:focus-within:border-emerald-800 dark:focus-within:bg-emerald-950/30">
+          <div className="flex items-center gap-2">
+            {hasDetails ? (
+              <button onClick={() => toggleExpanded(task.id)} aria-expanded={isExpanded}
+                aria-label={task.parent_task_id ? breadcrumb : undefined}
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md py-1 text-left text-sm font-medium text-gray-700 outline-none transition-colors hover:text-emerald-700 focus-visible:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300 dark:text-gray-300 dark:hover:text-emerald-300 dark:focus-visible:text-emerald-300 dark:focus-visible:ring-emerald-700">
+                <span className="truncate">{task.title}</span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            ) : (
+              <span className="min-w-0 flex-1 truncate py-1 text-sm font-medium text-gray-700 dark:text-gray-300">{task.title}</span>
+            )}
+            {!unavailableParentIds.has(task.id) && (
+              <button onClick={() => onSelectLongTermTask(task)} disabled={selectionPending}
+                aria-label={`${breadcrumb} 공부하기`} aria-busy={isPending}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 outline-none transition-colors hover:border-emerald-200 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/50 dark:focus-visible:ring-emerald-600 dark:focus-visible:ring-offset-gray-900">
+                <Play aria-hidden="true" className="h-3 w-3" />
+                {isPending ? '준비 중…' : '공부하기'}
+              </button>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
+            <span>{durationLabel}</span>
+            {progress.totalCount > 0 && <span>{`완료 ${progress.completedCount}/${progress.totalCount}`}</span>}
+          </div>
+        </div>
+        {hasDetails && isExpanded && (
+          <div className="ml-2 space-y-2 border-l border-gray-100 pl-2 dark:border-slate-800">
+            {partitionDoneLast(
+              task.subtasks,
+              (subtask) => subtask.completed_at !== null
+            ).map((subtask) => {
+              const isDone = subtask.completed_at !== null;
+              const isPending = subtask.id === pendingSubtaskId;
+              const isTogglePending = pendingToggleSubtaskIds.has(
+                subtask.id
+              );
+              return (
+                <div
+                  key={subtask.id}
+                  className="flex w-full items-center rounded-xl border border-transparent pr-2 transition-all hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                >
+                  <button
+                    onClick={() => onToggleSubtask(subtask)}
+                    disabled={isTogglePending}
+                    aria-busy={isTogglePending}
+                    aria-label={isDone ? '완료 해제' : '완료로 표시'}
+                    className={`flex-shrink-0 p-2 pl-3 transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                      isDone
+                        ? styles.check
+                        : 'text-gray-300 hover:text-gray-400'
+                    }`}
+                  >
+                    {isDone ? (
+                      <CheckCircle2 className="h-5 w-5" />
+                    ) : (
+                      <Circle className="h-5 w-5" />
+                    )}
+                  </button>
+                  {isDone ? (
+                    <span className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-400 line-through dark:text-gray-500">
+                      <span className="block truncate">{subtask.title}</span>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onSelectSubtask(subtask)}
+                      disabled={selectionPending}
+                      aria-busy={isPending}
+                      className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-700 disabled:opacity-60 dark:text-gray-300"
+                    >
+                      <span className="block truncate">{subtask.title}</span>
+                    </button>
+                  )}
+                  {materializedSubtaskIds.has(subtask.id) && (
+                    <span
+                      className={`flex-shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs font-bold ${SECTION_STYLES.rose.badge}`}
+                    >
+                      오늘
+                    </span>
+                  )}
+                  {isPending && (
+                    <span
+                      aria-hidden
+                      className="ml-1 h-4 w-4 flex-shrink-0 animate-spin rounded-full border-b-2 border-emerald-500"
+                    />
+                  )}
+                </div>
+              );
+            })}
+            {children.map(renderTask)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-2">
       <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-gray-400">
         장기 과제
       </h3>
-      {items.map((task) => {
-        const isExpanded = expandedIds.has(task.id);
-        const hasSubtasks = task.subtasks.length > 0;
-        const doneCount = task.subtasks.filter(
-          (subtask) => subtask.completed_at !== null
-        ).length;
-        const isPending = task.id === pendingLongTermTaskId;
-        const selectionPending = pendingSubtaskId !== null || pendingLongTermTaskId !== null;
-        const durationLabel = task.durationSeconds === undefined
-          ? '누적 시간 확인 불가'
-          : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
-        return (
-          <div key={task.id} className="space-y-2">
-            <div className="rounded-xl border border-gray-100 px-3 py-2 transition-colors hover:border-emerald-100 hover:bg-emerald-50/50 focus-within:border-emerald-200 focus-within:bg-emerald-50/50 dark:border-slate-800 dark:hover:border-emerald-900/60 dark:hover:bg-emerald-950/30 dark:focus-within:border-emerald-800 dark:focus-within:bg-emerald-950/30">
-              <div className="flex items-center gap-2">
-                {hasSubtasks ? (
-                  <button onClick={() => toggleExpanded(task.id)} aria-expanded={isExpanded}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md py-1 text-left text-sm font-medium text-gray-700 outline-none transition-colors hover:text-emerald-700 focus-visible:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300 dark:text-gray-300 dark:hover:text-emerald-300 dark:focus-visible:text-emerald-300 dark:focus-visible:ring-emerald-700">
-                    <span className="truncate">{task.title}</span>
-                    <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                  </button>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate py-1 text-sm font-medium text-gray-700 dark:text-gray-300">{task.title}</span>
-                )}
-                {!unavailableParentIds.has(task.id) && (
-                  <button onClick={() => onSelectLongTermTask(task)} disabled={selectionPending}
-                    aria-label={`${task.title} 공부하기`} aria-busy={isPending}
-                    className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 outline-none transition-colors hover:border-emerald-200 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/50 dark:focus-visible:ring-emerald-600 dark:focus-visible:ring-offset-gray-900">
-                    <Play aria-hidden="true" className="h-3 w-3" />
-                    {isPending ? '준비 중…' : '공부하기'}
-                  </button>
-                )}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
-                <span>{durationLabel}</span>
-                {hasSubtasks && <span>{`완료 ${doneCount}/${task.subtasks.length}`}</span>}
-              </div>
-            </div>
-            {hasSubtasks && isExpanded && (
-              <div className="ml-2 space-y-2">
-                {partitionDoneLast(
-                  task.subtasks,
-                  (subtask) => subtask.completed_at !== null
-                ).map((subtask) => {
-                  const isDone = subtask.completed_at !== null;
-                  const isPending = subtask.id === pendingSubtaskId;
-                  const isTogglePending = pendingToggleSubtaskIds.has(
-                    subtask.id
-                  );
-                  return (
-                    <div
-                      key={subtask.id}
-                      className="flex w-full items-center rounded-xl border border-transparent pr-2 transition-all hover:bg-gray-50 dark:hover:bg-slate-800/50"
-                    >
-                      <button
-                        onClick={() => onToggleSubtask(subtask)}
-                        disabled={isTogglePending}
-                        aria-busy={isTogglePending}
-                        aria-label={isDone ? '완료 해제' : '완료로 표시'}
-                        className={`flex-shrink-0 p-2 pl-3 transition-colors disabled:cursor-wait disabled:opacity-60 ${
-                          isDone
-                            ? styles.check
-                            : 'text-gray-300 hover:text-gray-400'
-                        }`}
-                      >
-                        {isDone ? (
-                          <CheckCircle2 className="h-5 w-5" />
-                        ) : (
-                          <Circle className="h-5 w-5" />
-                        )}
-                      </button>
-                      {isDone ? (
-                        <span className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-400 line-through dark:text-gray-500">
-                          <span className="block truncate">{subtask.title}</span>
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => onSelectSubtask(subtask)}
-                          disabled={selectionPending}
-                          aria-busy={isPending}
-                          className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-700 disabled:opacity-60 dark:text-gray-300"
-                        >
-                          <span className="block truncate">{subtask.title}</span>
-                        </button>
-                      )}
-                      {materializedSubtaskIds.has(subtask.id) && (
-                        <span
-                          className={`flex-shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs font-bold ${SECTION_STYLES.rose.badge}`}
-                        >
-                          오늘
-                        </span>
-                      )}
-                      {isPending && (
-                        <span
-                          aria-hidden
-                          className="ml-1 h-4 w-4 flex-shrink-0 animate-spin rounded-full border-b-2 border-emerald-500"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {roots.map(renderTask)}
     </div>
   );
 }
@@ -406,13 +418,18 @@ export default function TaskSidebar({
     task.id !== excludedTaskId && (!choosingNextTask || task.status !== 'done'));
   const unavailableParentIds = new Set(tasks.flatMap(task => task.sourceLongTermTaskId &&
     (task.id === excludedTaskId || (choosingNextTask && task.status === 'done')) ? [task.sourceLongTermTaskId] : []));
-  const availableLongTermTasks = longTermTasks.map((task) => ({
+  const filteredLongTermTasks = longTermTasks.map((task) => ({
     ...task,
     subtasks: task.subtasks.filter((subtask) => subtask.id !== excludedSubtaskId &&
       (!choosingNextTask || subtask.completed_at === null)),
-  })).filter((task) => !unavailableParentIds.has(task.id) || task.subtasks.length > 0);
+  }));
+  const isTaskAvailable = (task: LongTermTaskItem) =>
+    !unavailableParentIds.has(task.id) || task.subtasks.length > 0;
+  const availableLongTermTasks = filteredLongTermTasks.filter((task) =>
+    isTaskAvailable(task) || (!task.parent_task_id &&
+      getLongTermTaskChildren(filteredLongTermTasks, task.id).some(isTaskAvailable)));
   const hasNextTask = availableTasks(tasks).length + availableTasks(weeklyPlans).length +
-    availableTasks(monthlyPlans).length + availableLongTermTasks.length > 0;
+    availableTasks(monthlyPlans).length + getLongTermTaskRoots(availableLongTermTasks).length > 0;
 
   return (
     <>

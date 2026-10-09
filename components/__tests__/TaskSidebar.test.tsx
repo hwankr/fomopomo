@@ -19,6 +19,8 @@ vi.mock('react-hot-toast', () => ({
   default: toastMock,
 }));
 
+vi.mock('@/lib/supabase', () => ({ supabase: {} }));
+
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({
     subjects: [{ id: 'math', user_id: 'user-1', name: '수학' }],
@@ -392,6 +394,84 @@ describe('TaskSidebar', () => {
       id: 'lt1',
       title: '빅데이터분석기사',
       subtasks: [chapter1, chapter2, chapter3],
+    });
+
+    it('nests courses only inside their project alongside its direct subtasks', () => {
+      const root = makeLongTermTask({ id: 'exam', title: '중간고사', durationSeconds: 7200,
+        subtasks: [makeSubtask({ id: 'direct', title: '시험 일정 확인', completed_at: '2026-10-09T00:00:00Z' })] });
+      const course = makeLongTermTask({ id: 'course-a', title: 'A과목', parent_task_id: 'exam', subject_id: 'subject-a',
+        durationSeconds: 3600, subtasks: [makeSubtask({ id: 'detail', title: '기출문제 풀기' })] });
+      renderSidebar({ longTermTasks: [root, course] });
+      expect(screen.queryByText('A과목')).not.toBeInTheDocument();
+      expect(screen.getByText('완료 1/2')).toBeInTheDocument();
+      expect(screen.getByText('누적 2h 0m')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
+      expect(screen.getAllByText('A과목')).toHaveLength(1);
+      expect(screen.getByText('시험 일정 확인')).toBeInTheDocument();
+      expect(screen.getByText('누적 1h 0m')).toBeInTheDocument();
+      expect(screen.queryByText('기출문제 풀기')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '중간고사 › A과목' }));
+      expect(screen.getByRole('button', { name: '기출문제 풀기' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
+      expect(screen.queryByText('A과목')).not.toBeInTheDocument();
+      expect(screen.queryByText('기출문제 풀기')).not.toBeInTheDocument();
+    });
+
+    it('allows studying an empty course directly and disambiguates identical course names', async () => {
+      const course = makeLongTermTask({ id: 'midterm-a', title: 'A과목', parent_task_id: 'midterm', subject_id: 'subject-a' });
+      const onSelectLongTermTask = vi.fn().mockResolvedValue(makeTask({ id: 'today', title: 'A과목' }));
+      const onClose = vi.fn();
+      renderSidebar({ onSelectLongTermTask, onClose, longTermTasks: [
+        makeLongTermTask({ id: 'midterm', title: '중간고사' }), course,
+        makeLongTermTask({ id: 'final', title: '기말고사' }),
+        makeLongTermTask({ id: 'final-a', title: 'A과목', parent_task_id: 'final', subject_id: 'subject-a' }),
+      ] });
+      fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
+      fireEvent.click(screen.getByRole('button', { name: '기말고사' }));
+      expect(screen.getByRole('button', { name: '기말고사 › A과목 공부하기' })).toBeEnabled();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '중간고사 › A과목 공부하기' })); });
+      expect(onSelectLongTermTask).toHaveBeenCalledWith(course);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('selects the specific nested subtask and keeps its completion controls', async () => {
+      const detail = makeSubtask({ id: 'detail', title: '기출문제 풀기' });
+      const onSelectSubtask = vi.fn().mockResolvedValue(makeTask({ id: 'today', title: detail.title }));
+      const onToggleSubtask = vi.fn();
+      const onClose = vi.fn();
+      renderSidebar({ onSelectSubtask, onToggleSubtask, onClose, longTermTasks: [
+        makeLongTermTask({ id: 'exam', title: '중간고사' }),
+        makeLongTermTask({ id: 'course', title: 'A과목', parent_task_id: 'exam', subject_id: 'subject-a', subtasks: [detail] }),
+      ] });
+      fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
+      fireEvent.click(screen.getByRole('button', { name: '중간고사 › A과목' }));
+      fireEvent.click(screen.getByRole('button', { name: '완료로 표시' }));
+      expect(onToggleSubtask).toHaveBeenCalledWith(detail);
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: detail.title })); });
+      expect(onSelectSubtask).toHaveBeenCalledWith(detail);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('retains a completed project as a container when a course can be chosen next', () => {
+      renderSidebar({ choosingNextTask: true, tasks: [
+        makeTask({ id: 'done', title: '중간고사', status: 'done', sourceLongTermTaskId: 'exam' }),
+      ], longTermTasks: [
+        makeLongTermTask({ id: 'exam', title: '중간고사' }),
+        makeLongTermTask({ id: 'course', title: 'A과목', parent_task_id: 'exam', subject_id: 'subject-a' }),
+      ] });
+      expect(screen.queryByRole('button', { name: '중간고사 공부하기' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
+      expect(screen.getByRole('button', { name: '중간고사 › A과목 공부하기' })).toBeEnabled();
+      expect(screen.queryByText(/이어서 할 작업이 없어요/)).not.toBeInTheDocument();
+    });
+
+    it('does not promote courses whose project is archived or deleted', () => {
+      renderSidebar({ choosingNextTask: true, longTermTasks: [
+        makeLongTermTask({ id: 'orphan', title: 'A과목', parent_task_id: 'missing', subject_id: 'subject-a' }),
+      ] });
+      expect(screen.queryByText('장기 과제')).not.toBeInTheDocument();
+      expect(screen.queryByText('A과목')).not.toBeInTheDocument();
+      expect(screen.getByText(/이어서 할 작업이 없어요/)).toBeInTheDocument();
     });
 
     it('does not render the section without long-term tasks', () => {
