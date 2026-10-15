@@ -11,6 +11,7 @@ import FloatingTimerButton from '@/components/FloatingTimerButton';
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import GoogleAnalytics from '../components/GoogleAnalytics';
+import { SITE_URL } from '@/lib/seo';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -29,11 +30,12 @@ export const metadata: Metadata = {
       'naver-site-verification': '79045230bcdc999bf0f45f89d43fb527bb1ec363',
     },
   },
-  metadataBase: new URL('https://fomopomo.com'),
+  metadataBase: new URL(SITE_URL),
+  // 공개 페이지의 metadata에서만 index를 허용합니다.
+  robots: { index: false, follow: true },
   openGraph: {
     type: 'website',
     locale: 'ko_KR',
-    url: 'https://fomopomo.com',
     siteName: 'fomopomo',
     title: 'fomopomo - 뽀모도로 타이머',
     description: '뽀모도로와 스톱워치로 학습을 기록하세요. Fomopomo',
