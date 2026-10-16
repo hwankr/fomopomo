@@ -1,107 +1,22 @@
-'use client';
+import { getPublicPageMetadata } from '@/lib/seo';
+import HomeClient from './home-client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
-import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useAuthSession } from '@/hooks/useAuthSession';
+export const metadata = getPublicPageMetadata('/');
 
-import TimerApp from '@/components/TimerApp';
-import HistoryList from '@/components/HistoryList';
-import LoginModal from '@/components/LoginModal';
-
-import SettingsModal from '@/components/SettingsModal';
-import { toast } from 'react-hot-toast';
-
-import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
-import Navbar from '@/components/Navbar';
-import { useTheme } from '@/components/ThemeProvider';
-
-export default function Home() {
-  const { session, loading: isLoading } = useAuthSession();
-
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-
-
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
-  const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
-
-  // ✨ [추가] 기록 목록 새로고침을 위한 트리거 상태
-  const [historyUpdateTrigger, setHistoryUpdateTrigger] = useState(0);
-
-  const handleGoogleLogin = async () => {
-    if (isInAppBrowser()) {
-      const handled = handleInAppBrowser();
-      if (handled) {
-        toast.error(
-          '구글 로그인은 보안 정책상\n외부 브라우저(크롬, 사파리 등)에서\n진행해야 합니다.',
-          {
-            duration: 5000,
-          }
-        );
-        return;
-      }
-    }
-
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    });
-  };
-
-  if (isLoading) {
-    return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-[#f8f9fa] dark:bg-[#0f172a]"
-        suppressHydrationWarning
-      >
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900 dark:border-white" />
-      </div>
-    );
-  }
-
+export default function HomePage() {
   return (
-    <div className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
-      <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onGoogleLogin={handleGoogleLogin}
-      />
-
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        onSave={() => setSettingsUpdateTrigger((prev) => prev + 1)}
-      />
-
-      <Navbar
-        session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
-
-        onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
-      />
-
-      {/* Content Container - Narrow for Focus */}
-      <div className="w-full max-w-lg flex flex-col items-center gap-8 animate-fade-in p-3 sm:p-4 mt-4">
-        {/* ✨ TimerApp에 콜백 전달: 저장 완료 시 트리거 숫자를 증가시킴 */}
-        <TimerApp
-          settingsUpdated={settingsUpdateTrigger}
-          onRecordSaved={() => setHistoryUpdateTrigger((prev) => prev + 1)}
-          isLoggedIn={!!session}
-        />
-
-        {/* ✨ HistoryList에 트리거 전달: 숫자가 바뀌면 새로고침 됨 */}
-        <HistoryList 
-          updateTrigger={historyUpdateTrigger} 
-          session={session}
-          onOpenLogin={() => setIsLoginModalOpen(true)}
-        />
-      </div>
-    </div>
+    <HomeClient
+      introduction={
+        <section className="w-full max-w-lg px-4 pt-6 text-center text-gray-900 dark:text-gray-100">
+          <h1 className="text-xl font-bold sm:text-2xl">
+            집중 시간을 기록하는 뽀모도로 타이머
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+            뽀모도로와 스톱워치로 집중 시간을 측정하고 학습을 기록하세요.
+            Fomopomo와 함께 꾸준한 공부 습관을 만들어 보세요.
+          </p>
+        </section>
+      }
+    />
   );
 }
