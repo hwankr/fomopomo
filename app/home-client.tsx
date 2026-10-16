@@ -1,7 +1,7 @@
 'use client';
 
 import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
 
@@ -16,7 +16,7 @@ import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 import Navbar from '@/components/Navbar';
 import { useTheme } from '@/components/ThemeProvider';
 
-export default function HomeClient({ introduction }: { introduction: ReactNode }) {
+export default function HomeClient() {
   const { session, loading: isLoading } = useAuthSession();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -53,13 +53,12 @@ export default function HomeClient({ introduction }: { introduction: ReactNode }
   if (isLoading) {
     return (
       <div
-        className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a]"
+        className="flex min-h-screen items-center justify-center bg-[#f8f9fa] dark:bg-[#0f172a]"
         suppressHydrationWarning
+        role="status"
+        aria-label="타이머 불러오는 중"
       >
-        {introduction}
-        <div className="flex flex-1 items-center justify-center" role="status" aria-label="타이머 불러오는 중">
-          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900 dark:border-white" />
-        </div>
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900 dark:border-white" />
       </div>
     );
   }
@@ -88,8 +87,6 @@ export default function HomeClient({ introduction }: { introduction: ReactNode }
         onOpenLogin={() => setIsLoginModalOpen(true)}
         onLogout={() => signOutWithPushCleanup()}
       />
-
-      {introduction}
 
       {/* Content Container - Narrow for Focus */}
       <div className="w-full max-w-lg flex flex-col items-center gap-8 animate-fade-in p-3 sm:p-4 mt-4">

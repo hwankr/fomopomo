@@ -53,8 +53,8 @@
 | --- | --- |
 | `lib/seo.ts` (신규) | 프로덕션 origin, 공개 경로·제목·설명, canonical 생성 및 공개 metadata helper를 한 곳에서 관리 |
 | `app/layout.tsx` | 기본 `noindex, follow`, 공통 origin 사용. 모든 페이지에 홈 canonical을 상속시키지 않음. 루트의 고정 `og:url` 제거 |
-| `app/page.tsx` | Server Component wrapper로 전환. 홈 metadata 및 실제 표시되는 소개 h1/p 제공 |
-| `app/home-client.tsx` (이동) | 기존 타이머·인증 로직 유지. 서버 소개 슬롯을 로딩 중/완료 후 모두 표시 |
+| `app/page.tsx` | Server Component wrapper에서 홈 metadata 제공. 화면에 소개 문구를 추가하지 않음 |
+| `app/home-client.tsx` (이동) | 기존 타이머·인증 로직과 홈 화면 구성 유지 |
 | `app/contact/page.tsx`, `app/support/page.tsx`, `app/privacy/page.tsx`, `app/terms/page.tsx` | 각 페이지의 Server Component wrapper에서 해당 경로의 metadata export |
 | 각 공개 경로의 `*-client.tsx` (이동) | 기존 UI와 상호작용 유지. 문의·후원은 인증 로딩 때문에 공개 본문 전체를 숨기지 않음 |
 | `app/sitemap.ts` | 공개 allowlist 5개 canonical만 반환. 근거 없는 lastModified 및 불필요한 priority/changeFrequency 제거 |
@@ -73,7 +73,7 @@
 - robots.txt는 크롤링 제어이며 색인 제거 또는 접근 권한 통제가 아니다. HTML의 noindex를 읽게 하려면 해당 HTML을 Disallow로 막지 않는다. 인증·권한 검증은 기존 코드/데이터 계층의 별도 책임이다.
 - `/api/` Disallow는 기존 크롤링 정책 유지일 뿐, API URL의 색인 제거를 보장하지 않는다. 실제 API URL이 색인되었다면 인증/상태 코드를 확인하고, 필요 시 크롤링 가능한 응답의 `X-Robots-Tag: noindex`를 별도 검토한다. 이번 HTML 경고의 영향 API URL은 확인되지 않았다.
 - 새 HTML 페이지는 기본 noindex다. 공개 페이지를 추가할 때 `PUBLIC_PAGES`에 등록하고 해당 Server page에서 helper를 호출해야 한다. 경로 등록만으로 metadata가 자동 적용되지는 않는다.
-- 홈·문의·후원의 공개 본문을 초기 HTML에 제공하지만 타이머와 로그인 상태 확인은 클라이언트에서 계속 처리한다. Google이 페이지를 색인할지는 콘텐츠와 기타 신호에도 달려 있다.
+- 문의·후원의 공개 본문을 초기 HTML에 제공하지만 타이머와 로그인 상태 확인은 클라이언트에서 계속 처리한다. 홈은 기존 타이머 화면을 유지하며, 2026-10-16 사용자 요청에 따라 PR #3에서 추가했던 소개 제목·문단을 제거했다. Google이 페이지를 색인할지는 콘텐츠와 기타 신호에도 달려 있다.
 
 ## 배포 전 검증
 
@@ -101,7 +101,7 @@ npm start
 node scripts/verify-seo.mjs http://localhost:3000
 ```
 
-이 스크립트는 일반 UA와 Googlebot UA로 공개 5개 경로/추적 쿼리 변형 및 내부 9개 경로를 조회한다. 공개 페이지에는 head 안 브랜드명이 포함된 정확한 title과 canonical이 각각 하나, index 허용, 올바른 og:url, 초기 HTML의 고유 h1이 있어야 한다. 내부 페이지에는 noindex가 있고 잘못 상속된 홈 canonical이 없어야 한다. sitemap은 공개 5개만, robots는 HTML 허용/API만 차단, `/contact/`는 영구 리다이렉트여야 한다. Googlebot UA를 사용하는 것은 HTTP 응답 차이를 점검할 뿐 실제 Google 크롤링을 재현하거나 증명하지 않는다.
+이 스크립트는 일반 UA와 Googlebot UA로 공개 5개 경로/추적 쿼리 변형 및 내부 9개 경로를 조회한다. 공개 페이지에는 head 안 브랜드명이 포함된 정확한 title과 canonical이 각각 하나, index 허용, 올바른 og:url이 있어야 한다. 홈을 제외한 공개 안내 페이지는 초기 HTML의 고유 h1도 검사한다. 홈에는 SEO를 위한 별도 소개 문구를 요구하지 않는다. 내부 페이지에는 noindex가 있고 잘못 상속된 홈 canonical이 없어야 한다. sitemap은 공개 5개만, robots는 HTML 허용/API만 차단, `/contact/`는 영구 리다이렉트여야 한다. Googlebot UA를 사용하는 것은 HTTP 응답 차이를 점검할 뿐 실제 Google 크롤링을 재현하거나 증명하지 않는다.
 
 브라우저에서는 비로그인 타이머, 로그인/로그아웃, 문의 이메일 복사, 후원 링크, 계획·친구·그룹·프로필 화면을 빠르게 확인한다. 특히 공개 본문을 위해 auth loading을 제거한 문의·후원 페이지의 Navbar 상태가 로그인 완료 후 정상 갱신되는지 확인한다. preview 호스트에는 호스팅 접근 보호나 noindex 헤더가 적용되는지 확인한다. 프로덕션 canonical만으로 preview 색인을 막을 수는 없다.
 

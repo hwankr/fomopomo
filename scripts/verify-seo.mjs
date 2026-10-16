@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const base = new URL(process.argv[2] ?? 'http://localhost:3000');
 const origin = 'https://fomopomo.com';
 const publicPages = new Map([
-  ['/', { heading: '집중 시간을 기록하는 뽀모도로 타이머', title: '뽀모도로 타이머 | fomopomo' }],
+  ['/', { heading: null, title: '뽀모도로 타이머 | fomopomo' }],
   ['/contact', { heading: 'Contact', title: '문의하기 | fomopomo' }],
   ['/support', { heading: 'Fomopomo 후원하기', title: '후원하기 | fomopomo' }],
   ['/privacy', { heading: '개인정보처리방침', title: '개인정보처리방침 | fomopomo' }],
@@ -49,8 +49,11 @@ for (const agent of agents) {
       assert(!/\b(noindex|none)\b/i.test(response.headers.get('x-robots-tag') ?? ''), `${label}: X-Robots-Tag`);
       assert.equal(new URL(meta.find(tag => tag.property === 'og:url')?.content).href,
         new URL(path, origin).href, `${label}: OG URL`);
-      const headings = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map(match => match[1]);
-      assert(headings.some(text => text.includes(heading)), `${label}: public heading in initial HTML`);
+      // The home page keeps its timer UI without an added introduction heading.
+      if (heading) {
+        const headings = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map(match => match[1]);
+        assert(headings.some(text => text.includes(heading)), `${label}: public heading in initial HTML`);
+      }
     }
   }
   for (const path of internalPages) {
