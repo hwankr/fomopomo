@@ -41,7 +41,7 @@ export function getPublicPageMetadata(path: PublicPagePath): Metadata {
   const image = `${SITE_URL}/og-image.png`;
 
   return {
-    title: page.title,
+    title: { absolute: title },
     description: page.description,
     alternates: { canonical: url },
     robots: { index: true, follow: true },

@@ -66,6 +66,7 @@
 
 - `metadataBase`는 URL 필드의 기준 주소일 뿐 canonical을 자동 생성하지 않는다. 공개 페이지 각각에서 `alternates.canonical`을 지정한다. 루트에 `canonical: '/'`를 넣어 서로 다른 공개 페이지까지 홈의 중복으로 선언하지 않는다.
 - metadata는 서버 `page.tsx`/`layout.tsx`에서 export해야 한다. 기존 Client Component를 분리하되 URL 경로는 유지한다.
+- 루트 layout의 `title.template`은 같은 경로 단계의 홈 page에 적용되지 않는다. 공개 helper는 브랜드명이 포함된 `title.absolute`를 지정해 홈과 하위 공개 페이지의 제목을 일관되게 유지한다.
 - Next.js metadata는 중첩 객체를 얕게 병합한다. 공개 helper는 `robots`, `openGraph`, `twitter`에 필요한 값을 완전하게 제공한다. root의 noindex는 공개 페이지의 `index:true`로 대체된다.
 - 공개 페이지의 추적 쿼리는 콘텐츠 경로의 canonical을 사용한다. 쿼리를 일괄 제거하는 HTTP 리다이렉트는 추가하지 않아 OAuth 파라미터와 기존 기능을 유지한다.
 - 개인 페이지는 검색 제외가 목적이므로 홈을 canonical로 지정하지 않는다. 일반적인 중복 URL 통합에는 canonical/영구 리다이렉트를 사용하고, 검색 제외 정책에는 noindex를 사용한다.
@@ -76,12 +77,15 @@
 
 ## 배포 전 검증
 
-이 수정안에서 실행한 검증:
+2026-10-16 PR 검토에서 실행한 검증 (WSL Ubuntu, Node 24.19.0):
 
-- 변경된 TS/TSX/검증 스크립트의 ESLint 통과, `git diff --check` 통과.
-- `next typegen` 후 `tsc --noEmit --incremental false` 통과. 초기 타입 선언 부재로 발생한 이미지 import 오류는 Next.js 타입 생성 후 해소됐다.
-- HTTP 검증 스크립트를 수정 전 운영 사이트에 실행해 홈 canonical 부재를 검출했다(`0 !== 1`). 이는 기존 문제를 검출한 결과이며 수정 후 통과 결과는 아니다.
-- `npm run build`와 webpack 모드 빌드는 모두 실행환경의 `ENOENT: uv_resident_set_memory`에서 컴파일 전에 중단됐다. 통과한 프로덕션 빌드가 없으므로 수정 후 실제 HTTP 출력, 로그인 상태 UI, 배포 동작은 아직 검증하지 못했다. 아래 절차를 정상 개발/CI 환경에서 반드시 완료한다.
+- 전체 `npm run lint`, `git diff --check` 통과.
+- `npm run test:run`: 54개 테스트 파일, 750개 테스트 통과.
+- `npm run build`: Turbopack 프로덕션 빌드와 TypeScript 검사 통과. 초기 작성 환경의 `ENOENT: uv_resident_set_memory` 오류는 이 환경에서 재현되지 않았다.
+- 빌드된 앱을 `npm start -- --port 3103`으로 실행하고 `node scripts/verify-seo.mjs http://localhost:3103` 통과. 일반 UA/Googlebot, 공개 페이지와 추적 쿼리, 내부 경로, sitemap, robots, 슬래시 리다이렉트를 확인했다.
+- 비로그인 브라우저에서 홈 타이머 시작·일시정지·초기화, 문의 이메일 복사 및 로그인 모달, 후원 안내 링크, 이용약관·개인정보처리방침 표시를 확인했다. 확인한 화면에서 브라우저 오류 로그는 없었다.
+- 실제 계정의 OAuth 로그인·로그아웃과 로그인 완료 후 Navbar 상태 갱신은 수동 검증이 남아 있다. 위 비로그인 확인이나 자동 테스트가 실제 계정 검증을 대신하지는 않는다.
+- 운영 배포 및 Search Console의 Google 선택 canonical은 아래 배포 후 절차로 별도 확인한다.
 
 Node 24, 프로젝트 lockfile을 사용한다. 정상 환경의 공개 Supabase 환경 변수를 준비한 뒤:
 
@@ -97,7 +101,7 @@ npm start
 node scripts/verify-seo.mjs http://localhost:3000
 ```
 
-이 스크립트는 일반 UA와 Googlebot UA로 공개 5개 경로/추적 쿼리 변형 및 내부 9개 경로를 조회한다. 공개 페이지에는 head 안 canonical이 정확히 하나, index 허용, 올바른 og:url, 초기 HTML의 고유 h1이 있어야 한다. 내부 페이지에는 noindex가 있고 잘못 상속된 홈 canonical이 없어야 한다. sitemap은 공개 5개만, robots는 HTML 허용/API만 차단, `/contact/`는 영구 리다이렉트여야 한다. Googlebot UA를 사용하는 것은 HTTP 응답 차이를 점검할 뿐 실제 Google 크롤링을 재현하거나 증명하지 않는다.
+이 스크립트는 일반 UA와 Googlebot UA로 공개 5개 경로/추적 쿼리 변형 및 내부 9개 경로를 조회한다. 공개 페이지에는 head 안 브랜드명이 포함된 정확한 title과 canonical이 각각 하나, index 허용, 올바른 og:url, 초기 HTML의 고유 h1이 있어야 한다. 내부 페이지에는 noindex가 있고 잘못 상속된 홈 canonical이 없어야 한다. sitemap은 공개 5개만, robots는 HTML 허용/API만 차단, `/contact/`는 영구 리다이렉트여야 한다. Googlebot UA를 사용하는 것은 HTTP 응답 차이를 점검할 뿐 실제 Google 크롤링을 재현하거나 증명하지 않는다.
 
 브라우저에서는 비로그인 타이머, 로그인/로그아웃, 문의 이메일 복사, 후원 링크, 계획·친구·그룹·프로필 화면을 빠르게 확인한다. 특히 공개 본문을 위해 auth loading을 제거한 문의·후원 페이지의 Navbar 상태가 로그인 완료 후 정상 갱신되는지 확인한다. preview 호스트에는 호스팅 접근 보호나 noindex 헤더가 적용되는지 확인한다. 프로덕션 canonical만으로 preview 색인을 막을 수는 없다.
 

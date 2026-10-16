@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 const base = new URL(process.argv[2] ?? 'http://localhost:3000');
 const origin = 'https://fomopomo.com';
 const publicPages = new Map([
-  ['/', '집중 시간을 기록하는 뽀모도로 타이머'],
-  ['/contact', 'Contact'],
-  ['/support', 'Fomopomo 후원하기'],
-  ['/privacy', '개인정보처리방침'],
-  ['/terms', '이용약관'],
+  ['/', { heading: '집중 시간을 기록하는 뽀모도로 타이머', title: '뽀모도로 타이머 | fomopomo' }],
+  ['/contact', { heading: 'Contact', title: '문의하기 | fomopomo' }],
+  ['/support', { heading: 'Fomopomo 후원하기', title: '후원하기 | fomopomo' }],
+  ['/privacy', { heading: '개인정보처리방침', title: '개인정보처리방침 | fomopomo' }],
+  ['/terms', { heading: '이용약관', title: '이용약관 | fomopomo' }],
 ]);
 const internalPages = [
   '/plan', '/friends', '/groups', '/groups/seo-audit-placeholder', '/profile',
@@ -31,12 +31,14 @@ async function get(path, agent = agents[0]) {
 }
 
 for (const agent of agents) {
-  for (const [path, heading] of publicPages) {
+  for (const [path, { heading, title }] of publicPages) {
     for (const suffix of ['', '?utm_source=seo-audit']) {
       const { response, html } = await get(path + suffix, agent);
       const label = `${agent} ${path}${suffix}`;
       assert.equal(response.status, 200, `${label}: HTTP status`);
       const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? '';
+      const titles = [...head.matchAll(/<title\b[^>]*>([\s\S]*?)<\/title>/gi)].map(match => match[1]);
+      assert.deepEqual(titles, [title], `${label}: exactly one branded title in head`);
       const canonical = tags(head, 'link').filter(tag => tag.rel === 'canonical');
       assert.equal(canonical.length, 1, `${label}: exactly one canonical in head`);
       assert.equal(new URL(canonical[0].href).href, new URL(path, origin).href, `${label}: canonical`);
