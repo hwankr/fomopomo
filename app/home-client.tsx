@@ -1,6 +1,5 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
@@ -13,8 +12,10 @@ import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
+import { SlidersHorizontal } from 'lucide-react';
 import Navbar from '@/components/Navbar';
-import { useTheme } from '@/components/ThemeProvider';
+import MobileTopBar, { Wordmark } from '@/components/layout/MobileTopBar';
+import NotificationBell from '@/components/layout/NotificationBell';
 
 export default function HomeClient() {
   const { session, loading: isLoading } = useAuthSession();
@@ -24,7 +25,6 @@ export default function HomeClient() {
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
 
   // ✨ [추가] 기록 목록 새로고침을 위한 트리거 상태
@@ -79,13 +79,37 @@ export default function HomeClient() {
 
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
-
         onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
+        mobileTopBar={
+          <MobileTopBar
+            start={<Wordmark />}
+            end={
+              <>
+                {session ? (
+                  <NotificationBell variant="topbar" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsLoginModalOpen(true)}
+                    className="ui-button-secondary min-h-10 px-4 text-sm"
+                  >
+                    로그인
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  // Space가 타이머 전역 단축키로 새지 않게 한다.
+                  onKeyDown={(event) => event.stopPropagation()}
+                  aria-label="설정"
+                  className="ui-icon-button"
+                >
+                  <SlidersHorizontal aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+              </>
+            }
+          />
+        }
       />
 
       {/* Content Container - Narrow for Focus */}

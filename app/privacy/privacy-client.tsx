@@ -1,14 +1,11 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import Navbar from '@/components/Navbar';
-import { useTheme } from '@/components/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 
 export default function PrivacyClient() {
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
@@ -29,10 +26,6 @@ export default function PrivacyClient() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onLogout={() => signOutWithPushCleanup()}
         onOpenLogin={() => supabase.auth.signInWithOAuth({ provider: 'google' })}
       />
 

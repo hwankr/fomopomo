@@ -119,11 +119,11 @@ export default function DatePicker({
 
   const previousMonthUnavailable = Boolean(minimum && endOfMonth(addMonths(visibleMonth, -1)) < minimum);
   const nextMonthUnavailable = Boolean(maximum && startOfMonth(addMonths(visibleMonth, 1)) > maximum);
-  const navigationClass = 'flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-25 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white';
+  const navigationClass = 'ui-icon-button size-9 text-ink disabled:opacity-25';
 
   return (
     <div className={`min-w-0 space-y-1.5 ${className}`}>
-      <label id={labelId} htmlFor={triggerId} className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+      <label id={labelId} htmlFor={triggerId} className="block text-[13px] font-semibold text-ink-muted">
         {label}
       </label>
       <Popover.Root open={isOpen} onOpenChange={changeOpen}>
@@ -133,12 +133,12 @@ export default function DatePicker({
             disabled={disabled || invalidRange}
             onClick={event => event.stopPropagation()}
             onKeyDown={event => event.stopPropagation()}
-            className="flex h-10 w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-rose-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-rose-800 dark:hover:bg-slate-700/60 dark:focus-visible:ring-offset-slate-900"
+            className="flex h-11 w-full min-w-0 items-center justify-between gap-3 rounded-control border-0 bg-surface px-3.5 text-left text-[15px] text-ink transition-[filter] hover:brightness-97 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <span id={valueId} className={`truncate tabular-nums ${selectedDate ? '' : 'text-slate-500 dark:text-slate-400'}`}>
+            <span id={valueId} className={`truncate tabular-nums ${selectedDate ? '' : 'text-ink-faint'}`}>
               {selectedDate ? format(selectedDate, 'yyyy.MM.dd (EEE)', { locale: ko }) : placeholder}
             </span>
-            <CalendarDays aria-hidden="true" className="h-4 w-4 shrink-0 text-rose-400 dark:text-rose-300" />
+            <CalendarDays aria-hidden="true" className="h-4 w-4 shrink-0 text-ink-muted" />
           </button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -153,14 +153,14 @@ export default function DatePicker({
             onClick={event => event.stopPropagation()}
             onMouseDown={event => event.stopPropagation()}
             onKeyDown={event => event.stopPropagation()}
-            className="ui-popover z-80 max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xl shadow-slate-900/10 outline-none dark:border-slate-700 dark:bg-slate-800 dark:shadow-black/30"
+            className="ui-popover ui-popover-surface z-80 max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto p-3 outline-none"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <button type="button" aria-label="이전 달" disabled={previousMonthUnavailable} className={navigationClass}
                 onClick={() => moveDate(addMonths(focusDate, -1), false)}>
                 <ChevronLeft aria-hidden="true" className="h-4 w-4" />
               </button>
-              <h3 id={titleId} aria-live="polite" className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+              <h3 id={titleId} aria-live="polite" className="text-[15px] font-bold tabular-nums text-ink">
                 {format(visibleMonth, 'yyyy년 M월', { locale: ko })}
               </h3>
               <button type="button" aria-label="다음 달" disabled={nextMonthUnavailable} className={navigationClass}
@@ -172,7 +172,7 @@ export default function DatePicker({
             <div role="grid" aria-labelledby={titleId}>
               <div role="row" className="mb-1 grid grid-cols-7">
                 {WEEKDAYS.map(day => (
-                  <span key={day} role="columnheader" className="py-1 text-center text-[11px] font-medium text-slate-500 dark:text-slate-400">{day}</span>
+                  <span key={day} role="columnheader" className="py-1 text-center text-xs font-semibold text-ink-muted">{day}</span>
                 ))}
               </div>
               {Array.from({ length: 6 }, (_, week) => (
@@ -195,13 +195,13 @@ export default function DatePicker({
                           aria-current={current ? 'date' : undefined}
                           onClick={() => selectDate(day)}
                           onKeyDown={event => handleDayKeyDown(event, day)}
-                          className={`relative flex h-9 w-full items-center justify-center rounded-lg text-xs tabular-nums transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-25 dark:focus-visible:ring-offset-slate-800 ${selected
-                            ? 'bg-rose-600 font-semibold text-white shadow-sm shadow-rose-500/20 hover:bg-rose-700'
+                          className={`relative mx-auto flex size-9 items-center justify-center rounded-full text-sm tabular-nums transition-colors focus-visible:z-10 disabled:cursor-not-allowed disabled:opacity-25 ${selected
+                            ? 'ui-focus-ink bg-ink font-bold text-white'
                             : current
-                              ? 'bg-rose-50 font-semibold text-rose-600 ring-1 ring-inset ring-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-900 dark:hover:bg-rose-900/40'
+                              ? 'font-bold text-pomo hover:bg-hover'
                               : inMonth
-                                ? 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700'
-                                : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}
+                                ? 'text-ink hover:bg-hover'
+                                : 'text-ink-faint hover:bg-hover'}`}
                         >
                           {format(day, 'd')}
                         </button>
@@ -212,13 +212,13 @@ export default function DatePicker({
               ))}
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 dark:border-slate-700">
+            <div className="mt-2 flex items-center justify-between">
               <button type="button" disabled={!isAllowed(today)} onClick={() => selectDate(today)}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-30 dark:text-rose-300 dark:hover:bg-rose-950/40">
+                className="ui-button-ghost min-h-9 rounded-chip px-3 text-sm text-pomo disabled:opacity-30">
                 오늘
               </button>
               <button type="button" disabled={!value} onClick={() => { onChange(''); setOpen(false); }}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200">
+                className="ui-button-ghost min-h-9 rounded-chip px-3 text-sm text-ink-muted disabled:opacity-30">
                 지우기
               </button>
             </div>

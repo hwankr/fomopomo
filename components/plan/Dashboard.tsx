@@ -1,6 +1,5 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { useState, useEffect } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { format } from 'date-fns';
@@ -17,7 +16,6 @@ import { getCalendarDayStart, getCalendarDayEnd } from '@/lib/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import Navbar from '../Navbar';
-import { useTheme } from '../ThemeProvider';
 import { usePlanRequestScope } from './usePlanRequestScope';
 
 interface DashboardProps {
@@ -28,20 +26,10 @@ export default function Dashboard({ session }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isDailyTasksExpanded, setIsDailyTasksExpanded] = usePersistedState('dashboard_daily_expanded', true);
 
-  const handleLogout = async () => {
-    await signOutWithPushCleanup();
-  };
-
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
-
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onLogout={handleLogout}
         onOpenLogin={() => supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -50,7 +38,7 @@ export default function Dashboard({ session }: DashboardProps) {
         })}
       />
 
-      <main className="max-w-6xl mx-auto">
+      <main className="max-w-6xl mx-auto box-content p-4 sm:p-6 lg:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
           {/* Left Column Wrapper */}
           <div className="contents lg:flex lg:flex-col lg:col-span-4 lg:space-y-6">

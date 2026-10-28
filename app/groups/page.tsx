@@ -1,6 +1,5 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/hooks/useAuthSession';
@@ -9,7 +8,6 @@ import CreateGroupModal from '@/components/CreateGroupModal';
 import JoinGroupModal from '@/components/JoinGroupModal';
 import LoginModal from '@/components/LoginModal';
 import Navbar from '@/components/Navbar';
-import { useTheme } from '@/components/ThemeProvider';
 
 
 interface Group {
@@ -24,7 +22,6 @@ type GroupMembershipRow = {
 
 export default function GroupsPage() {
     const { session, loading: sessionLoading } = useAuthSession();
-    const { theme, isDarkMode, toggleDarkMode } = useTheme();
     const [groups, setGroups] = useState<Group[]>([]);
     const [groupsLoading, setGroupsLoading] = useState(true);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -106,7 +103,7 @@ export default function GroupsPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-8">
+        <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
             <LoginModal
                 isOpen={isLoginModalOpen}
                 onClose={() => setIsLoginModalOpen(false)}
@@ -120,13 +117,9 @@ export default function GroupsPage() {
             />
             <Navbar
                 session={session}
-                theme={theme}
-                isDarkMode={isDarkMode}
-                toggleDarkMode={toggleDarkMode}
-                onLogout={() => signOutWithPushCleanup()}
                 onOpenLogin={() => setIsLoginModalOpen(true)}
             />
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto box-content p-4 sm:p-8">
                 <div className="mb-8">
                     <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
                         <h1 className="shrink-0 text-3xl font-bold text-gray-900 dark:text-white">내 그룹</h1>

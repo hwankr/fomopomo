@@ -1,11 +1,9 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { useState } from 'react';
 import DonationSection from '@/components/DonationSection';
 import Navbar from '@/components/Navbar';
 import { useAuthSession } from '@/hooks/useAuthSession';
-import { useTheme } from '@/components/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import LoginModal from '@/components/LoginModal';
 import SettingsModal from '@/components/SettingsModal';
@@ -16,7 +14,6 @@ import Link from 'next/link';
 
 export default function SupportClient() {
   const { session } = useAuthSession();
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -55,12 +52,7 @@ export default function SupportClient() {
 
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
       />
 
       <div className="container max-w-lg mx-auto py-6 px-4 pb-24 mt-4 animate-fade-in">

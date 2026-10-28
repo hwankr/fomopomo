@@ -31,7 +31,6 @@ const { pending, callbacks, supabaseMock } = vi.hoisted(() => {
 vi.mock('@/lib/supabase', () => ({ supabase: supabaseMock }));
 vi.mock('@/lib/pushSubscriptionLifecycle', () => ({ signOutWithPushCleanup: vi.fn() }));
 vi.mock('@/components/Navbar', () => ({ default: () => null }));
-vi.mock('@/components/ThemeProvider', () => ({ useTheme: () => ({ theme: 'light' }) }));
 vi.mock('../TaskList', () => ({ default: () => null }));
 vi.mock('../Timeline', () => ({ default: () => null }));
 vi.mock('../WeeklyPlan', () => ({ default: () => null }));

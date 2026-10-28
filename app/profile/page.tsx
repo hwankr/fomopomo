@@ -1,6 +1,5 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 // import { User } from '@supabase/supabase-js'; // Removed unused
@@ -11,7 +10,6 @@ import { useStudyStats } from '@/hooks/useStudyStats';
 import Navbar from '@/components/Navbar';
 import LoginModal from '@/components/LoginModal';
 import SettingsModal from '@/components/SettingsModal';
-import { useTheme } from '@/components/ThemeProvider';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
@@ -27,7 +25,6 @@ export default function ProfilePage() {
     earliestYear,
     loading: statsLoading,
   } = useStudyStats(userId);
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
@@ -91,12 +88,7 @@ export default function ProfilePage() {
 
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
       />
 
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8 animate-fade-in mt-16">

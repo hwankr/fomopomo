@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import Image from 'next/image';
+import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
+import ModalDialog from '@/components/ui/ModalDialog';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -35,6 +37,10 @@ export default function LoginModal({
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const titleId = useId();
+  const emailId = useId();
+  const passwordId = useId();
+  const googleButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleEmailAuth = async () => {
     if (!email || !password) {
@@ -79,118 +85,113 @@ export default function LoginModal({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-lg bg-white p-6 sm:p-8 text-gray-800 shadow-2xl">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-gray-400 hover:text-gray-600"
-          aria-label="로그인 창 닫기"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-            className="h-6 w-6"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
+    <ModalDialog
+      open={isOpen}
+      onClose={onClose}
+      aria-labelledby={titleId}
+      // 닫기 버튼보다 실제 로그인 수단에 먼저 포커스를 둔다.
+      initialFocusRef={googleButtonRef}
+      overlayClassName="animate-fade-in"
+      className="relative md:max-w-[400px]"
+    >
+      <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+      <button
+        type="button"
+        onClick={onClose}
+        className="ui-icon-button absolute top-3 right-3 text-ink-muted md:top-4 md:right-4"
+        aria-label="로그인 창 닫기"
+      >
+        <X aria-hidden="true" size={20} strokeWidth={2} />
+      </button>
 
-        <div className="mb-6 text-center">
-          <h2 className="mb-1 text-sm font-bold uppercase tracking-wider text-gray-500">
-            {isSignUp ? '회원가입' : '로그인'}
-          </h2>
-          <h1 className="text-2xl font-extrabold text-gray-700">
-            {isSignUp ? 'fomopomo 회원가입' : 'fomopomo 로그인'}
-          </h1>
-        </div>
-
-        <button
-          onClick={onGoogleLogin}
-          className="group mb-6 flex w-full items-center justify-center gap-3 rounded-lg border-2 border-gray-100 bg-white py-3 font-bold text-gray-600 shadow-sm transition-all hover:border-gray-200 hover:bg-gray-50"
-        >
-          <Image
-            src="https://www.svgrepo.com/show/475656/google-color.svg"
-            alt="Google"
-            width={20}
-            height={20}
-            className="h-5 w-5 transition-transform group-hover:scale-110"
-          />
-          Google로 계속하기
-        </button>
-
-        <div className="mb-6 flex items-center gap-4">
-          <div className="h-px flex-1 bg-gray-200"></div>
-          <span className="text-sm font-medium text-gray-400">또는</span>
-          <div className="h-px flex-1 bg-gray-200"></div>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-bold text-gray-400">
-              이메일
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="example@mail.com"
-              className="w-full rounded bg-gray-100 px-4 py-3 text-gray-700 outline-none transition-all focus:ring-2 focus:ring-gray-300"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-bold text-gray-400">
-              비밀번호
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="********"
-              className="w-full rounded bg-gray-100 px-4 py-3 text-gray-700 outline-none transition-all focus:ring-2 focus:ring-gray-300"
-              onKeyDown={(event) =>
-                event.key === 'Enter' ? void handleEmailAuth() : undefined
-              }
-            />
-          </div>
-
-          <button
-            onClick={handleEmailAuth}
-            disabled={loading}
-            className="w-full rounded bg-gray-800 py-3 font-bold text-white shadow-lg transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading
-              ? '처리 중...'
-              : isSignUp
-                ? '이메일로 가입하기'
-                : '이메일로 로그인'}
-          </button>
-        </div>
-
-        <div className="mt-6 text-center text-sm">
-          <span className="text-gray-400">
-            {isSignUp
-              ? '이미 계정이 있으신가요? '
-              : '계정이 없으신가요? '}
-          </span>
-          <button
-            onClick={() => setIsSignUp((current) => !current)}
-            className="font-bold text-gray-800 hover:underline"
-          >
-            {isSignUp ? '로그인' : '회원가입'}
-          </button>
-        </div>
+      <div className="flex flex-col gap-1 pr-10">
+        <h2 className="m-0 text-[13px] font-semibold text-ink-muted">
+          {isSignUp ? '회원가입' : '로그인'}
+        </h2>
+        <h1 id={titleId} className="m-0 text-[22px] font-extrabold tracking-[-0.02em]">
+          {isSignUp ? 'fomopomo 회원가입' : 'fomopomo 로그인'}
+        </h1>
       </div>
-    </div>
+
+      <button
+        ref={googleButtonRef}
+        type="button"
+        onClick={onGoogleLogin}
+        className="ui-button-secondary min-h-12 w-full gap-3 rounded-tile"
+      >
+        <Image
+          src="https://www.svgrepo.com/show/475656/google-color.svg"
+          alt="Google"
+          width={20}
+          height={20}
+          className="h-5 w-5"
+        />
+        Google로 계속하기
+      </button>
+
+      <p className="m-0 text-center text-[13px] font-medium text-ink-faint">또는</p>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={emailId} className="text-[13px] font-semibold text-ink-muted">
+            이메일
+          </label>
+          <input
+            id={emailId}
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="example@mail.com"
+            className="ui-input w-full"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={passwordId} className="text-[13px] font-semibold text-ink-muted">
+            비밀번호
+          </label>
+          <input
+            id={passwordId}
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="********"
+            className="ui-input w-full"
+            onKeyDown={(event) =>
+              event.key === 'Enter' ? void handleEmailAuth() : undefined
+            }
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleEmailAuth}
+          disabled={loading}
+          className="ui-button-primary ui-press mt-1 min-h-12 w-full rounded-tile"
+        >
+          {loading
+            ? '처리 중...'
+            : isSignUp
+              ? '이메일로 가입하기'
+              : '이메일로 로그인'}
+        </button>
+      </div>
+
+      <p className="m-0 text-center text-sm">
+        <span className="text-ink-muted">
+          {isSignUp
+            ? '이미 계정이 있으신가요? '
+            : '계정이 없으신가요? '}
+        </span>
+        <button
+          type="button"
+          onClick={() => setIsSignUp((current) => !current)}
+          className="font-bold text-ink hover:text-pomo"
+        >
+          {isSignUp ? '로그인' : '회원가입'}
+        </button>
+      </p>
+    </ModalDialog>
   );
 }

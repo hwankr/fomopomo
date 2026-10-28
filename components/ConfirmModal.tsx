@@ -1,6 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
+import ModalDialog from '@/components/ui/ModalDialog';
+import { cn } from '@/lib/utils';
 
 interface ConfirmModalProps {
     isOpen: boolean;
@@ -23,46 +25,61 @@ export default function ConfirmModal({
     cancelText = '취소',
     isDangerous = false,
 }: ConfirmModalProps) {
-    if (!isOpen) return null;
+    const titleId = useId();
+    const messageId = useId();
+    const cancelRef = useRef<HTMLButtonElement>(null);
+    const confirmRef = useRef<HTMLButtonElement>(null);
 
     return (
-        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden transform transition-all animate-scale-in">
-                <div className="p-6">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                        {title}
-                    </h2>
-                    {typeof message === 'string' ? (
-                        <p className="text-gray-600 dark:text-gray-300 mb-6">
-                            {message}
-                        </p>
-                    ) : (
-                        <div className="text-gray-600 dark:text-gray-300 mb-6">
-                            {message}
-                        </div>
-                    )}
-                    <div className="flex justify-end gap-3">
-                        <button
-                            onClick={onClose}
-                            className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl font-medium transition-colors"
-                        >
-                            {cancelText}
-                        </button>
-                        <button
-                            onClick={() => {
-                                onConfirm();
-                                onClose();
-                            }}
-                            className={`ui-press px-4 py-2 text-white rounded-xl font-bold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 ${isDangerous
-                                    ? 'bg-rose-500 hover:bg-rose-600'
-                                    : 'bg-blue-500 hover:bg-blue-600'
-                                }`}
-                        >
-                            {confirmText}
-                        </button>
-                    </div>
+        <ModalDialog
+            open={isOpen}
+            onClose={onClose}
+            role="alertdialog"
+            aria-labelledby={titleId}
+            aria-describedby={messageId}
+            // 되돌릴 수 없는 동작이면 안전한 취소에, 아니면 확인에 먼저 포커스를 둔다.
+            initialFocusRef={isDangerous ? cancelRef : confirmRef}
+            overlayClassName="z-70 animate-fade-in"
+            className="animate-scale-in gap-3 md:gap-4"
+        >
+            <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+            <h2 id={titleId} className="ui-dialog-title">
+                {title}
+            </h2>
+            {typeof message === 'string' ? (
+                <p id={messageId} className="m-0 text-sm text-ink-muted md:text-[15px]">
+                    {message}
+                </p>
+            ) : (
+                <div id={messageId} className="text-sm text-ink-muted md:text-[15px]">
+                    {message}
                 </div>
+            )}
+            <div className="flex gap-2 pt-2 md:justify-end md:pt-1">
+                <button
+                    ref={cancelRef}
+                    type="button"
+                    onClick={onClose}
+                    className="ui-button-secondary min-h-[50px] flex-1 rounded-tile px-5 md:min-h-12 md:flex-none"
+                >
+                    {cancelText}
+                </button>
+                <button
+                    ref={confirmRef}
+                    type="button"
+                    onClick={() => {
+                        onConfirm();
+                        onClose();
+                    }}
+                    // 되돌릴 수 없는 동작은 진한 로즈, 나머지는 먹색(디자인의 확인 대화상자 기준)
+                    className={cn(
+                        'ui-button-primary ui-press min-h-[50px] flex-1 rounded-tile px-6 md:min-h-12 md:flex-none',
+                        isDangerous ? 'bg-pomo-deep' : 'bg-ink',
+                    )}
+                >
+                    {confirmText}
+                </button>
             </div>
-        </div>
+        </ModalDialog>
     );
 }

@@ -1,11 +1,9 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import Link from 'next/link';
 import { ArrowLeft, Mail, Copy } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { useAuthSession } from '@/hooks/useAuthSession';
-import { useTheme } from '@/components/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import { useState } from 'react';
 import LoginModal from '@/components/LoginModal';
@@ -15,7 +13,6 @@ import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 
 export default function ContactClient() {
   const { session } = useAuthSession();
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -54,12 +51,7 @@ export default function ContactClient() {
 
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
       />
 
       <div className="container max-w-lg mx-auto py-6 px-4 pb-24 mt-4 animate-fade-in">
