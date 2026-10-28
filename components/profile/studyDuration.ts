@@ -17,7 +17,7 @@ export function formatShortDuration(seconds: number) {
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-// 좁은 막대 위(모바일 연간): 1시간 이상은 반올림한 시간("70h"), 그보다 적으면 분("45m")
+// 좁은 막대 위(모바일 연간): 시간으로 반올림한 값("70h", 30분 이상이면 "1h"), 반올림해 0시간이면 분("20m")
 export function formatRoundedHours(seconds: number) {
   const hours = Math.round(Math.max(0, seconds) / 3600);
   return hours ? `${hours}h` : formatShortDuration(seconds);

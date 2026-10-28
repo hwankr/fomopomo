@@ -9,7 +9,8 @@ import { supabase } from '@/lib/supabase';
 import { getCalendarStudyDayRange } from '@/lib/dateUtils';
 import { getSessionBatchKey, isPomodoroMode } from '@/lib/pomodoroCounts';
 import { cn } from '@/lib/utils';
-import { formatClock, formatStudyTime, useIsDesktop } from './planUi';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { formatClock, formatStudyTime } from './planUi';
 import { usePlanRequestScope } from './usePlanRequestScope';
 
 interface TimelineProps {

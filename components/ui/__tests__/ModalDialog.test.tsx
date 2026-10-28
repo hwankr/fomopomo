@@ -220,6 +220,49 @@ describe('ModalDialog stacking', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('ignores overlay clicks by default', () => {
+    const onClose = vi.fn();
+    render(<ModalDialog open onClose={onClose} aria-label="안내"><button type="button">확인</button></ModalDialog>);
+
+    fireEvent.click(screen.getByRole('dialog', { name: '안내' }).parentElement!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes from the overlay with closeOnOverlayClick, but not from the panel or a dialog stacked above', () => {
+    const onOuterClose = vi.fn();
+    const onInnerClose = vi.fn();
+    function Dismissible() {
+      const [innerOpen, setInnerOpen] = useState(false);
+      return (
+        <ModalDialog open onClose={onOuterClose} aria-label="설치 안내" closeOnOverlayClick>
+          <button type="button" onClick={() => setInnerOpen(true)}>확인 열기</button>
+          <ConfirmModal
+            isOpen={innerOpen}
+            onClose={() => { onInnerClose(); setInnerOpen(false); }}
+            onConfirm={vi.fn()}
+            title="정말 지울까요?"
+            message="되돌릴 수 없어요."
+          />
+        </ModalDialog>
+      );
+    }
+    render(<Dismissible />);
+
+    const panel = screen.getByRole('dialog', { name: '설치 안내' });
+    fireEvent.click(panel);
+    expect(onOuterClose).not.toHaveBeenCalled();
+
+    // 위에 뜬 대화상자의 덮개 클릭은 아래 대화상자까지 올라오지만 닫지 않는다.
+    fireEvent.click(screen.getByRole('button', { name: '확인 열기' }));
+    fireEvent.click(screen.getByRole('alertdialog', { name: '정말 지울까요?' }).parentElement!);
+    expect(onOuterClose).not.toHaveBeenCalled();
+    expect(onInnerClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+
+    fireEvent.click(panel.parentElement!);
+    expect(onOuterClose).toHaveBeenCalledTimes(1);
+  });
+
   it('focuses the panel itself when it has nothing focusable', () => {
     render(<ModalDialog open onClose={vi.fn()} aria-label="안내"><p>내용</p></ModalDialog>);
 

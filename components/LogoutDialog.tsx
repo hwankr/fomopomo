@@ -2,17 +2,24 @@
 
 import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import ModalDialog from '@/components/ui/ModalDialog';
 import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 
 interface LogoutDialogProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * 로그아웃 바로 전에 할 일(설정 화면은 저장하지 않은 변경을 저장한다).
+   * false를 돌려주면 로그아웃하지 않고 대화상자를 열어 둔다. 알림은 이 함수가 띄운다.
+   */
+  beforeLogout?: () => Promise<boolean>;
+  /** 로그아웃에 실패했을 때 부른다. beforeLogout에서 바꾼 상태를 되돌릴 때 쓴다. */
+  onLogoutFailed?: () => void;
 }
 
-// 프로필의 로그아웃 확인. 로그아웃하면 타이머(/)로 돌아간다.
-export default function LogoutDialog({ open, onClose }: LogoutDialogProps) {
+// 로그아웃 확인(프로필 보드의 "로그아웃할까요?"). 프로필과 설정이 함께 쓴다. 로그아웃하면 타이머(/)로 간다.
+export default function LogoutDialog({ open, onClose, beforeLogout, onLogoutFailed }: LogoutDialogProps) {
   const router = useRouter();
   const titleId = useId();
   const messageId = useId();
@@ -26,11 +33,13 @@ export default function LogoutDialog({ open, onClose }: LogoutDialogProps) {
   const logout = async () => {
     setPending(true);
     try {
+      if (beforeLogout && !(await beforeLogout())) return;
       const { error } = await signOutWithPushCleanup();
       if (error) throw error;
       onClose();
       router.replace('/');
     } catch (error) {
+      onLogoutFailed?.();
       console.error('로그아웃 실패:', error);
       toast.error('로그아웃하지 못했어요. 다시 시도해 주세요.');
     } finally {

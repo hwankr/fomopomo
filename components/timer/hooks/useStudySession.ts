@@ -643,14 +643,8 @@ export const useStudySession = ({
           recoveringSessionIds.delete(record.sessionId);
           return 'skipped';
         }
-        const toastId = toast.loading('기록 저장 중...', {
-          style: {
-            borderRadius: '10px',
-            background: '#333',
-            color: '#fff',
-            fontSize: '14px',
-          },
-        });
+        // 모양은 레이아웃 Toaster의 공통 토스트를 따른다(성공·실패로 바꿀 때도 같은 모양).
+        const toastId = toast.loading('기록 저장 중...');
 
         try {
           const response = await callRecordBatchRpc({ sessionId: record.sessionId, ownerId: record.ownerId, ...payload }, isCurrentOwner);

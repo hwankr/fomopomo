@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Session } from '@supabase/supabase-js';
 import { Bell, BellOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { getDayStart, getStudyDayRange, getStudyWeekRange, type TimeRange } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import Avatar, { getDisplayName } from '@/components/ui/Avatar';
+import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
 import { formatHoursMinutes, getLiveSeconds, useNow } from '@/components/common/LiveStudyDuration';
 import MemberReportModal from '../MemberReportModal';
@@ -585,7 +586,7 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
         title="친구 삭제"
         message={`${deletingFriend?.name ?? ''} 님을 친구 목록에서 삭제할까요? 서로의 공부 상태와 순위가 더 이상 보이지 않아요.`}
         confirmText="삭제"
-        isDangerous
+        confirmTone="danger"
       />
 
       {
@@ -601,9 +602,6 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
     </>
   );
 }
-
-// 팝오버 안 키 입력이 window 단축키로 새지 않게 막는다.
-const isolateKeys = (event: KeyboardEvent<HTMLElement>) => event.stopPropagation();
 
 const MENU_ITEM_CLASS =
   'flex min-h-10 w-full items-center gap-2.5 rounded-control px-3 text-left text-sm font-medium transition-colors hover:bg-hover';
@@ -635,7 +633,7 @@ function FriendRowMenu({ friend, name, onToggleNotification, onEditNickname, onD
           ref={triggerRef}
           type="button"
           aria-label={`${name} 친구 메뉴`}
-          onKeyDown={isolateKeys}
+          onKeyDown={stopActivationKeys}
           className="ui-icon-button shrink-0 text-ink-muted"
         >
           <MoreHorizontal aria-hidden="true" size={18} strokeWidth={1.8} />
@@ -647,7 +645,7 @@ function FriendRowMenu({ friend, name, onToggleNotification, onEditNickname, onD
           align="end"
           sideOffset={4}
           collisionPadding={12}
-          onKeyDown={isolateKeys}
+          onKeyDown={stopAllKeys}
           className="ui-popover ui-popover-surface z-50 w-64 max-w-[calc(100vw-24px)] outline-none"
         >
           <div className="flex flex-col gap-0.5 px-3 pt-2 pb-2.5">

@@ -2,7 +2,7 @@
 
 리디자인 화면은 이 문서와 디자인 보드(`.design-ref/*.dc.html`, 이미지는 `.design-ref/png/`)만 보고 구현한다. 토큰·유틸리티·공통 컴포넌트는 여기 적힌 이름을 쓰고, hex 값을 직접 쓰거나 같은 역할의 프리미티브를 새로 만들지 않는다.
 
-- 라이트 테마만 지원한다. 다크·봄 테마와 테마 전환은 없다. `<html>`에 `dark`/`seasonal-spring` 클래스를 붙이는 코드는 없으며, 아직 남은 `dark:` 유틸리티는 `.dark` 클래스에만 묶여 있어 동작하지 않는다(`app/globals.css`의 `@variant dark`, 정리 작업에서 함께 제거한다). 리디자인하는 파일에서는 `dark:` 클래스를 지운다.
+- 라이트 테마만 지원한다. 다크·봄 테마와 테마 전환은 없고 `:root`는 `color-scheme: light`다. `dark:` 변형은 정의하지 않으며 코드에 `dark:` 클래스가 없다. 새로 쓰지 않는다(쓰면 Tailwind 기본값대로 OS 다크 모드를 따라가 라이트 화면이 깨진다).
 - 중단점은 `md`(768px) 하나다. `md` 미만은 모바일 보드(`XMobile.dc.html`), 이상은 데스크톱 보드(`X.dc.html`)를 따른다.
 - 보드의 샘플 데이터(이름·숫자·알림)는 가짜다. 실제 데이터를 그린다.
 
@@ -100,7 +100,13 @@
 | `ui-scrollbar-none` | 스크롤 막대 숨김(모바일 가로 탭 줄) | |
 | `animate-fade-in`, `animate-scale-in`, `ui-panel-enter` | 160ms 등장 | |
 
-대화상자 버튼 줄: 데스크톱 `flex justify-end gap-2`, 모바일 `flex gap-2` + 각 버튼 `min-h-[50px] flex-1`(`ConfirmModal` 참고). 되돌릴 수 없는 확인은 `bg-pomo-deep`, 일반 확인은 `bg-ink`, 모드 동작(그룹 나가기 등)은 `bg-pomo` — `ConfirmModal`에서는 `confirmTone="danger" | "ink" | "pomo"`로 고른다.
+대화상자 버튼 줄: 데스크톱 `flex justify-end gap-2`, 모바일 `flex gap-2` + 각 버튼 `min-h-[50px] flex-1`(`ConfirmModal` 참고). 확인 버튼 색은 세 가지다. `ConfirmModal`에서는 `confirmTone`으로 고른다.
+
+| `confirmTone` | 색 | 처음 포커스 | 쓰는 곳 |
+| --- | --- | --- | --- |
+| `danger` | `bg-pomo-deep` | 취소 | 되돌릴 수 없는 동작: 계정 초기화·탈퇴, 기록·할 일·계획 삭제, 친구 삭제, 그룹 삭제·멤버 내보내기·그룹장 넘기기 |
+| `pomo` | `bg-pomo` | 확인 | 모드 동작: 그룹 나가기. 로그아웃 확인(`LogoutDialog`)도 같은 로즈(`ui-button-primary`)다 |
+| `ink`(기본) | `bg-ink` | 확인 | 일반 확인: 설정 초기화 |
 
 ## 4. 공통 컴포넌트
 
@@ -142,7 +148,7 @@
 
 ### 대화상자 `components/ui/ModalDialog.tsx`
 
-**모든 모달 대화상자(설정 빠른 창, 그룹 만들기, 로그아웃 확인, 작업 시트 등)는 `ModalDialog`로 만든다.** `.ui-dialog-overlay`/`.ui-dialog` div를 직접 그리거나 포커스 처리를 따로 만들지 않는다.
+**모든 모달 대화상자(설정 빠른 창, 그룹 만들기, 로그아웃 확인, 작업 시트, 앱 설치 안내 등)는 `ModalDialog`로 만든다.** `.ui-dialog-overlay`/`.ui-dialog` div를 직접 그리거나 포커스 처리를 따로 만들지 않는다.
 
 ```tsx
 <ModalDialog
@@ -153,6 +159,7 @@
   aria-describedby={descId}         // 선택
   initialFocusRef={cancelRef}       // 선택. 없으면 첫 번째 Tab 대상, 그것도 없으면 패널
   overlayClassName="z-70"           // 선택. 다른 대화상자 위에 뜰 때
+  closeOnOverlayClick               // 선택. 덮개를 누르면 onClose(기본은 닫지 않음)
   className="md:max-w-[400px]"      // 선택. 패널(.ui-dialog)에 덧붙임
 >
   <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
@@ -164,7 +171,8 @@
 - `document.body`로 포털해 띄우고, 패널에 `role`·`aria-modal="true"`를 붙인다. 모바일은 아래 시트, `md`부터 가운데 패널(`.ui-dialog`).
 - 열 때: 연 요소를 기억하고 포커스를 안으로 옮긴다. 되돌릴 수 없는 확인은 안전한 취소에, 일반 확인은 확인 버튼에, 입력 대화상자는 첫 실제 컨트롤에 `initialFocusRef`를 준다.
 - 열린 동안: Tab/Shift+Tab을 패널 안에서 돈다(문서 캡처 단계에서 처리하므로 안쪽 컨트롤이 전파를 막아도 빠져나가지 않는다. 포털된 팝오버 내용 안의 Tab은 그 팝오버가 다룬다). body의 다른 자식은 `inert`가 된다(포인터·키보드·보조기기 모두 차단). 계속 보여야 하는 영역은 `data-dialog-keep`으로 남긴다(토스트). 패널 안 키 입력은 부모 대화상자나 window 단축키(타이머 Space)로 전달되지 않는다.
-- Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 덮개를 눌러도 닫히지 않는다. 겹친 층은 안쪽부터 하나씩 닫힌다.
+- Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 겹친 층은 안쪽부터 하나씩 닫힌다.
+- 덮개: 기본은 눌러도 닫히지 않는다. 앱 설치 안내처럼 언제 닫아도 되는 가벼운 안내만 `closeOnOverlayClick`으로 덮개 클릭에 `onClose`를 부른다(맨 위 대화상자의 덮개를 직접 누를 때만이며, 패널이나 위에 뜬 대화상자에서 올라온 클릭은 무시한다). 입력·확인 대화상자에는 쓰지 않는다.
   - 열린 선택 목록·달력·팝오버가 있으면 첫 Escape는 그 층만 닫고(Radix가 `preventDefault`), 다음 Escape가 대화상자를 닫는다.
   - 안쪽 요소가 Escape를 직접 쓰려면(예: 입력만 닫는 폼) `event.preventDefault()`를 부른다. 그러면 대화상자는 닫히지 않는다.
   - 안쪽 요소가 전파만 막고 `preventDefault`를 하지 않은 Escape도 이벤트 처리가 끝난 뒤 대화상자가 닫는다(그래서 닫힌 선택·날짜 트리거에 포커스가 있어도 Escape로 닫힌다).
@@ -173,7 +181,8 @@
 
 ### 확인·로그인·선택
 
-- `ConfirmModal` `{ isOpen, onClose, onConfirm, title, message, confirmText?, cancelText?, confirmTone?, isDangerous? }` — `ModalDialog` `role="alertdialog"`, z-70. `confirmTone`: `'ink'`(일반 확인, 기본 · `bg-ink`) · `'pomo'`(모드 동작, 예: 그룹 나가기 · `bg-pomo`) · `'danger'`(되돌릴 수 없음, 예: 계정 초기화 · `bg-pomo-deep`). `danger`는 처음 포커스가 취소, 나머지는 확인. 예전 `isDangerous`는 `confirmTone`이 없을 때 `'danger'`와 같다(새 코드는 `confirmTone`을 쓴다).
+- `ConfirmModal` `{ isOpen, onClose, onConfirm, title, message, confirmText?, cancelText?, confirmTone?, isDangerous? }` — `ModalDialog` `role="alertdialog"`, z-70. `confirmTone`: `'ink'`(일반 확인, 기본 · `bg-ink`) · `'pomo'`(모드 동작, 예: 그룹 나가기 · `bg-pomo`) · `'danger'`(되돌릴 수 없음, 예: 계정 초기화 · `bg-pomo-deep`). 쓰는 곳은 위 §3의 표. `danger`는 처음 포커스가 취소, 나머지는 확인. 예전 `isDangerous`는 `confirmTone`이 없을 때 `'danger'`와 같다(화면 코드는 모두 `confirmTone`을 쓴다).
+- `LogoutDialog` `{ open, onClose, beforeLogout?, onLogoutFailed? }` (`components/LogoutDialog.tsx`) — 프로필 보드의 “로그아웃할까요?” 확인. 프로필과 설정이 함께 쓴다. `alertdialog`, 처음 포커스는 `로그아웃`(`ui-button-primary`). 확인하면 정리 로그아웃(`signOutWithPushCleanup`) 뒤 `/`로 간다. 실패하면 알림을 띄우고 열어 둔다. `beforeLogout`은 그 앞 단계(설정 화면: 저장하지 않은 변경 저장)로, `false`를 돌려주면 로그아웃하지 않는다. `onLogoutFailed`는 로그아웃이 실패했을 때 그 단계에서 바꾼 상태를 되돌린다.
 - `LoginModal` `{ isOpen, onClose, onGoogleLogin }` — `ModalDialog`(데스크톱 400px), 처음 포커스는 `Google로 계속하기`, 닫기 `ui-icon-button`.
 - `AppSelect` `{ value, onValueChange, options, label?, placeholder?, displayValue?, compact?, disabled?, … }` — 트리거는 `ui-input`과 같은 모양(compact 36px·13px), 목록은 `ui-popover-surface`, 항목 40px·`hover` 강조·선택 600 + 로즈 체크. 화면에서는 기본 `<select>` 대신 이것을 쓴다.
 - `DatePicker` `{ value, onChange, label, min?, max?, … }` — 같은 입력 모양, 달력 팝오버. 선택한 날 `bg-ink` 흰 글자, 오늘 로즈 글자.
@@ -212,9 +221,9 @@
 | 탭 라벨 | — | 11px |
 | 타이머 숫자 | `font-display` 700, 232px(시:분:초면 150px), `min(…, 19vw)` | 124px(시:분:초면 90px) |
 
-목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 행 사이 간격 2px, 선 없음. 최소 높이는 아래 **바깥 높이**로 준다: 타이머 작업 선택 56px(모바일 56px), 최근 활동 행 52px(버튼), 설정 과목 행 60px, 친구 순위 82px, 받은 요청 92px — 화면마다 보드에서 아래 규칙으로 다시 계산한다.
+목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 행 사이 간격 2px, 선 없음. 최소 높이는 아래 **바깥 높이**로 준다: 타이머 작업 선택 56px(모바일 56px), 최근 활동 행 데스크톱 52px / 모바일 60px(버튼, 모바일 보드는 `content-box` 50px + 위아래 5px), 설정 과목 행 60px, 친구 순위 82px, 받은 요청 92px — 화면마다 보드에서 아래 규칙으로 다시 계산한다.
 
-**보드 치수 옮기기(content-box 주의)**: 보드의 `div`·`li`·`a`·`span`·`p`는 인라인 스타일에 `box-sizing: border-box`가 없으면 CSS 기본값 content-box라서 `width`/`min-height`/`height`에 padding이 **더해진다**(예: `min-height: 66px; padding: 8px 12px` → 바깥 82px). Tailwind는 모두 border-box이므로 `min-h-[82px] py-2`처럼 바깥 크기를 쓴다. `button`·`input`·`select`는 브라우저 기본이 border-box라 보드 값을 그대로 쓴다(예: 시작 버튼 `height: 56px; min-width: 200px; padding: 0 36px` → 바깥 200×56). 같은 개수의 항목으로 PNG와 행 간격을 비교해 확인한다.
+**보드 치수 옮기기(content-box 주의)**: 보드의 `div`·`li`·`a`·`span`·`p`는 인라인 스타일에 `box-sizing: border-box`가 없으면 CSS 기본값 content-box라서 `width`/`min-height`/`height`에 padding이 **더해진다**(예: `min-height: 66px; padding: 8px 12px` → 바깥 82px). Tailwind는 모두 border-box이므로 `min-h-[82px] py-2`처럼 바깥 크기를 쓴다. `button`·`select`는 브라우저 기본이 border-box라 보드 값을 그대로 쓴다(예: 시작 버튼 `height: 56px; min-width: 200px; padding: 0 36px` → 바깥 200×56). 글자 입력칸(`input type=text·email` 등)은 브라우저 기본이 content-box지만, 보드의 입력칸은 인라인 스타일에 `box-sizing: border-box`를 직접 적어 두었으므로 역시 보드 값이 바깥 크기다. 어느 태그든 인라인 스타일에 적힌 `box-sizing`이 태그 기본값보다 먼저다(예: 모바일 최근 활동 행 버튼은 `content-box`라 50px + 위아래 5px → 60px). 같은 개수의 항목으로 PNG와 행 간격을 비교해 확인한다.
 
 ## 6. 구슬 규칙
 

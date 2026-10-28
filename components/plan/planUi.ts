@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from 'react';
-
 export const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 /** "10월 27일 화요일", short면 "10월 27일 화" */
@@ -22,22 +20,4 @@ export function formatClock(totalMinutes: number): string {
   const minutes = Math.round(totalMinutes);
   const hour = Math.floor(minutes / 60) % 24;
   return `${hour}:${String(minutes % 60).padStart(2, '0')}`;
-}
-
-const DESKTOP_QUERY = '(min-width: 768px)';
-
-function subscribeDesktop(onChange: () => void) {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
-  const query = window.matchMedia(DESKTOP_QUERY);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-// md(768px) 이상이면 데스크톱 보드를 따른다. 서버 렌더에서는 모바일로 본다.
-export function useIsDesktop(): boolean {
-  return useSyncExternalStore(
-    subscribeDesktop,
-    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(DESKTOP_QUERY).matches,
-    () => false,
-  );
 }

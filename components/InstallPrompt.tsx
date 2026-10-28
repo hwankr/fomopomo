@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Download, Share, X } from 'lucide-react';
+import ModalDialog from './ui/ModalDialog';
 import { cn } from '../lib/utils';
 
 type BeforeInstallPromptEvent = Event & {
@@ -192,7 +193,8 @@ function BrowserInstallPrompt() {
   return null;
 }
 
-// 설치 안내 면: 덮개(누르면 닫힘) + 아래쪽에 뜨는 팝오버. 데스크톱은 오른쪽 아래 360px.
+// 설치 안내 면: ModalDialog(덮개를 누르거나 Escape로 닫힘, 다음 안내까지 쉬는 기간을 남긴다).
+// 패널은 대화상자 대신 아래쪽에 뜨는 팝오버 모양이다. 모바일은 가장자리에서 12px 안쪽, 데스크톱은 오른쪽 아래 360px.
 function PromptSurface({
   isClosing,
   onClose,
@@ -205,39 +207,36 @@ function PromptSurface({
   const titleId = useId();
 
   return (
-    <>
-      <div
-        className={cn(
-          'fixed inset-0 z-50 bg-scrim',
-          isClosing ? 'opacity-0 transition-opacity duration-300' : 'animate-fade-in'
-        )}
-        onClick={onClose}
-      />
-      <div
-        role="region"
-        aria-labelledby={titleId}
-        className={cn(
-          'ui-popover-surface fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-50 flex flex-col gap-3 rounded-panel p-5 md:inset-x-auto md:right-6 md:bottom-6 md:w-[360px]',
-          isClosing
-            ? 'translate-y-1 opacity-0 transition-[opacity,translate] duration-300'
-            : 'ui-panel-enter'
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <p id={titleId} className="flex-1 pt-2 text-[15px] font-bold">
-            더 빠르게 이용하려면 앱을 설치하세요.
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="설치 안내 닫기"
-            className="ui-icon-button -mt-1 -mr-2 text-ink-muted"
-          >
-            <X aria-hidden="true" className="size-5" strokeWidth={1.8} />
-          </button>
-        </div>
-        {children}
+    <ModalDialog
+      open
+      onClose={onClose}
+      aria-labelledby={titleId}
+      closeOnOverlayClick
+      overlayClassName={cn(
+        'p-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:items-end md:justify-end md:p-6',
+        isClosing ? 'opacity-0 transition-opacity duration-300' : 'animate-fade-in'
+      )}
+      className={cn(
+        'gap-3 rounded-panel p-5 shadow-popover md:w-[360px]',
+        isClosing
+          ? 'translate-y-1 opacity-0 transition-[opacity,translate] duration-300'
+          : 'ui-panel-enter'
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <h2 id={titleId} className="m-0 flex-1 pt-2 text-[15px] font-bold">
+          더 빠르게 이용하려면 앱을 설치하세요.
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="설치 안내 닫기"
+          className="ui-icon-button -mt-1 -mr-2 text-ink-muted"
+        >
+          <X aria-hidden="true" className="size-5" strokeWidth={1.8} />
+        </button>
       </div>
-    </>
+      {children}
+    </ModalDialog>
   );
 }

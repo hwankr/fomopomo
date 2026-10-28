@@ -47,7 +47,8 @@ import {
 import { notifyStudySubjectsChanged, type StudySubject } from '@/lib/studySubjects';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
-import { formatDayLabel, formatStudyTime, useIsDesktop } from './planUi';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { formatDayLabel, formatStudyTime } from './planUi';
 
 interface Task {
   id: string;

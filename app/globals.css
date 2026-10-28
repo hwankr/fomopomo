@@ -65,10 +65,6 @@
   --animate-bead-beat: ui-bead-beat 1.4s ease-in-out infinite;
 }
 
-/* 라이트 테마만 지원합니다. 아직 리디자인하지 않은 파일의 dark: 유틸리티가
-   OS 설정을 따라가지 않도록 .dark 클래스에만 묶어 둡니다(이 클래스는 더 이상 붙지 않음). */
-@variant dark (&:where(.dark, .dark *));
-
 @layer base {
   :root {
     color-scheme: light;

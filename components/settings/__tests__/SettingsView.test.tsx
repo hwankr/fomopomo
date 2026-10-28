@@ -980,6 +980,30 @@ describe('SettingsView (/settings)', () => {
     expect(within(dialog()).getByRole('button', { name: '로그아웃' })).toBeEnabled();
   });
 
+  it('keeps the dialog open after a failed sign-out and still saves later edits when the page is left', async () => {
+    mockUser('user-signout-fail');
+    setStoredSettings({ longBreak: 20 });
+    supabaseMock.auth.signOut.mockResolvedValueOnce({ error: new Error('network') });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { unmount } = renderPage();
+    await waitFor(() => expect(longBreakInput()).toHaveValue(20));
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }));
+    fireEvent.click(within(dialog()).getByRole('button', { name: '로그아웃' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('로그아웃하지 못했어요. 다시 시도해 주세요.'));
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: '로그아웃' })).toBeEnabled());
+
+    // The failed logout no longer counts as leaving: a later edit is saved on leave.
+    fireEvent.click(within(dialog()).getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '긴 휴식 늘리기' }));
+    unmount();
+    await waitFor(() => expect(upsertMock).toHaveBeenCalledWith({
+      user_id: 'user-signout-fail',
+      settings: expect.objectContaining({ longBreak: 25 }),
+    }));
+  });
+
   it('shows login prompts instead of account actions for guests while timer settings stay editable', async () => {
     setStoredSettings({});
     const { onOpenLogin } = renderPage();

@@ -145,25 +145,63 @@ describe('InstallPrompt', () => {
     ).toBeNull();
   });
 
-  it('shows the prompt as a labelled region and closes it from the backdrop with a cooldown', () => {
+  it('shows the prompt as a modal dialog and closes it from the backdrop with a cooldown', () => {
     render(<InstallPrompt />);
 
-    const region = screen.getByRole('region', {
+    const dialog = screen.getByRole('dialog', {
       name: '더 빠르게 이용하려면 앱을 설치하세요.',
     });
-    const backdrop = region.previousElementSibling as HTMLElement;
-    expect(backdrop).not.toBeNull();
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    const backdrop = dialog.parentElement as HTMLElement;
+
+    // 패널 안을 눌러도 닫히지 않는다.
+    fireEvent.click(dialog);
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).toBeNull();
 
     act(() => {
       fireEvent.click(backdrop);
-      vi.runAllTimers();
+    });
+    // 300ms 동안 사라지는 전환을 보여 준 뒤 닫힌다.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(300);
     });
 
     expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
     expect(
       window.localStorage.getItem('pwa_prompt_permanently_dismissed')
     ).toBeNull();
-    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps keyboard focus in the prompt, makes the page inert and closes on Escape with a cooldown', () => {
+    const { container } = render(
+      <>
+        <button type="button">배경 버튼</button>
+        <InstallPrompt />
+      </>
+    );
+
+    const close = screen.getByRole('button', { name: '설치 안내 닫기' });
+    const neverAgain = screen.getByRole('button', { name: '다시 보지 않기' });
+    expect(close).toHaveFocus();
+    expect(container).toHaveAttribute('inert');
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(neverAgain).toHaveFocus();
+    fireEvent.keyDown(neverAgain, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    act(() => {
+      fireEvent.keyDown(close, { key: 'Escape' });
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
+    expect(
+      window.localStorage.getItem('pwa_prompt_permanently_dismissed')
+    ).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(container).not.toHaveAttribute('inert');
   });
 
   it('stores a permanent dismissal and hides the prompt', () => {
@@ -248,6 +286,7 @@ describe('InstallPrompt', () => {
 
       expect(onRecoverableError).not.toHaveBeenCalled();
       expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     }
   );
 
@@ -261,6 +300,7 @@ describe('InstallPrompt', () => {
 
     expect(onRecoverableError).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows the iOS prompt after hydration when the dismissal cooldown has expired', async () => {
@@ -281,6 +321,7 @@ describe('InstallPrompt', () => {
 
     expect(onRecoverableError).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     let installEvent!: BeforeInstallPromptEvent;
     act(() => {
@@ -294,5 +335,6 @@ describe('InstallPrompt', () => {
 
     expect(installEvent.prompt).toHaveBeenCalledOnce();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

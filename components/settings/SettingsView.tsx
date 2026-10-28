@@ -11,7 +11,6 @@ import MobileTopBar from '@/components/layout/MobileTopBar';
 import NotificationManager from '@/components/NotificationManager';
 import DonationSection from '@/components/DonationSection';
 import SubjectManager from '@/components/subjects/SubjectManager';
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
 import { cn } from '@/lib/utils';
 import AccountSection from './AccountSection';
 import { deleteAccount, resetAccount } from './accountActions';
@@ -117,23 +116,14 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
     setAccountStatus('설정을 기본값으로 되돌렸어요.');
   };
 
-  // 저장하지 않은 변경을 먼저 저장하고 로그아웃한다. 로그아웃하면 타이머(/)로 간다.
-  const handleLogout = async () => {
+  // 로그아웃 대화상자가 로그아웃하기 전에 부른다. 저장하지 않은 변경을 먼저 저장하고, 저장하지 못하면 로그아웃하지 않는다.
+  // 저장한 뒤에는 떠날 때 저장을 끈다(로그아웃에 실패하면 onLogoutFailed가 되돌린다). 로그아웃하면 타이머(/)로 간다.
+  const beforeLogout = async () => {
     if (form.isDirty && (await handleSave()) !== 'saved') {
       toast.error('설정을 저장하지 못해 로그아웃하지 않았어요. 다시 시도해주세요.');
       return false;
     }
     leavingRef.current = true;
-    try {
-      const { error } = await signOutWithPushCleanup();
-      if (error) throw error;
-    } catch (error) {
-      leavingRef.current = false;
-      console.error('로그아웃 실패:', error);
-      toast.error('로그아웃하지 못했어요. 다시 시도해주세요.');
-      return false;
-    }
-    router.replace('/');
     return true;
   };
 
@@ -387,7 +377,8 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
             status={accountStatus}
             onOpenLogin={() => { void openLogin(); }}
             onResetSettings={() => { void handleResetSettings(); }}
-            onLogout={handleLogout}
+            beforeLogout={beforeLogout}
+            onLogoutFailed={() => { leavingRef.current = false; }}
             onResetAccount={() => { void resetAccount({ beforeLeave: leave }); }}
             onDeleteAccount={() => { void deleteAccount(router, { beforeLeave: leave }); }}
           />

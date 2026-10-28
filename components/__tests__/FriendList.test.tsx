@@ -515,6 +515,33 @@ describe('FriendList', () => {
     expect(toastMock.success).toHaveBeenCalledWith('공부 시작 알림을 껐어요.');
   });
 
+  it('keeps only the keys the row menu uses away from window shortcuts', async () => {
+    setupFriendshipResponse(onlineFriend);
+    render(<FriendList session={session as never} refreshTrigger={0} />);
+    await waitFor(() => {
+      expect(screen.getByText('Buddy')).toBeInTheDocument();
+    });
+
+    const reached: string[] = [];
+    const record = (event: KeyboardEvent) => reached.push(event.key);
+    window.addEventListener('keydown', record);
+    try {
+      // 닫힌 트리거는 Enter·Space만 막고 Escape·Tab은 대화상자·폼으로 올려 보낸다.
+      const trigger = screen.getByRole('button', { name: 'Buddy 친구 메뉴' });
+      for (const key of [' ', 'Enter', 'Escape', 'Tab']) fireEvent.keyDown(trigger, { key });
+      expect(reached).toEqual(['Escape', 'Tab']);
+
+      // 열린 메뉴는 키보드를 가진다.
+      reached.length = 0;
+      fireEvent.click(trigger);
+      const item = await screen.findByRole('button', { name: '닉네임 수정' });
+      for (const key of [' ', 'Enter', 'Tab']) fireEvent.keyDown(item, { key });
+      expect(reached).toEqual([]);
+    } finally {
+      window.removeEventListener('keydown', record);
+    }
+  });
+
   it('renames a friend through the nickname dialog', async () => {
     setupFriendshipResponse(onlineFriend);
     render(<FriendList session={session as never} refreshTrigger={0} />);

@@ -6,7 +6,7 @@ import { SlidersVertical } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ProfileHeader from '@/components/profile/ProfileHeader';
 import ContributionGraph from '@/components/profile/ContributionGraph';
-import LogoutDialog from '@/components/profile/LogoutDialog';
+import LogoutDialog from '@/components/LogoutDialog';
 import StudyReport from '@/components/StudyReport';
 import { useStudyStats } from '@/hooks/useStudyStats';
 import Navbar from '@/components/Navbar';

@@ -490,7 +490,7 @@ export default function TimerApp({
                 toast.dismiss(t.id);
                 void attempt(record, taskText, taskId, onAfterSave);
               }}
-              className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-bold text-white"
+              className="ui-button-primary ui-press min-h-9 shrink-0 rounded-chip px-3 text-sm"
             >
               재시도
             </button>

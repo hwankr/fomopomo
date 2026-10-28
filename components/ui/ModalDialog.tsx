@@ -26,6 +26,8 @@ type ModalDialogProps = {
   className?: string;
   /** 덮개(.ui-dialog-overlay)에 덧붙일 클래스(z-index 등) */
   overlayClassName?: string;
+  /** 덮개를 누르면 onClose를 부른다. 기본은 닫지 않는다(설치 안내처럼 가벼운 안내에만 쓴다). */
+  closeOnOverlayClick?: boolean;
   children: ReactNode;
 };
 
@@ -129,6 +131,7 @@ function OpenModalDialog({
   initialFocusRef,
   className,
   overlayClassName,
+  closeOnOverlayClick = false,
   children,
 }: ModalDialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -214,13 +217,24 @@ function OpenModalDialog({
     onCloseRef.current();
   };
 
-  // 덮개를 눌러도 포커스가 body로 빠지지 않게 한다(배경 클릭으로 닫지는 않는다).
+  // 덮개를 눌러도 포커스가 body로 빠지지 않게 한다(배경 클릭으로 닫는 것은 closeOnOverlayClick일 때만).
   const keepFocus = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) event.preventDefault();
   };
 
+  // 패널이나 안쪽 포털(팝오버·위에 뜬 대화상자)에서 올라온 클릭은 덮개 클릭이 아니다.
+  const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!closeOnOverlayClick || event.target !== event.currentTarget || !isTopDialog(idRef.current)) return;
+    onCloseRef.current();
+  };
+
   return (
-    <div ref={overlayRef} className={cn('ui-dialog-overlay', overlayClassName)} onMouseDown={keepFocus}>
+    <div
+      ref={overlayRef}
+      className={cn('ui-dialog-overlay', overlayClassName)}
+      onMouseDown={keepFocus}
+      onClick={handleOverlayClick}
+    >
       <div
         ref={panelRef}
         role={role}

@@ -20,7 +20,7 @@ vi.mock('@/hooks/useStudyStats', () => ({ useStudyStats: () => ({
 }) }));
 vi.mock('@/lib/pushSubscriptionLifecycle', () => ({ signOutWithPushCleanup: mock.signOut }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: mock.replace, push: vi.fn() }) }));
-vi.mock('react-hot-toast', () => ({ toast: { error: mock.toastError } }));
+vi.mock('react-hot-toast', () => ({ default: { error: mock.toastError }, toast: { error: mock.toastError } }));
 // 헤더·리포트·로그인 창은 각자의 테스트가 다룬다. 여기서는 페이지 배치와 로그아웃 흐름만 본다.
 vi.mock('@/components/Navbar', () => ({ default: ({ mobileTopBar, onOpenLogin }: { mobileTopBar?: ReactNode; onOpenLogin?: () => void }) => (
   <header>{mobileTopBar}<button type="button" onClick={onOpenLogin}>헤더 로그인</button></header>

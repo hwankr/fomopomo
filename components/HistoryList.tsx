@@ -13,7 +13,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import ModalDialog from '@/components/ui/ModalDialog';
 import HistoryRecordEditor from '@/components/history/HistoryRecordEditor';
 import RecentWeek from '@/components/history/RecentWeek';
-import { useIsDesktop } from '@/components/history/useIsDesktop';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import {
   formatRecordDuration,
   formatRecordTime,
@@ -599,7 +599,7 @@ export default function HistoryList({
         title="기록을 삭제할까요?"
         message="삭제한 기록은 되돌릴 수 없어요. 나뉘어 저장된 기록은 모든 조각이 함께 삭제돼요."
         confirmText="삭제"
-        isDangerous
+        confirmTone="danger"
       />
     </section>
   );

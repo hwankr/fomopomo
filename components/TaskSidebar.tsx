@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 import Beads from '@/components/ui/Beads';
 import ModalDialog from '@/components/ui/ModalDialog';
 import TaskCreateForm from '@/components/timer/TaskCreateForm';
-import { useIsDesktop } from '@/components/timer/ui/useIsDesktop';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 
 interface TaskSidebarProps {
   isOpen: boolean;

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { SlidersVertical } from 'lucide-react';
 import Beads, { type BeadState, type BeadTone } from '@/components/ui/Beads';
 import { cn } from '@/lib/utils';
-import { useIsDesktop } from './useIsDesktop';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 
 // 상태 문구 + 사이클 표시. 상태가 바뀌면 보조기기에 알린다.
 export function StageStatus({ status, detail }: { status: string; detail: string }) {
