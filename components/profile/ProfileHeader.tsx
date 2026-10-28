@@ -1,45 +1,65 @@
-// components/profile/ProfileHeader.tsx
-import { User } from '@supabase/supabase-js';
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { SlidersVertical } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
+import Avatar, { getDisplayName } from '@/components/ui/Avatar';
+import { formatStudyDuration, formatTotalHours } from '@/components/profile/studyDuration';
+import { cn } from '@/lib/utils';
 
 interface ProfileHeaderProps {
-  user: User | null;
+  user: User;
   totalFocusTime: number;
+  todayFocusTime: number;
+  /** 첫 집계가 오기 전에는 0 대신 자리 표시를 보여 준다. */
+  loading?: boolean;
+  /** 데스크톱 로그아웃 버튼. 모바일 로그아웃은 페이지 맨 아래에 있다. */
+  onLogout: () => void;
 }
 
-export default function ProfileHeader({ user, totalFocusTime }: ProfileHeaderProps) {
-  const formatTotalTime = (seconds: number) => {
-      const hours = Math.floor(seconds / 3600);
-      return `${hours}시간`;
-  };
+export default function ProfileHeader({ user, totalFocusTime, todayFocusTime, loading = false, onLogout }: ProfileHeaderProps) {
+  const name = getDisplayName(user) ?? '이름 없음';
+  const pending = loading && totalFocusTime === 0;
 
   return (
-    <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-      <div className="relative">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-rose-400 to-orange-400 flex items-center justify-center text-white text-3xl font-bold shadow-lg">
-              {user?.user_metadata?.full_name?.[0] || user?.email?.[0]?.toUpperCase() || 'U'}
-          </div>
-          <div className="absolute bottom-0 right-0 w-6 h-6 bg-green-400 border-4 border-white dark:border-slate-800 rounded-full"></div>
+    <section aria-label="내 정보" className="flex flex-col gap-5 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-8">
+      <div className="flex min-w-0 items-center gap-4 md:gap-5">
+        <Avatar name={name} size={64} />
+        <div className="flex min-w-0 flex-col gap-px md:gap-0.5">
+          <h1 className="ui-h1 [overflow-wrap:anywhere]">{name}</h1>
+          {user.email ? <p className="m-0 text-sm text-ink-muted [overflow-wrap:anywhere] md:text-[15px]">{user.email}</p> : null}
+        </div>
       </div>
-      
-      <div className="w-full min-w-0 flex-1 text-center md:text-left">
-          <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-bold text-gray-800 dark:text-white mb-2">
-              {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-          </h1>
-          <p className="break-all text-gray-500 dark:text-gray-400 text-sm mb-4">
-              {user?.email}
-          </p>
-          
-          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
-              <div className="bg-gray-50 dark:bg-slate-700/50 px-4 py-2 rounded-xl border border-gray-100 dark:border-slate-600">
-                  <span className="text-xs text-gray-400 uppercase font-bold mr-2">등급</span>
-                  <span className="text-gray-700 dark:text-gray-200 font-medium">학생</span>
-              </div>
-              <div className="bg-rose-50 dark:bg-rose-900/20 px-4 py-2 rounded-xl border border-rose-100 dark:border-rose-800/30">
-                  <span className="text-xs text-rose-400 uppercase font-bold mr-2">누적</span>
-                  <span className="text-rose-600 dark:text-rose-300 font-bold">{formatTotalTime(totalFocusTime)}</span>
-              </div>
-          </div>
+
+      <div className="flex flex-wrap items-center gap-x-7 gap-y-4 md:gap-10">
+        <dl className="m-0 flex flex-wrap gap-x-7 gap-y-3 md:gap-x-10">
+          <Stat label="누적 집중 시간" value={pending ? '–' : formatTotalHours(totalFocusTime)} />
+          <Stat
+            label={<>오늘<span className="hidden md:inline"> 집중 시간</span>, 오전 5시부터</>}
+            value={pending ? '–' : formatStudyDuration(todayFocusTime)}
+            accent
+          />
+        </dl>
+        <div className="hidden items-center gap-1 md:flex">
+          <Link href="/settings" className="ui-button-secondary rounded-tile px-4">
+            <SlidersVertical size={18} strokeWidth={1.8} aria-hidden="true" />
+            설정
+          </Link>
+          <button type="button" onClick={onLogout} className="ui-button-ghost rounded-tile px-3.5 text-ink-muted">
+            로그아웃
+          </button>
+        </div>
       </div>
+    </section>
+  );
+}
+
+function Stat({ label, value, accent = false }: { label: ReactNode; value: string; accent?: boolean }) {
+  return (
+    <div className="flex flex-col-reverse gap-px md:gap-0.5">
+      <dt className="text-xs text-ink-muted md:text-[13px]">{label}</dt>
+      <dd className={cn('m-0 font-display text-[30px] leading-[1.1] font-bold tracking-[-0.02em] whitespace-nowrap md:text-4xl', accent && 'text-pomo')}>
+        {value}
+      </dd>
     </div>
   );
 }
