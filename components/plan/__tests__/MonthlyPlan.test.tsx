@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,6 +8,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
@@ -56,9 +58,16 @@ type SessionRow = {
 let monthlyPlans: MonthlyPlanRow[];
 let sessions: SessionRow[];
 
+// 실시간 콜백과, 다시 불러오기를 붙잡아 두는 관문(모션 테스트용. 기본은 바로 응답)
+let realtimeCallbacks: Array<() => void>;
+let fetchGate: Promise<void> | null;
+
 function createChannelMock() {
   const channel = {
-    on: vi.fn(() => channel),
+    on: vi.fn((_event: string, _filter: unknown, callback: () => void) => {
+      realtimeCallbacks.push(callback);
+      return channel;
+    }),
     subscribe: vi.fn(() => channel),
   };
 
@@ -94,6 +103,8 @@ describe('MonthlyPlan', () => {
     ];
     sessions = [{ task_id: 'monthly-1', duration: 7200 }];
 
+    realtimeCallbacks = [];
+    fetchGate = null;
     supabaseMock.channel.mockImplementation(() => createChannelMock());
     supabaseMock.removeChannel.mockReset();
 
@@ -104,10 +115,10 @@ describe('MonthlyPlan', () => {
             eq: vi.fn(() => ({
               eq: vi.fn(() => ({
                 eq: vi.fn(() => ({
-                  order: vi.fn(async () => ({
-                    data: monthlyPlans,
-                    error: null,
-                  })),
+                  order: vi.fn(async () => {
+                    await fetchGate;
+                    return { data: monthlyPlans, error: null };
+                  }),
                 })),
               })),
             })),
@@ -174,7 +185,7 @@ describe('MonthlyPlan', () => {
     renderPlan();
 
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
-    expect(screen.getByText('2h 0m')).toBeInTheDocument();
+    expect(screen.getByText('2시간')).toBeInTheDocument();
   });
 
   it('infers and saves a subject from a new title while keeping subject-only edits available', async () => {
@@ -267,11 +278,14 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[0]);
+    const toggle = within(card).getByRole('button', { name: 'Finish portfolio 완료' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
 
     await waitFor(() => {
-      expect(screen.getByText('Finish portfolio').parentElement).toHaveClass('line-through');
+      expect(screen.getByText('Finish portfolio')).toHaveClass('line-through');
     });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('edits a monthly goal title on Enter', async () => {
@@ -280,7 +294,7 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[1]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish portfolio 수정' }));
 
     const input = within(card).getByDisplayValue('Finish portfolio');
     fireEvent.change(input, { target: { value: 'Finish redesign' } });
@@ -297,11 +311,80 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[2]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish portfolio 삭제' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     await waitFor(() => {
       expect(screen.queryByText('Finish portfolio')).not.toBeInTheDocument();
     });
+  });
+  it('keeps rows mounted during a refetch and plays each action’s motion only once', async () => {
+    // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다.
+    const animations = simulateRunningAnimations();
+    try {
+      // 목표 탭 패널처럼 감싼 요소를 숨겼다가 다시 보일 수 있게 그린다.
+      const view = (hidden: boolean) => <div hidden={hidden}><MonthlyPlan userId="user-1" /></div>;
+      const { rerender } = render(view(false));
+      expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
+      const first = getCardForTitle('Finish portfolio');
+      const animated = () => [...document.querySelectorAll('[class*="animate-"]')];
+      // 처음 불러온 목록은 움직이지 않는다.
+      expect(animated()).toEqual([]);
+
+      fireEvent.click(screen.getByRole('button', { name: '월간 목표 추가' }));
+      const form = screen.getByPlaceholderText('월간 목표를 입력하세요').closest('form')!;
+      expect(form).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(form).not.toHaveClass('animate-fade-up');
+      fireEvent.change(screen.getByPlaceholderText('월간 목표를 입력하세요'), { target: { value: 'New goal' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      await screen.findByText('New goal');
+      const added = getCardForTitle('New goal');
+      expect(animated()).toEqual([added]);
+      await animations.finish();
+      expect(animated()).toEqual([]);
+
+      // 다른 탭으로 갔다가 돌아와도(패널이 숨었다 다시 보임) 방금 추가한 행이 다시 돌지 않는다.
+      rerender(view(true));
+      rerender(view(false));
+      expect(getCardForTitle('New goal')).toBe(added);
+      expect(animated()).toEqual([]);
+
+      const toggle = within(first).getByRole('button', { name: 'Finish portfolio 완료' });
+      fireEvent.click(toggle);
+      expect(toggle.querySelector('svg')).toHaveClass('animate-pop-in');
+      expect(screen.getByText('Finish portfolio')).toHaveClass('transition-colors');
+      await waitFor(() => expect(monthlyPlans[0].status).toBe('done'));
+
+      // 다시 불러오는 동안에도 목록을 그대로 둔다(불러오는 중 문구로 바꾸지 않는다).
+      let release!: () => void;
+      fetchGate = new Promise((resolve) => { release = resolve; });
+      act(() => realtimeCallbacks.forEach((callback) => callback()));
+      expect(screen.queryByText('불러오는 중...')).not.toBeInTheDocument();
+      expect(getCardForTitle('Finish portfolio')).toBe(first);
+
+      // 도는 중에 다른 곳에서 완료를 풀었다가 다시 완료해도 다시 튀지 않는다.
+      monthlyPlans = monthlyPlans.map((plan) => plan.id === 'monthly-1' ? { ...plan, status: 'todo' } : plan);
+      fetchGate = null;
+      await act(async () => release());
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'false'));
+      monthlyPlans = monthlyPlans.map((plan) => plan.id === 'monthly-1' ? { ...plan, status: 'done' } : plan);
+      await act(async () => realtimeCallbacks.forEach((callback) => callback()));
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'true'));
+      expect(animated()).toEqual([]);
+      expect(getCardForTitle('Finish portfolio')).toBe(first);
+      expect(getCardForTitle('New goal')).toBe(added);
+
+      fireEvent.click(within(first).getByRole('button', { name: 'Finish portfolio 수정' }));
+      const editor = within(first).getByRole('textbox', { name: '목표 제목' }).parentElement!;
+      expect(editor).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(editor).not.toHaveClass('animate-fade-up');
+      rerender(view(true));
+      rerender(view(false));
+      expect(animated()).toEqual([]);
+    } finally {
+      animations.restore();
+    }
   });
 });

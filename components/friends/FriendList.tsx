@@ -1,22 +1,38 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { getStudyDayRange } from '@/lib/dateUtils';
+import * as Popover from '@radix-ui/react-popover';
 import { Session } from '@supabase/supabase-js';
-import { Pencil, Trash2, Check, X, AlertTriangle, Bell, BellOff } from 'lucide-react';
+import { Bell, BellOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { supabase } from '@/lib/supabase';
+import { getDayStart, getStudyDayRange, getStudyWeekRange, type TimeRange } from '@/lib/dateUtils';
+import { cn } from '@/lib/utils';
+import Avatar, { getDisplayName } from '@/components/ui/Avatar';
+import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
+import ConfirmModal from '@/components/ConfirmModal';
+import { formatHoursMinutes, getLiveSeconds, useNow } from '@/components/common/LiveStudyDuration';
 import MemberReportModal from '../MemberReportModal';
-import { FriendStatusBadge } from './FriendStatusBadge';
+import FriendNicknameDialog from './FriendNicknameDialog';
+import { FriendStatusBadge, type FriendStatus } from './FriendStatusBadge';
 
+export interface FriendListSummary {
+  friendCount: number;
+  studyingCount: number;
+}
 
 interface FriendListProps {
   session: Session;
   refreshTrigger: number;
+  /** 친구 수와 지금 공부 중인 친구 수. 불러오는 동안은 null. */
+  onSummaryChange?: (summary: FriendListSummary | null) => void;
+  /** 이 목록이 보이는지(친구 탭). 숨어 있는 동안 생긴 새 친구 줄은 보일 때 한 번 떠오르고, 숨으면 남은 피드백 표시를 뗀다. */
+  active?: boolean;
 }
 
 interface FriendProfile {
-  status: 'online' | 'offline' | 'studying' | 'paused' | null;
+  status: FriendStatus;
   current_task: string | null;
   last_active_at: string | null;
   study_start_time: string | null;
@@ -37,6 +53,20 @@ type FriendshipRow = Omit<Friendship, 'friend'> & {
   friend: FriendProfile | FriendProfile[] | null;
 };
 
+type StudyTotals = { today: number; week: number };
+
+interface RankingRow {
+  key: string;
+  userId: string;
+  name: string;
+  isMe: boolean;
+  friendship: Friendship | null;
+  status: FriendStatus;
+  task: string | null;
+  today: number;
+  week: number;
+}
+
 function normalizeFriendProfile(
   friend: FriendshipRow['friend']
 ): FriendProfile | null {
@@ -47,79 +77,195 @@ function normalizeFriendProfile(
   return friend;
 }
 
+const getFriendName = (friend: Friendship) =>
+  friend.nickname || friend.friend_email || '알 수 없는 사용자';
+
+async function fetchFriendTotals(userId: string, range: TimeRange) {
+  try {
+    const { data, error } = await supabase.rpc('get_friends_study_time', {
+      p_user_id: userId,
+      p_start_time: range.start.toISOString(),
+      p_end_time: range.end.toISOString(),
+    });
+
+    if (error) {
+      console.error('Error fetching friends study time:', error);
+      return null;
+    }
+
+    const timeMap: Record<string, number> = {};
+    (data ?? []).forEach((item: { friend_id: string; total_seconds: number }) => {
+      timeMap[item.friend_id] = Number(item.total_seconds) || 0;
+    });
+    return timeMap;
+  } catch (error) {
+    console.error('Error fetching friends study time:', error);
+    return null;
+  }
+}
+
+// 순위에 함께 오르는 내 기록: 이번 공부주 세션을 한 번 읽어 오늘과 이번 주를 나눠 더한다.
+async function fetchMyTotals(userId: string, today: TimeRange, week: TimeRange): Promise<StudyTotals | null> {
+  try {
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .select('duration, created_at')
+      .eq('user_id', userId)
+      .gte('created_at', week.start.toISOString())
+      .lte('created_at', week.end.toISOString());
+
+    if (error) {
+      console.error('Error fetching my study time:', error);
+      return null;
+    }
+
+    const totals: StudyTotals = { today: 0, week: 0 };
+    (data ?? []).forEach((row: { duration: number; created_at: string }) => {
+      const seconds = Number(row.duration) || 0;
+      const createdAt = new Date(row.created_at).getTime();
+      totals.week += seconds;
+      if (createdAt >= today.start.getTime() && createdAt <= today.end.getTime()) {
+        totals.today += seconds;
+      }
+    });
+    return totals;
+  } catch (error) {
+    console.error('Error fetching my study time:', error);
+    return null;
+  }
+}
+
+// 저장된 시간 + 지금 진행 중인 공부(공부 중이면 시작 시각부터, 일시정지면 아직 저장 안 된 시간).
+function withLiveTime(
+  profile: FriendProfile | null,
+  saved: StudyTotals,
+  dayStart: Date,
+  weekStart: Date,
+  now: number
+): StudyTotals {
+  if (profile?.status === 'studying' && profile.study_start_time) {
+    return {
+      today: saved.today + getLiveSeconds(profile.study_start_time, dayStart, now),
+      week: saved.week + getLiveSeconds(profile.study_start_time, weekStart, now),
+    };
+  }
+
+  if (profile?.status === 'paused') {
+    const pending = profile.total_stopwatch_time || 0;
+    return { today: saved.today + pending, week: saved.week + pending };
+  }
+
+  return saved;
+}
+
 export default function FriendList(props: FriendListProps) {
   return <FriendListContent key={props.session.user.id} {...props} />;
 }
 
-function FriendListContent({ session, refreshTrigger }: FriendListProps) {
+function FriendListContent({ session, refreshTrigger, onSummaryChange, active = true }: FriendListProps) {
+  const userId = session.user.id;
   const [friends, setFriends] = useState<Friendship[]>([]);
+  const [myProfile, setMyProfile] = useState<FriendProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingFriend, setEditingFriend] = useState<Friendship | null>(null);
   const [editName, setEditName] = useState('');
+  const [savingName, setSavingName] = useState(false);
   const [deletingFriend, setDeletingFriend] = useState<{ id: string; name: string; friendId: string } | null>(null);
-  const [selectedFriendForReport, setSelectedFriendForReport] = useState<{ id: string; name: string } | null>(null);
-  const [studyTimes, setStudyTimes] = useState<Record<string, number>>({});
+  // 리포트 창은 닫아도 남겨 두어 퇴장 애니메이션을 하고(마지막 친구를 그대로 보인다), 열 때마다 key를 바꿔 새로 그린다.
+  const [report, setReport] = useState<{ id: string; name: string; open: boolean; key: number } | null>(null);
+  // 다시 불러온 목록에서 처음 보이는 친구(요청 수락 등)와 방금 알림을 끈 친구. 그 줄·표시만 한 번 움직이고,
+  // 다 돌면 또는 보이던 패널이 숨으면 비운다(탭을 다시 열거나 순위가 바뀌어 줄이 옮겨져도 다시 돌지 않게).
+  const [newFriendIds, setNewFriendIds] = useState<string[]>([]);
+  const [mutedFriendId, setMutedFriendId] = useState<string | null>(null);
+  // 요청 탭에서 수락하면 새 줄은 숨은 친구 패널에 생긴다. 패널이 보인 뒤에야 그 줄들을 표시로 넘겨, 처음 보일 때 한 번 돈다.
+  const [shownNewFriendIds, setShownNewFriendIds] = useState<string[] | null>(null);
+  if (active && newFriendIds.length > 0 && shownNewFriendIds !== newFriendIds) setShownNewFriendIds(newFriendIds);
+  // 다른 탭을 고르면 패널을 숨기는 그 렌더에서 뗀다. 숨김으로 취소된 애니메이션의 소식은 패널이 다시 보인 뒤에 올 수 있다.
+  if (!active && shownNewFriendIds) {
+    setNewFriendIds((prev) => prev.filter((id) => !shownNewFriendIds.includes(id)));
+    setShownNewFriendIds(null);
+  }
+  if (!active && mutedFriendId) setMutedFriendId(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const mutedRef = useRef<SVGSVGElement>(null);
+  usePlayOnce(shownNewFriendIds, listRef, (played) => {
+    setNewFriendIds((prev) => prev.filter((id) => !played.includes(id)));
+    setShownNewFriendIds((current) => (current === played ? null : current));
+  });
+  usePlayOnce(mutedFriendId, mutedRef, (played) => setMutedFriendId((current) => (current === played ? null : current)));
+  const [todayTimes, setTodayTimes] = useState<Record<string, number>>({});
+  const [weekTimes, setWeekTimes] = useState<Record<string, number>>({});
+  const [myTimes, setMyTimes] = useState<StudyTotals>({ today: 0, week: 0 });
   const studyTimeRequestRef = useRef(0);
   const friendsRequestRef = useRef(0);
   const friendIdsRef = useRef<Set<string> | null>(null);
 
   const fetchStudyTimes = useCallback(async () => {
     const requestId = ++studyTimeRequestRef.current;
-    try {
-      // 공부일(로컬 05:00 경계) 절대 범위를 서버에 전달한다 — lib/dateUtils.ts 정책 참고
-      const { start, end } = getStudyDayRange();
-      const { data, error } = await supabase.rpc('get_friends_study_time', {
-        p_user_id: session.user.id,
-        p_start_time: start.toISOString(),
-        p_end_time: end.toISOString(),
-      });
+    // 공부일(로컬 05:00 경계)과 그 공부일이 속한 공부주(월요일 05:00부터) 절대 범위를
+    // 서버에 전달한다 — lib/dateUtils.ts 정책 참고
+    const today = getStudyDayRange();
+    const week = getStudyWeekRange(today.start);
+    const [friendToday, friendWeek, mine] = await Promise.all([
+      fetchFriendTotals(userId, today),
+      fetchFriendTotals(userId, week),
+      fetchMyTotals(userId, today, week),
+    ]);
 
-      if (requestId !== studyTimeRequestRef.current) return;
-
-      if (error) {
-        console.error('Error fetching friends study time:', error);
-        return;
-      }
-
-      if (data) {
-        const timeMap: Record<string, number> = {};
-        data.forEach((item: { friend_id: string; total_seconds: number }) => {
-          timeMap[item.friend_id] = item.total_seconds;
-        });
-        setStudyTimes(timeMap);
-      }
-    } catch (error) {
-      console.error('Error fetching friends study time:', error);
-    }
-  }, [session.user.id]);
+    if (requestId !== studyTimeRequestRef.current) return;
+    if (friendToday) setTodayTimes(friendToday);
+    if (friendWeek) setWeekTimes(friendWeek);
+    if (mine) setMyTimes(mine);
+  }, [userId]);
 
   const fetchFriends = useCallback(async () => {
     const requestId = ++friendsRequestRef.current;
     try {
-      const { data, error } = await supabase
-        .from('friendships')
-        .select(`
-          id,
-          friend_email,
-          friend_id,
-          nickname,
-          created_at,
-          is_notification_enabled,
-          friend:friend_id (
-            status,
-            current_task,
-            last_active_at,
-            study_start_time,
-            total_stopwatch_time
-          )
-        `)
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
+      const [friendshipResult, profileResult] = await Promise.all([
+        supabase
+          .from('friendships')
+          .select(`
+            id,
+            friend_email,
+            friend_id,
+            nickname,
+            created_at,
+            is_notification_enabled,
+            friend:friend_id (
+              status,
+              current_task,
+              last_active_at,
+              study_start_time,
+              total_stopwatch_time
+            )
+          `)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('profiles')
+          .select('status, current_task, last_active_at, study_start_time, total_stopwatch_time')
+          .eq('id', userId)
+          .maybeSingle(),
+      ]);
 
       if (requestId !== friendsRequestRef.current) return;
+
+      if (profileResult.error) {
+        console.error('Error fetching my status:', profileResult.error);
+      } else {
+        setMyProfile((profileResult.data as FriendProfile | null) ?? null);
+      }
+
+      const { data, error } = friendshipResult;
       if (error) throw error;
 
       const friendshipRows = (data ?? []) as FriendshipRow[];
+      // 처음 불러온 목록은 세지 않는다.
+      const previousIds = friendIdsRef.current;
+      if (previousIds) {
+        const added = friendshipRows.filter((row) => !previousIds.has(row.friend_id)).map((row) => row.id);
+        if (added.length > 0) setNewFriendIds((prev) => [...prev, ...added]);
+      }
       friendIdsRef.current = new Set(friendshipRows.map((row) => row.friend_id));
       setFriends(
         friendshipRows.flatMap((row) => {
@@ -136,7 +282,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
     } finally {
       if (requestId === friendsRequestRef.current) setLoading(false);
     }
-  }, [session.user.id]);
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +292,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
     void load();
 
     const channel = supabase
-      .channel(`friend-list-updates-${session.user.id}`)
+      .channel(`friend-list-updates-${userId}`)
       .on(
         'postgres_changes',
         {
@@ -156,6 +302,17 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
         },
         (payload) => {
           if (cancelled) return;
+          const nextStatus = {
+            status: payload.new.status,
+            current_task: payload.new.current_task,
+            last_active_at: payload.new.last_active_at,
+            study_start_time: payload.new.study_start_time,
+            total_stopwatch_time: payload.new.total_stopwatch_time,
+          };
+          if (payload.new.id === userId) {
+            setMyProfile((prev) => ({ ...prev, ...nextStatus }));
+            return;
+          }
           setFriends((prev) =>
             prev.map((f) => {
               if (f.friend_id === payload.new.id) {
@@ -163,11 +320,7 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
                   ...f,
                   friend: {
                     ...f.friend,
-                    status: payload.new.status,
-                    current_task: payload.new.current_task,
-                    last_active_at: payload.new.last_active_at,
-                    study_start_time: payload.new.study_start_time,
-                    total_stopwatch_time: payload.new.total_stopwatch_time,
+                    ...nextStatus,
                   },
                 };
               }
@@ -185,7 +338,12 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
           const previousRow = payload.old as { user_id?: string };
           const changedUserId = nextRow.user_id ?? previousRow.user_id;
           // DELETE payloads may contain only the primary key under RLS.
-          if (!changedUserId || !friendIdsRef.current || friendIdsRef.current.has(changedUserId)) {
+          if (
+            !changedUserId ||
+            changedUserId === userId ||
+            !friendIdsRef.current ||
+            friendIdsRef.current.has(changedUserId)
+          ) {
             void fetchStudyTimes();
           }
         }
@@ -201,66 +359,79 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
       friendsRequestRef.current += 1;
       supabase.removeChannel(channel);
     };
-  }, [fetchFriends, fetchStudyTimes, refreshTrigger, session.user.id]);
+  }, [fetchFriends, fetchStudyTimes, refreshTrigger, userId]);
+
+  const studyingCount = friends.filter((f) => f.friend.status === 'studying').length;
+
+  useEffect(() => {
+    onSummaryChange?.(loading ? null : { friendCount: friends.length, studyingCount });
+  }, [friends.length, loading, onSummaryChange, studyingCount]);
+
+  // 누군가 공부 중일 때만 1초 시계를 돌려 순위와 시간을 함께 갱신한다.
+  const now = useNow(studyingCount > 0 || myProfile?.status === 'studying');
 
   const confirmDelete = (friend: Friendship) => {
     setDeletingFriend({
       id: friend.id,
-      name: friend.nickname || friend.friend_email,
+      name: getFriendName(friend),
       friendId: friend.friend_id
     });
   };
 
   const handleDelete = async () => {
-    if (!deletingFriend) return;
+    const target = deletingFriend;
+    if (!target) return;
 
     try {
-      const { error } = await supabase.rpc('delete_friend', { friend_uuid: deletingFriend.friendId });
+      const { error } = await supabase.rpc('delete_friend', { friend_uuid: target.friendId });
 
       if (error) throw error;
-      setFriends(prev => prev.filter(f => f.id !== deletingFriend.id));
-      toast.success('친구가 삭제되었습니다.');
-      setDeletingFriend(null);
+      setFriends(prev => prev.filter(f => f.id !== target.id));
+      toast.success('친구를 삭제했어요.');
     } catch (error) {
       console.error('Error deleting friend:', error);
-      toast.error('친구 삭제에 실패했습니다.');
+      toast.error('친구를 삭제하지 못했어요.');
     }
   };
 
-
   const handleStartEdit = (friend: Friendship) => {
-    setEditingId(friend.id);
+    setEditingFriend(friend);
     setEditName(friend.nickname || friend.friend_email);
   };
 
   const handleCancelEdit = () => {
-    setEditingId(null);
+    setEditingFriend(null);
     setEditName('');
   };
 
-  const handleSaveEdit = async (id: string) => {
+  const handleSaveEdit = async () => {
+    if (!editingFriend) return;
+    const id = editingFriend.id;
+    const nickname = editName.trim() || null;
+
+    setSavingName(true);
     try {
       const { error } = await supabase
         .from('friendships')
-        .update({ nickname: editName.trim() || null })
+        .update({ nickname })
         .eq('id', id);
 
       if (error) throw error;
 
       setFriends(prev => prev.map(f =>
-        f.id === id ? { ...f, nickname: editName.trim() || null } : f
+        f.id === id ? { ...f, nickname } : f
       ));
-      setEditingId(null);
-      toast.success('닉네임이 수정되었습니다.');
+      setEditingFriend(null);
+      toast.success('닉네임을 바꿨어요.');
     } catch (error) {
       console.error('Error updating nickname:', error);
-      toast.error('닉네임 수정에 실패했습니다.');
+      toast.error('닉네임을 바꾸지 못했어요.');
+    } finally {
+      setSavingName(false);
     }
-
   };
 
-  const toggleNotification = async (friend: Friendship, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleNotification = async (friend: Friendship) => {
     try {
       const newValue = !friend.is_notification_enabled;
       const { error } = await supabase
@@ -273,168 +444,282 @@ function FriendListContent({ session, refreshTrigger }: FriendListProps) {
       setFriends(prev => prev.map(f =>
         f.id === friend.id ? { ...f, is_notification_enabled: newValue } : f
       ));
-      toast.success(newValue ? '알림을 켰습니다.' : '알림을 껐습니다.');
+      setMutedFriendId(newValue ? null : friend.id);
+      toast.success(newValue ? '공부 시작 알림을 켰어요.' : '공부 시작 알림을 껐어요.');
     } catch (error) {
       console.error('Error toggling notification:', error);
-      toast.error('설정 변경 실패');
+      toast.error('알림 설정을 바꾸지 못했어요.');
     }
   };
 
-  if (loading) return <div className="text-gray-500">친구 목록을 불러오는 중...</div>;
+  const openReport = (id: string, name: string) =>
+    setReport((prev) => ({ id, name, open: true, key: (prev?.key ?? 0) + 1 }));
 
-  if (friends.length === 0) {
-    return <div className="text-gray-500">아직 친구가 없습니다. 친구를 추가해보세요!</div>;
+  // 마지막 친구를 지워 빈 목록이 돼도 닫히는 창이 끝까지 퇴장하도록 창들은 어느 상태에서나 그린다.
+  const dialogs = (
+    <>
+      <FriendNicknameDialog
+        open={!!editingFriend}
+        email={editingFriend?.friend_email ?? ''}
+        value={editName}
+        saving={savingName}
+        onChange={setEditName}
+        onSave={() => void handleSaveEdit()}
+        onCancel={handleCancelEdit}
+      />
+
+      <ConfirmModal
+        isOpen={!!deletingFriend}
+        onClose={() => setDeletingFriend(null)}
+        onConfirm={() => void handleDelete()}
+        title="친구 삭제"
+        message={`${deletingFriend?.name ?? ''} 님을 친구 목록에서 삭제할까요? 서로의 공부 상태와 순위가 더 이상 보이지 않아요.`}
+        confirmText="삭제"
+        confirmTone="danger"
+      />
+
+      {report ? (
+        <MemberReportModal
+          key={`report-${report.key}`}
+          isOpen={report.open}
+          onClose={() => setReport((prev) => (prev ? { ...prev, open: false } : prev))}
+          userId={report.id}
+          userName={report.name}
+        />
+      ) : null}
+    </>
+  );
+
+  if (loading || friends.length === 0) {
+    return (
+      <>
+        <p className="m-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]">
+          {loading ? '친구 목록을 불러오는 중이에요.' : '아직 친구가 없어요. 찾기에서 친구를 추가해 보세요.'}
+        </p>
+        {dialogs}
+      </>
+    );
   }
 
+  const dayStart = getDayStart(new Date(now));
+  const weekStart = getStudyWeekRange(dayStart).start;
+  const rows: RankingRow[] = [
+    ...friends.map((friend) => {
+      const totals = withLiveTime(
+        friend.friend,
+        { today: todayTimes[friend.friend_id] || 0, week: weekTimes[friend.friend_id] || 0 },
+        dayStart,
+        weekStart,
+        now
+      );
+      return {
+        key: friend.id,
+        userId: friend.friend_id,
+        name: getFriendName(friend),
+        isMe: false,
+        friendship: friend,
+        status: friend.friend.status,
+        task: friend.friend.current_task,
+        ...totals,
+      };
+    }),
+    {
+      key: 'me',
+      userId,
+      name: getDisplayName(session.user) ?? '나',
+      isMe: true,
+      friendship: null,
+      status: myProfile?.status ?? null,
+      task: myProfile?.current_task ?? null,
+      ...withLiveTime(myProfile, myTimes, dayStart, weekStart, now),
+    },
+  ].sort((a, b) => b.today - a.today || b.week - a.week);
 
   return (
     <>
-      <ul className="space-y-3">
-        {friends.map((friend) => (
-          <li
-            key={friend.id}
-            className="group flex items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl hover:border-indigo-100 dark:hover:border-indigo-900 transition-colors cursor-pointer"
-            onClick={() => setSelectedFriendForReport({ id: friend.friend_id, name: friend.nickname || friend.friend_email })}
-          >
-            <div className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 w-full sm:flex sm:gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-medium text-sm shrink-0">
-                {(friend.nickname || friend.friend_email || '?')[0].toUpperCase()}
-              </div>
-              <div className="contents sm:block sm:flex-1 sm:min-w-0">
-                <div className="contents sm:flex sm:items-center sm:justify-between sm:gap-2">
-                  {editingId === friend.id ? (
-                    <div className="flex min-w-0 items-center gap-2 w-full max-w-[240px]" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="min-w-0 w-full flex-1 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        aria-label="친구 닉네임"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveEdit(friend.id);
-                          if (e.key === 'Escape') handleCancelEdit();
-                        }}
-                      />
-                      <button
-                        onClick={() => handleSaveEdit(friend.id)}
-                        className="shrink-0 p-1 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30 rounded"
-                        aria-label="닉네임 저장"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="shrink-0 p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 rounded"
-                        aria-label="닉네임 수정 취소"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-1 items-center gap-2 min-w-0">
-                      <p className="min-w-0 truncate font-medium text-gray-900 dark:text-white" title={friend.nickname || friend.friend_email}>
-                        {friend.nickname || friend.friend_email || '알 수 없는 사용자'}
-                      </p>
-
-                      {friend.nickname && (
-                        <span className="min-w-0 text-xs text-gray-400 dark:text-gray-500 truncate" title={friend.friend_email}>
-                          ({friend.friend_email})
-                        </span>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(friend);
-                        }}
-                        className="shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
-                        title="닉네임 수정"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                  <div className="col-span-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 min-w-0 w-full sm:w-auto sm:max-w-[55%] shrink-0 self-start sm:self-auto sm:gap-3">
-                    <button
-                      onClick={(e) => toggleNotification(friend, e)}
-                      className={`p-1.5 rounded-lg transition-all ${friend.is_notification_enabled
-                        ? 'text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
-                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700'
-                        }`}
-                      title={friend.is_notification_enabled ? '알림 끄기' : '알림 켜기'}
-                    >
-                      {friend.is_notification_enabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-                    </button>
-                    <FriendStatusBadge
-                      status={friend.friend?.status || null}
-                      task={friend.friend?.current_task || null}
-                      studyStartTime={friend.friend?.study_start_time || null}
-                      totalStopwatchTime={friend.friend?.total_stopwatch_time || null}
-                      dailyStudyTime={studyTimes[friend.friend_id] || 0}
-                    />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        confirmDelete(friend);
-                      }}
-                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30 rounded-lg transition-all"
-                      title="친구 삭제"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="col-span-2 text-xs text-gray-500 dark:text-gray-400 sm:mt-0.5">
-                  친구 추가일: {new Date(friend.created_at).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-          </li>
-        ))}
-        {/* Delete Confirmation Modal */}
-        {deletingFriend && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain p-6 space-y-4 animate-in zoom-in-95 duration-200">
-              <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
-                <div className="p-2 bg-rose-50 dark:bg-rose-900/20 rounded-full">
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">친구 삭제</h3>
-              </div>
-
-              <p className="break-words text-gray-600 dark:text-gray-300">
-                정말로 <span className="font-medium text-gray-900 dark:text-white">{deletingFriend.name}</span>님을 친구 목록에서 삭제하시겠습니까?
-              </p>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setDeletingFriend(null)}
-                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 rounded-xl font-medium transition-colors"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 px-4 py-2 text-white bg-rose-600 hover:bg-rose-700 rounded-xl font-medium transition-colors shadow-sm"
-                >
-                  삭제
-                </button>
-              </div>
-            </div>
+      <section aria-label="오늘 집중 시간 순위" className="flex flex-col gap-0.5">
+        <div className="flex items-center justify-between px-2 pb-1.5 text-xs font-semibold text-ink-muted md:hidden">
+          <span>오늘 가장 오래 집중한 순서</span>
+          <span className="mr-10 pl-3">오늘 (시:분)</span>
+        </div>
+        <div className="hidden items-center md:flex">
+          <div className="flex min-w-0 flex-1 items-center gap-4 px-3 pb-2.5 text-[13px] font-semibold text-ink-muted">
+            <span className="w-8 shrink-0">순위</span>
+            <span className="min-w-0 flex-1">오늘 가장 오래 집중한 순서</span>
+            <span className="w-[88px] shrink-0 text-right">오늘</span>
+            <span className="w-[104px] shrink-0 text-right">이번 주</span>
           </div>
-        )}
-      </ul >
-      {
-        selectedFriendForReport && (
-          <MemberReportModal
-            isOpen={!!selectedFriendForReport}
-            onClose={() => setSelectedFriendForReport(null)}
-            userId={selectedFriendForReport.id}
-            userName={selectedFriendForReport.name}
-          />
-        )
-      }
+          <span aria-hidden="true" className="w-10 shrink-0" />
+        </div>
+        <ul ref={listRef} className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {rows.map((row, index) => {
+            const friend = row.friendship;
+            const isNew = friend !== null && newFriendIds.includes(friend.id);
+            return (
+              <li
+                key={row.key}
+                className={cn(
+                  'flex items-center rounded-tile transition-colors md:rounded-2xl',
+                  row.isMe ? 'bg-surface' : 'hover:bg-hover',
+                  isNew && 'animate-fade-up',
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => openReport(row.userId, row.name)}
+                  className="flex min-h-[72px] min-w-0 flex-1 items-center gap-3 rounded-[inherit] px-2 py-1.5 text-left md:min-h-[82px] md:gap-4 md:px-3 md:py-2"
+                >
+                  <span
+                    className={cn(
+                      'w-6 shrink-0 font-display text-lg leading-none font-bold md:w-8 md:text-xl',
+                      index === 0 ? 'text-pomo' : 'text-ink-muted',
+                    )}
+                  >
+                    <span className="sr-only">순위 </span>
+                    {index + 1}
+                  </span>
+                  <Avatar
+                    name={row.name}
+                    tone={row.isMe ? 'solid' : 'tint'}
+                    className="md:size-10 md:text-[15px]"
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col gap-px md:gap-0.5">
+                    <span
+                      className={cn(
+                        'flex min-w-0 items-center gap-1.5 text-[15px] md:gap-2 md:text-base',
+                        row.isMe ? 'font-bold' : 'font-semibold',
+                      )}
+                    >
+                      <span className="min-w-0 truncate" title={friend?.nickname ? `${row.name} (${friend.friend_email})` : row.name}>
+                        {row.name}
+                      </span>
+                      {row.isMe ? (
+                        <span className="shrink-0 rounded-md bg-pomo-tint px-1.5 py-px text-[11px] font-bold text-pomo md:px-[7px] md:py-0.5">
+                          나
+                        </span>
+                      ) : null}
+                      {friend && !friend.is_notification_enabled ? (
+                        <>
+                          <BellOff
+                            aria-hidden="true"
+                            size={14}
+                            strokeWidth={1.8}
+                            ref={mutedFriendId === friend.id ? mutedRef : undefined}
+                            className={cn('shrink-0 text-ink-faint', mutedFriendId === friend.id && 'animate-pop-in')}
+                          />
+                          <span className="sr-only">공부 시작 알림 꺼짐</span>
+                        </>
+                      ) : null}
+                    </span>
+                    <FriendStatusBadge status={row.status} task={row.task} />
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-px md:contents">
+                    <span className="text-[15px] font-bold md:w-[88px] md:text-right md:text-base">
+                      <span className="sr-only">오늘 </span>
+                      {formatHoursMinutes(row.today)}
+                    </span>
+                    <span className="text-[11px] text-ink-muted md:w-[104px] md:text-right md:text-[15px]">
+                      <span className="sr-only">이번 주 </span>
+                      <span aria-hidden="true" className="md:hidden">주 </span>
+                      {formatHoursMinutes(row.week)}
+                    </span>
+                  </span>
+                </button>
+                {friend ? (
+                  <FriendRowMenu
+                    friend={friend}
+                    name={row.name}
+                    onToggleNotification={() => void toggleNotification(friend)}
+                    onEditNickname={() => handleStartEdit(friend)}
+                    onDelete={() => confirmDelete(friend)}
+                  />
+                ) : (
+                  <span aria-hidden="true" className="w-10 shrink-0" />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mx-3 mt-3.5 mb-0 hidden text-[13px] text-ink-muted md:block">
+          시간은 시:분이에요. 공부 중인 친구는 지금 하는 작업이 함께 보여요.
+        </p>
+      </section>
 
+      {dialogs}
     </>
+  );
+}
+
+const MENU_ITEM_CLASS =
+  'flex min-h-10 w-full items-center gap-2.5 rounded-control px-3 text-left text-sm font-medium transition-colors hover:bg-hover';
+
+interface FriendRowMenuProps {
+  friend: Friendship;
+  name: string;
+  onToggleNotification: () => void;
+  onEditNickname: () => void;
+  onDelete: () => void;
+}
+
+// 친구 줄 끝의 더보기: 친구 정보(이메일·추가일)와 알림·닉네임·삭제.
+function FriendRowMenu({ friend, name, onToggleNotification, onEditNickname, onDelete }: FriendRowMenuProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // 대화상자를 열기 전에 트리거로 포커스를 돌려 두어, 대화상자가 닫히면 이 버튼으로 돌아오게 한다.
+  const run = (action: () => void) => {
+    triggerRef.current?.focus();
+    setOpen(false);
+    action();
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label={`${name} 친구 메뉴`}
+          onKeyDown={stopActivationKeys}
+          className="ui-icon-button shrink-0 text-ink-muted"
+        >
+          <MoreHorizontal aria-hidden="true" size={18} strokeWidth={1.8} />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          aria-label={`${name} 친구 메뉴`}
+          align="end"
+          sideOffset={4}
+          collisionPadding={12}
+          onKeyDown={stopAllKeys}
+          className="ui-popover ui-popover-surface z-50 w-64 max-w-[calc(100vw-24px)] outline-none"
+        >
+          <div className="flex flex-col gap-0.5 px-3 pt-2 pb-2.5">
+            <p className="m-0 truncate text-sm font-semibold text-ink">{name}</p>
+            <p className="m-0 truncate text-xs text-ink-subtle">{friend.friend_email}</p>
+            <p className="m-0 text-xs text-ink-subtle">
+              {new Date(friend.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}에 친구가 됐어요
+            </p>
+          </div>
+          <button type="button" onClick={() => run(onToggleNotification)} className={cn(MENU_ITEM_CLASS, 'text-ink')}>
+            {friend.is_notification_enabled ? (
+              <BellOff aria-hidden="true" size={16} strokeWidth={1.8} />
+            ) : (
+              <Bell aria-hidden="true" size={16} strokeWidth={1.8} />
+            )}
+            {friend.is_notification_enabled ? '공부 시작 알림 끄기' : '공부 시작 알림 켜기'}
+          </button>
+          <button type="button" onClick={() => run(onEditNickname)} className={cn(MENU_ITEM_CLASS, 'text-ink')}>
+            <Pencil aria-hidden="true" size={16} strokeWidth={1.8} />
+            닉네임 수정
+          </button>
+          <button type="button" onClick={() => run(onDelete)} className={cn(MENU_ITEM_CLASS, 'text-pomo-deep')}>
+            <Trash2 aria-hidden="true" size={16} strokeWidth={1.8} />
+            친구 삭제
+          </button>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

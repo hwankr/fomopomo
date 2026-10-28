@@ -1,373 +1,137 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { Session } from '@supabase/supabase-js';
-import { Menu, X, Sun, Moon, Cherry, Settings, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
-import appIcon from '@/app/icon.png';
 import { usePathname } from 'next/navigation';
-import { useFriendRequestCount } from '@/hooks/useFriendRequestCount';
-
-type Theme = 'light' | 'dark' | 'spring';
+import { Session } from '@supabase/supabase-js';
+import Avatar, { getDisplayName } from '@/components/ui/Avatar';
+import MobileTopBar, { Wordmark } from '@/components/layout/MobileTopBar';
+import NotificationBell from '@/components/layout/NotificationBell';
+import { getActiveSection, HEADER_NAV_ITEMS, type AppSection } from '@/components/layout/navigation';
+import { playMotion, readCssToken } from '@/components/ui/motion';
+import { cn } from '@/lib/utils';
 
 interface NavbarProps {
     session: Session | null;
-    theme: Theme;
-    isDarkMode: boolean;
-    toggleDarkMode: () => void;
-    onOpenSettings?: () => void;
     onOpenLogin?: () => void;
-    onLogout?: () => void;
+    /**
+     * 모바일(md 미만) 상단 바. 화면마다 <MobileTopBar>로 만들어 넘긴다.
+     * 생략하면 워드마크 + 알림(로그아웃 상태면 로그인 버튼), null이면 상단 바를 그리지 않는다.
+     */
+    mobileTopBar?: ReactNode;
 }
 
-// 현재 테마 아이콘/라벨
-const themeIcon = (theme: Theme, size: string) => {
-    if (theme === 'dark') return <Moon className={`${size} text-indigo-500`} />;
-    if (theme === 'spring') return <Cherry className={`${size} text-pink-500`} />;
-    return <Sun className={`${size} text-amber-500`} />;
-};
+// 헤더는 화면마다 새로 그려지므로, 직전 헤더가 내려갈 때 선택 메뉴와 로즈 점의 자리를 여기 기억한다.
+// 처음 불러올 때는 비어 있어(null) 움직이지 않는다. left가 null이면 점이 보이지 않았다(선택 없음, 모바일).
+let lastIndicator: { section: AppSection | null; left: number | null } | null = null;
 
-const themeLabel = (theme: Theme) => {
-    if (theme === 'dark') return '다크';
-    if (theme === 'spring') return '봄';
-    return '라이트';
-};
-
-export default function Navbar({
-    session,
-    theme,
-    toggleDarkMode,
-    onOpenSettings,
-    onOpenLogin,
-    onLogout,
-}: NavbarProps) {
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-    const [scrolled, setScrolled] = useState(false);
-    const pathname = usePathname();
-    const friendRequestCount = useFriendRequestCount(session);
-
-    // Scroll effect for glassmorphism intensity
-    useEffect(() => {
-        const handleScroll = () => {
-            setScrolled(window.scrollY > 10);
+// 메뉴를 옮겨 가면 새 점이 직전 점의 자리에서 미끄러져 오고(선택이 없던 화면에서 오면 나타나고),
+// 두 메뉴 글자색이 서로 바뀐다. 실제 위치를 재므로 폭·스크롤 막대와 상관없다.
+function useNavIndicator(navRef: RefObject<HTMLElement | null>, activeSection: AppSection | null) {
+    useLayoutEffect(() => {
+        const nav = navRef.current;
+        const previous = lastIndicator;
+        const dot = nav?.querySelector<HTMLElement>('[data-nav-dot]');
+        const dotRect = dot?.getBoundingClientRect();
+        if (nav && previous && previous.section !== activeSection && nav.getClientRects().length > 0) {
+            const motion = { duration: 'emphasized' as const };
+            if (dot && dotRect && dotRect.width > 0) {
+                playMotion(
+                    dot,
+                    previous.left === null
+                        ? [{ opacity: 0, transform: 'scale(0.96)', offset: 0 }]
+                        : [{ transform: `translateX(${previous.left - dotRect.left}px)`, offset: 0 }],
+                    motion,
+                );
+                playMotion(dot.parentElement, [{ color: readCssToken('--color-ink-muted'), offset: 0 }], motion);
+            }
+            const previousLink = previous.section
+                ? nav.querySelector<HTMLElement>(`[data-nav-section="${previous.section}"]`)
+                : null;
+            playMotion(previousLink, [{ color: readCssToken('--color-ink'), offset: 0 }], motion);
+        }
+        return () => {
+            const rect = dot?.getBoundingClientRect();
+            lastIndicator = { section: activeSection, left: rect && rect.width > 0 ? rect.left : null };
         };
-        window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+    }, [navRef, activeSection]);
+}
 
-    const navLinks = [
-        { href: '/', label: '타이머', mobileOnly: true },
-        { href: '/plan', label: '계획' },
-        { href: '/friends', label: '친구' },
-        { href: '/groups', label: '그룹' },
-    ];
+export default function Navbar({ session, onOpenLogin, mobileTopBar }: NavbarProps) {
+    const pathname = usePathname();
+    const activeSection = getActiveSection(pathname);
+    const isProfilePage = activeSection === 'profile';
+    const navRef = useRef<HTMLElement>(null);
+    useNavIndicator(navRef, activeSection);
 
-    const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
+    const loginButton = onOpenLogin ? (
+        <button type="button" onClick={onOpenLogin} className="ui-button-secondary min-h-10 px-4 text-sm">
+            로그인
+        </button>
+    ) : null;
 
     return (
         <>
-            <nav
-                // Radix scroll locks compensate body width; fixed elements need the same offset.
-                className={`fixed top-0 left-0 right-[var(--removed-body-scroll-bar-size,0px)] z-50 transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 border-b ${scrolled
-                    ? 'bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-gray-200/50 dark:border-slate-700/50 shadow-sm'
-                    : 'bg-transparent border-transparent'
-                    }`}
-            >
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16 items-center">
-                        {/* Logo & Desktop Nav */}
-                        <div className="flex items-center gap-8">
-                            <Link href="/" className="flex-shrink-0 flex items-center gap-2 group">
-                                <div className="relative w-8 h-8 overflow-hidden rounded-xl shadow-sm group-hover:shadow-md transition-all duration-300 group-hover:scale-105">
-                                    <Image
-                                        src={appIcon}
-                                        alt="fomopomo"
-                                        fill
-                                        className="object-cover"
-                                    />
-                                </div>
-                                <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-rose-500 to-orange-500 block">
-                                    Fomopomo
-                                </span>
+            {/* 데스크톱 헤더: 고정하지 않고 투명하게 두어 타이머 무대 색이 그대로 비친다.
+                data-shell-header: 화면을 옮길 때 본문만 떠오르고 헤더는 그대로 있게 한다(RouteEnter). */}
+            <header data-shell-header="" className="relative z-[5] hidden h-[calc(72px+env(safe-area-inset-top))] w-full grid-cols-[1fr_auto_1fr] items-center gap-6 pt-[env(safe-area-inset-top)] pr-[max(2.5rem,env(safe-area-inset-right))] pl-[max(2.5rem,env(safe-area-inset-left))] md:grid">
+                <Wordmark className="justify-self-start" />
+
+                <nav ref={navRef} aria-label="주요 메뉴" className="flex items-center gap-2.5">
+                    {HEADER_NAV_ITEMS.map((item) => {
+                        const isActive = item.section === activeSection;
+                        return (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                aria-current={isActive ? 'page' : undefined}
+                                data-nav-section={item.section}
+                                className={cn(
+                                    'relative flex h-11 items-center justify-center rounded-control px-3.5 text-[15px] transition-colors',
+                                    isActive ? 'font-bold text-ink' : 'font-medium text-ink-muted hover:text-ink',
+                                )}
+                            >
+                                {item.label}
+                                {isActive ? (
+                                    <span data-nav-dot="" aria-hidden="true" className="absolute bottom-[3px] left-1/2 -ml-[2.5px] size-[5px] rounded-full bg-pomo" />
+                                ) : null}
                             </Link>
+                        );
+                    })}
+                </nav>
 
-                            {/* Desktop Navigation Links */}
-                            <div className="hidden md:flex space-x-1">
-                                {navLinks.filter(link => !link.mobileOnly).map((link) => {
-                                    const isActive = pathname === link.href;
-                                    return (
-                                        <Link
-                                            key={link.href}
-                                            href={link.href}
-                                            className={`relative px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${isActive
-                                                ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
-                                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50 dark:text-gray-300 dark:hover:text-white dark:hover:bg-slate-800/50'
-                                                }`}
-                                        >
-                                            {link.label}
-                                            {link.href === '/friends' && friendRequestCount > 0 && (
-                                                <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
-                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-                                                </span>
-                                            )}
-                                        </Link>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* Right Side Icons (Desktop) */}
-                        <div className="hidden md:flex items-center gap-3">
-                            <button
-                                onClick={toggleDarkMode}
-                                className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-amber-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-yellow-400 transition-all duration-200"
-                                aria-label="테마 전환"
+                <div className="flex items-center gap-2 justify-self-end">
+                    {session ? (
+                        <>
+                            <NotificationBell />
+                            <Link
+                                href="/profile"
+                                aria-label="내 프로필"
+                                aria-current={isProfilePage ? 'page' : undefined}
+                                className="rounded-full"
                             >
-                                {themeIcon(theme, 'w-5 h-5')}
-                            </button>
-
-                            {session && (
-                                <Link
-                                    href="/profile"
-                                    className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-rose-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-rose-400 transition-all duration-200"
-                                    aria-label="프로필"
-                                >
-                                    <UserIcon className="w-5 h-5" />
-                                </Link>
-                            )}
-
-                            {onOpenSettings && (
-                                <button
-                                    onClick={onOpenSettings}
-                                    className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 hover:text-indigo-500 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-indigo-400 transition-all duration-200"
-                                    aria-label="설정"
-                                >
-                                    <Settings className="w-5 h-5" />
-                                </button>
-                            )}
-
-                            <div className="h-6 w-px bg-gray-200 dark:bg-slate-700 mx-1"></div>
-
-                            {session ? (
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                                        className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-full hover:bg-gray-50 dark:hover:bg-slate-800 transition-all duration-200 border border-transparent hover:border-gray-200 dark:hover:border-slate-700"
-                                    >
-                                        <div className="relative w-8 h-8 rounded-full overflow-hidden border border-gray-200 dark:border-slate-600 shadow-sm">
-                                            <Image
-                                                src={
-                                                    session.user.user_metadata.avatar_url ||
-                                                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                        session.user.email?.split('@')[0] || '사용자'
-                                                    )}&background=random&color=fff`
-                                                }
-                                                alt="사용자"
-                                                fill
-                                                className="object-cover"
-                                            />
-                                        </div>
-                                        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
-                                    </button>
-
-                                    {isProfileMenuOpen && (
-                                        <>
-                                            <div
-                                                className="fixed inset-0 z-10 cursor-default"
-                                                onClick={() => setIsProfileMenuOpen(false)}
-                                            ></div>
-                                            <div className="absolute right-0 mt-2 w-56 rounded-2xl shadow-xl py-2 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 ring-1 ring-black ring-opacity-5 focus:outline-none z-20 animate-in fade-in zoom-in-95 duration-200">
-                                                <div className="px-4 py-3 border-b border-gray-100 dark:border-slate-700 mb-1">
-                                                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                                        {session.user.email?.split('@')[0]}
-                                                    </p>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                                                        {session.user.email}
-                                                    </p>
-                                                </div>
-                                            <Link
-                                                href="/profile"
-                                                onClick={() => setIsProfileMenuOpen(false)}
-                                                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-                                            >
-                                                <UserIcon className="w-4 h-4" />
-                                                내 프로필
-                                            </Link>
-                                            <button
-                                                onClick={() => {
-                                                    setIsProfileMenuOpen(false);
-                                                    onLogout?.();
-                                                }}
-                                                className="w-full text-left px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 flex items-center gap-2 transition-colors"
-                                                >
-                                                    <LogOut className="w-4 h-4" />
-                                                    로그아웃
-                                                </button>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={onOpenLogin}
-                                    className="bg-gray-900 text-white dark:bg-white dark:text-gray-900 px-5 py-2 rounded-full text-sm font-medium hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
-                                >
-                                    로그인
-                                </button>
-                            )}
-                        </div>
-
-                        {/* Mobile Menu Button */}
-                        <div className="flex items-center md:hidden">
-                            <button
-                                onClick={toggleMenu}
-                                className="inline-flex items-center justify-center p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"
-                            >
-                                <span className="sr-only">메인 메뉴 열기</span>
-                                {isMenuOpen ? (
-                                    <X className="block h-6 w-6" aria-hidden="true" />
-                                ) : (
-                                    <Menu className="block h-6 w-6" aria-hidden="true" />
-                                )}
-                            </button>
-                        </div>
-                    </div>
+                                <Avatar
+                                    name={getDisplayName(session.user)}
+                                    tone={isProfilePage ? 'solid' : 'tint'}
+                                    // 타이머 실행 중에는 페이지가 --header-avatar-bg로 바탕을 바꿀 수 있다.
+                                    className={isProfilePage ? undefined : 'bg-[color:var(--header-avatar-bg,var(--color-pomo-tint))] transition-colors duration-(--duration-emphasized)'}
+                                />
+                            </Link>
+                        </>
+                    ) : (
+                        loginButton
+                    )}
                 </div>
+            </header>
 
-                {/* Mobile Menu Overlay */}
-                {isMenuOpen && (
-                    <div className="md:hidden absolute top-16 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-800 shadow-xl animate-in slide-in-from-top-5 duration-200 h-[calc(100dvh-4rem)] overflow-y-auto">
-                        <div className="px-4 pt-4 pb-6 space-y-2">
-                            {navLinks.map((link) => {
-                                const isActive = pathname === link.href;
-                                return (
-                                    <Link
-                                        key={link.href}
-                                        href={link.href}
-                                        onClick={() => setIsMenuOpen(false)}
-                                        className={`relative block px-4 py-3 rounded-xl text-base font-medium transition-all ${isActive
-                                            ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
-                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-slate-800 dark:hover:text-white'
-                                            }`}
-                                    >
-                                        <span className="flex items-center justify-between">
-                                            {link.label}
-                                            <div className="flex gap-2">
-                                                {link.href === '/friends' && friendRequestCount > 0 && (
-                                                    <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                                                        {friendRequestCount}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </span>
-                                    </Link>
-                                );
-                            })}
-                        </div>
-
-                        <div className="px-4 py-6 border-t border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/50">
-                            <div className="flex items-center px-2 mb-6">
-                                {session ? (
-                                    <div className="flex-shrink-0 relative">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white dark:border-slate-700 shadow-sm">
-                                            <Image
-                                                src={
-                                                    session.user.user_metadata.avatar_url ||
-                                                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                        session.user.email?.split('@')[0] || '사용자'
-                                                    )}&background=random&color=fff`
-                                                }
-                                                alt="사용자"
-                                                fill
-                                                className="object-cover"
-                                            />
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="w-12 h-12 rounded-full bg-white dark:bg-slate-700 flex items-center justify-center shadow-sm border border-gray-100 dark:border-slate-600">
-                                        <UserIcon className="w-6 h-6 text-gray-400" />
-                                    </div>
-                                )}
-                                <div className="ml-4 min-w-0 flex-1">
-                                    <div className="break-words [overflow-wrap:anywhere] text-base font-bold text-gray-900 dark:text-white">
-                                        {session ? session.user.email?.split('@')[0] : '게스트'}
-                                    </div>
-                                    <div className="break-all text-sm text-gray-500 dark:text-gray-400">
-                                        {session ? session.user.email : 'fomopomo에 오신 것을 환영합니다'}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    onClick={toggleDarkMode}
-                                    className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
-                                >
-                                    <span className="mb-2">{themeIcon(theme, 'w-6 h-6')}</span>
-                                    <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                                        {themeLabel(theme)}
-                                    </span>
-                                </button>
-
-                                {onOpenSettings && (
-                                    <button
-                                        onClick={() => {
-                                            setIsMenuOpen(false);
-                                            onOpenSettings();
-                                        }}
-                                        className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <Settings className="w-6 h-6 mb-2 text-gray-500 dark:text-gray-400" />
-                                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">설정</span>
-                                    </button>
-                                )}
-
-
-
-                                {session ? (
-                                    <>
-                                        <Link
-                                            href="/profile"
-                                            onClick={() => setIsMenuOpen(false)}
-                                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all"
-                                        >
-                                            <UserIcon className="w-6 h-6 mb-2 text-gray-500 dark:text-gray-400" />
-                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">내 프로필</span>
-                                        </Link>
-
-                                        <button
-                                            onClick={() => {
-                                                setIsMenuOpen(false);
-                                                onLogout?.();
-                                            }}
-                                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800/50 shadow-sm hover:shadow-md transition-all"
-                                        >
-                                            <LogOut className="w-6 h-6 mb-2 text-rose-500" />
-                                            <span className="text-xs font-medium text-rose-600 dark:text-rose-400">로그아웃</span>
-                                        </button>
-                                    </>
-                                ) : (
-                                    <button
-                                        onClick={() => {
-                                            setIsMenuOpen(false);
-                                            onOpenLogin?.();
-                                        }}
-                                        className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-900 dark:bg-white shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <UserIcon className="w-6 h-6 mb-2 text-white dark:text-gray-900" />
-                                        <span className="text-xs font-medium text-white dark:text-gray-900">로그인</span>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </nav>
-            {/* Spacer to prevent content from hiding behind fixed navbar */}
-            <div className="h-16" />
+            {mobileTopBar === undefined ? (
+                <MobileTopBar
+                    start={<Wordmark />}
+                    end={session ? <NotificationBell variant="topbar" /> : loginButton}
+                />
+            ) : (
+                mobileTopBar
+            )}
         </>
     );
 }

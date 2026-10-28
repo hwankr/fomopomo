@@ -1,8 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
+import { Check, Coffee, Pause, RefreshCw, Timer, TriangleAlert } from 'lucide-react';
 import TaskSidebar from './TaskSidebar';
+import type { BeadTone } from '@/components/ui/Beads';
+import { playMotion } from '@/components/ui/motion';
+import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { cn } from '@/lib/utils';
 
 // Hooks
 import { useSettings, type Settings } from '@/components/timer/hooks/useSettings';
@@ -27,8 +32,9 @@ import {
 import { TaskModal } from './timer/ui/TaskModal';
 import { TimerDisplay } from './timer/ui/TimerDisplay';
 import { StopwatchDisplay } from './timer/ui/StopwatchDisplay';
-import { ThemeBackground } from './timer/ui/ThemeBackground';
-import { getDisplayCycleCount } from './timer/ui/timerDisplayUtils';
+import { TimerModeTabs, getTimerTabId, type TimerModeKey } from './timer/ui/TimerModeTabs';
+import { TimerSettingsDialog, type TimerDurationSettings } from './timer/ui/TimerSettingsDialog';
+import type { EndedPhase } from './timer/ui/timerDisplayUtils';
 import { isStudySessionIdentity, newStudySessionIdentity, type StudySessionIdentity } from './timer/hooks/sessionIdentity';
 
 // Helper to format time for Tab Title
@@ -41,11 +47,50 @@ const formatTimeForTitle = (seconds: number) => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+// 페이지(무대)가 알아야 하는 타이머 상태: 실행 중인 시계의 모드 색, 최근 활동 시트를
+// 접어 둘지(실행 중이거나 방금 끝났는지), 시계가 (다시) 움직이기 시작한 횟수.
+// startCount가 바뀌면 페이지는 잠깐 펼쳐 둔 시트를 다시 접는다(끝남 → 다음 단계 시작 포함).
+export type TimerStage = {
+  tone: BeadTone | null;
+  busy: boolean;
+  startCount: number;
+};
+
 interface TimerAppProps {
-  settingsUpdated: number;
+  /** @deprecated 설정은 저장소 구독으로 바로 반영된다. */
+  settingsUpdated?: number;
   onRecordSaved: () => void;
   isLoggedIn: boolean;
+  /** 빠른 "타이머 설정" 창. 모바일 상단 바에서도 열 수 있게 페이지가 상태를 쥘 수 있다. */
+  settingsOpen?: boolean;
+  onSettingsOpenChange?: (open: boolean) => void;
+  onStageChange?: (stage: TimerStage) => void;
+  onOpenLogin?: () => void;
 }
+
+const TIMER_PANEL_ID = 'timer-mode-panel';
+
+// Space 단축키가 가로채지 않을 대상: 스스로 Space에 반응하는 컨트롤.
+const SPACE_INTERACTIVE_SELECTOR = [
+  'button', 'a[href]', 'input', 'textarea', 'select', 'summary', '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]', '[role="option"]',
+  '[role="switch"]', '[role="checkbox"]', '[role="radio"]',
+].join(',');
+// 열려 있는 대화상자·팝오버(ModalDialog는 aria-modal, Radix 팝오버·선택은 popper 래퍼).
+// 퇴장 애니메이션 중인 팝오버(내용이 data-state="closed")는 이미 닫혔으므로 세지 않는다.
+const hasOpenLayer = () =>
+  document.querySelector('[aria-modal="true"]') !== null ||
+  Array.from(document.querySelectorAll('[data-radix-popper-content-wrapper]'))
+    .some((wrapper) => wrapper.firstElementChild?.getAttribute('data-state') !== 'closed');
+
+// 새 패널·숫자가 나타나는 움직임(animate-fade-in과 같다). 시작 상태만 적는다(docs/design-system.md §8).
+const FADE_IN: Keyframe[] = [{ opacity: 0, offset: 0 }];
+
+const isSpaceShortcutTarget = (target: EventTarget | null) => {
+  if (!(target instanceof Element)) return true;
+  if (target instanceof HTMLElement && target.isContentEditable) return false;
+  return !target.closest(`${SPACE_INTERACTIVE_SELECTOR}, [role="dialog"], [role="alertdialog"]`);
+};
 
 type SavedInterval = {
   start: number;
@@ -114,9 +159,19 @@ const closeStopwatchIntervals = (
   return closed;
 };
 
+// 토스트 아이콘: 이모지 대신 18px 선 아이콘을 토큰 색으로 쓴다(성공·실패는 Toaster 기본 아이콘).
+const toastIcons = {
+  autoPause: <Pause aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-watch" />,
+  warning: <TriangleAlert aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-pomo-deep" />,
+  rest: <Coffee aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-rest" />,
+  focus: <Timer aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-pomo" />,
+  completed: <Check aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-rest" />,
+  refresh: <RefreshCw aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-ink-muted" />,
+};
+
 const notifyStopwatchAutoPause = () => toast(
   '4시간 연속 실행되어 자동 일시정지했어요. 기록은 유지되며 다시 시작하거나 저장할 수 있어요.',
-  { icon: '⏸️', duration: 6000 }
+  { icon: toastIcons.autoPause, duration: 6000 }
 );
 
 // Pure completion-transition kernel shared by the live completion handler and
@@ -154,12 +209,32 @@ const expiredSessionBatchId = (targetTime: number) =>
 const FULL_STATE_KEY = 'fomopomo_full_state';
 
 export default function TimerApp({
-  settingsUpdated,
+  settingsUpdated = 0,
   onRecordSaved,
   isLoggedIn,
+  settingsOpen,
+  onSettingsOpenChange,
+  onStageChange,
+  onOpenLogin,
 }: TimerAppProps) {
   const [tab, setTab] = useState<'timer' | 'stopwatch'>('timer');
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
+  const taskPickerId = useId();
+  // 방금 끝난 단계("집중 끝"/"휴식 끝" 안내 띠와 끝난 모습). 타이머는 이미 다음 단계로
+  // 넘어가 있으므로, 화면에 보여 줄 끝난 단계의 모드·길이·사이클을 따로 둔다.
+  // 다음 시작·모드 변경·초기화로 사라진다.
+  const [ended, setEnded] = useState<EndedPhase | null>(null);
+  // 사용자가 모드를 바꾸면 새 패널이, 시계를 처음으로 되돌리면(초기화·프리셋·저장 뒤 초기화) 숫자가 한 번 나타난다.
+  // 타이머 틱·복원·자동 전환·다른 기기 동기화에는 돌지 않는다(렌더 끝의 레이아웃 효과).
+  const panelRef = useRef<HTMLElement>(null);
+  const panelSwapFromRef = useRef<TimerModeKey | null>(null);
+  const [panelSwap, setPanelSwap] = useState(0);
+  const [digitsSwap, setDigitsSwap] = useState(0);
+  const requestDigitsSwap = () => setDigitsSwap(count => count + 1);
+  const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
+  const isSettingsOpen = settingsOpen ?? internalSettingsOpen;
+  const setSettingsOpen = onSettingsOpenChange ?? setInternalSettingsOpen;
+  const taskTriggerRef = useRef<HTMLButtonElement>(null);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskHandoff, setTaskHandoffState] = useState<TaskHandoff | null>(null);
   const [isCompletingTask, setIsCompletingTask] = useState(false);
@@ -219,12 +294,19 @@ export default function TimerApp({
     toggleSubtask,
     pendingSubtaskIds,
   } = useTasks(isLoggedIn);
+  const { subjects } = useStudySubjects(isLoggedIn ? getCurrentUserId() : null);
+  const getSubjectName = (subjectId: string | null | undefined) =>
+    subjectId ? subjects.find(subject => subject.id === subjectId)?.name ?? null : null;
 
-  // 사이드바를 열 때마다 목록과 작업별 누적 시간을 새로 가져온다.
+  // 선택기를 열 때마다 목록과 작업별 누적 시간을 새로 가져온다.
   const openTaskSidebar = useCallback(() => {
     setIsTaskSidebarOpen(true);
     void fetchDbTasks();
   }, [fetchDbTasks]);
+  const toggleTaskSidebar = () => {
+    if (isTaskSidebarOpen) closeTaskSidebar();
+    else openTaskSidebar();
+  };
 
   // 4. Study Session Hook
   const sessionIdentityRef = useRef<StudySessionIdentity | null>(null);
@@ -297,6 +379,20 @@ export default function TimerApp({
     onAutoPauseRef: onStopwatchAutoPauseRef,
   });
 
+  // 어느 시계든 다시 움직이거나 스톱워치로 넘어가면 종료 안내는 할 일을 다 했다.
+  if (ended !== null && (isRunning || isStopwatchRunning || tab === 'stopwatch')) {
+    setEnded(null);
+  }
+
+  // 시계가 멈춤 → 움직임으로 바뀐 횟수(시작·재개·다음 단계·반복 모두).
+  const clockRunning = isRunning || isStopwatchRunning;
+  const [startCount, setStartCount] = useState(0);
+  const [wasClockRunning, setWasClockRunning] = useState(clockRunning);
+  if (wasClockRunning !== clockRunning) {
+    setWasClockRunning(clockRunning);
+    if (clockRunning) setStartCount(count => count + 1);
+  }
+
   // --- Account-scoped persistence namespace ---
   // Storage owner for every persisted key: the authenticated user id, or the
   // guest namespace when logged out. Ref to track if server sync has been done
@@ -340,6 +436,7 @@ export default function TimerApp({
     setTaskHandoffState(null);
     setIsCompletingTask(false);
     setIsTaskSidebarOpen(false);
+    setEnded(null);
   }
 
   // --- Persistence Logic ---
@@ -420,13 +517,13 @@ export default function TimerApp({
                 toast.dismiss(t.id);
                 void attempt(record, taskText, taskId, onAfterSave);
               }}
-              className="shrink-0 rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-bold text-white"
+              className="ui-button-primary ui-press min-h-9 shrink-0 rounded-chip px-3 text-sm"
             >
               재시도
             </button>
           </div>
         ),
-        { duration: 12000, icon: '⚠️' }
+        { duration: 12000, icon: toastIcons.warning }
       );
     }
     // 'skipped': another save is in flight or the account changed — the
@@ -498,7 +595,7 @@ export default function TimerApp({
             void finish(handoff);
           }}>재시도</button>
         </div>
-      ), { duration: 12000, icon: '⚠️' });
+      ), { duration: 12000, icon: toastIcons.warning });
       return;
     }
     const ready = { ...handoff, completionPending: false };
@@ -641,6 +738,9 @@ export default function TimerApp({
     setTaskHandoff(null);
     // Play alarm (handled in useEffect/hook but let's make sure)
     playAlarm();
+    // 다음 단계가 곧 자동으로 시작되면 안내 띠는 띄우지 않는다.
+    const autoStartsNext = timerMode === 'focus' ? settings.autoStartBreaks : settings.autoStartPomos;
+    if (!autoStartsNext) setEnded({ mode: timerMode, duration: timerDuration, cycleCount, live: true });
 
     const { nextMode, nextSeconds, nextCycle } = computeNextTimerPhase(timerMode, cycleCount, settings);
 
@@ -655,7 +755,7 @@ export default function TimerApp({
       setFocusLoggedSeconds(0);
       setCycleCount(nextCycle);
 
-      toast(nextMode === 'longBreak' ? '🎉 긴 휴식 시간입니다!' : '잠시 휴식하세요.', { icon: '☕' });
+      toast(nextMode === 'longBreak' ? '긴 휴식 시간입니다!' : '잠시 휴식하세요.', { icon: toastIcons.rest });
       if (settings.autoStartBreaks) setTimeout(() => {
         autoStartTimerRef.current(nextMode, nextSeconds);
       }, 1000);
@@ -663,7 +763,7 @@ export default function TimerApp({
       // 긴 휴식 완료 후 focus로 돌아올 때 사이클 리셋
       if (nextCycle !== cycleCount) setCycleCount(nextCycle);
       setFocusLoggedSeconds(0);
-      toast('다시 집중할 시간입니다!', { icon: '🔥' });
+      toast('다시 집중할 시간입니다!', { icon: toastIcons.focus });
       if (settings.autoStartPomos) setTimeout(() => {
         autoStartTimerRef.current('focus', nextSeconds);
       }, 1000);
@@ -783,6 +883,9 @@ export default function TimerApp({
       toast.error('스톱워치 기록이 있습니다.\n먼저 스톱워치를 초기화하거나 저장해주세요.');
       return;
     }
+    setEnded(null);
+    // 모드를 바꾸면 늘 타이머 보기로 간다(스톱워치 보기에서 고른 경우 포함). 저장도 그 탭으로 한다.
+    setTab('timer');
     setTaskHandoff(null);
     completingTaskRef.current = false;
     setIsCompletingTask(false);
@@ -805,18 +908,22 @@ export default function TimerApp({
     sessionIdentityRef.current = null;
     setIntervals([]);
     currentIntervalStartRef.current = null;
-    saveState(tab, mode, false, nextTimeLeft, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, nextTimeLeft);
+    saveState('timer', mode, false, nextTimeLeft, null, cycleCount, mode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, nextTimeLeft);
   };
 
+  // 적용했으면 true(빠른 설정 창을 닫는다).
   const handlePresetClick = (minutes: number) => {
     if (isStopwatchRunning || stopwatchTime > 0) {
       toast.error('스톱워치 기록이 있습니다.\n먼저 스톱워치를 초기화하거나 저장해주세요.');
-      return;
+      return false;
     }
     if (isRunning) {
       toast.error("타이머가 작동 중입니다.\n먼저 정지해주세요.");
-      return;
+      return false;
     }
+    setEnded(null);
+    // 프리셋은 스톱워치 보기에서도 고를 수 있다. 타이머 보기로 옮기고 그 탭으로 저장한다.
+    setTab('timer');
     setTaskHandoff(null);
     completingTaskRef.current = false;
     setIsCompletingTask(false);
@@ -827,8 +934,64 @@ export default function TimerApp({
     sessionIdentityRef.current = null;
     setSettings((prev: Settings) => ({ ...prev, pomoTime: minutes }));
     setIntervals([]);
-    saveState(tab, "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null, minutes * 60);
+    saveState('timer', "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null, minutes * 60);
+    // 프리셋은 늘 뽀모도로로 간다. 보이던 탭이 뽀모도로가 아니었으면 패널을, 맞으면 숫자만 비춘다.
+    if ((tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode) !== 'focus') requestPanelSwap();
+    else requestDigitsSwap();
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
+    return true;
+  };
+
+  // 지금 보이는 모드 탭을 기억해 두고, 바뀐 채로 그려지면 새 패널을 한 번 비춘다(거절돼 그대로면 아무것도 안 한다).
+  const requestPanelSwap = () => {
+    panelSwapFromRef.current = tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode;
+    setPanelSwap(count => count + 1);
+  };
+
+  // 모드 탭: 스톱워치 탭은 보기만 바꾸고(타이머는 그대로), 타이머 모드는 기존 모드 변경
+  // 규칙(스톱워치 기록 확인, 집중 중간 기록 저장, 초기화)을 그대로 따른다.
+  // 이미 고른 탭을 다시 눌러도 아무 일도 하지 않는다(초기화는 재설정 버튼으로).
+  const handleSelectMode = (key: TimerModeKey) => {
+    requestPanelSwap();
+    if (key === 'stopwatch') {
+      setTab('stopwatch');
+      return;
+    }
+    if (tab === 'stopwatch') setTab('timer');
+    if (key !== timerMode) handleChangeTimerMode(key);
+    // 끝난 단계를 보여 주는 중에 이미 준비된 다음 단계 탭을 고르면 그 단계를 쉬는 상태로 보여 준다.
+    else setEnded(null);
+  };
+
+  // 종료 안내 띠: 주 동작은 이미 준비된 다음 단계(휴식/집중)를 시작하고,
+  // 보조 동작은 방금 끝난 단계를 한 번 더 시작한다(계속 집중 / 조금 더 쉬기).
+  const handleEndedPrimary = () => {
+    requestPanelSwap();
+    setEnded(null);
+    handleToggleTimer();
+  };
+
+  const handleEndedSecondary = () => {
+    const repeatMode = ended?.mode;
+    if (!repeatMode) return;
+    setEnded(null);
+    requestDigitsSwap();
+    const minutes = repeatMode === 'focus' ? settings.pomoTime
+      : repeatMode === 'shortBreak' ? settings.shortBreak : settings.longBreak;
+    playClickSound();
+    autoStartTimer(repeatMode, minutes * 60);
+  };
+
+  // 빠른 설정 저장: 현재 저장된 설정에 시간·사이클만 덮어쓴다. 쉬고 있는 타이머는
+  // useTimerLogic이 새 길이로 맞추고, 진행 중인 세션은 그대로 둔다.
+  const handleSaveTimerSettings = async (values: TimerDurationSettings) => {
+    const didPersist = await persistSettings({ ...readSettingsSnapshot(), ...values });
+    if (!didPersist) {
+      toast.error('설정을 저장할 수 없습니다. 데이터를 복구하거나 초기화한 뒤 다시 시도해주세요.');
+      return false;
+    }
+    toast.success('설정이 저장되었습니다!');
+    return true;
   };
 
   const handleSaveTimer = () => {
@@ -857,6 +1020,7 @@ export default function TimerApp({
         if (currentFullTime !== configuredFullTime) return;
 
         const resetTime = resetTimerManual();
+        requestDigitsSwap();
         sessionIdentityRef.current = null;
         setIntervals([]);
         saveState(tab, timerMode, false, resetTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null, resetTime);
@@ -880,6 +1044,7 @@ export default function TimerApp({
       // triggerSave's guards would desync memory from the persisted snapshot
       // on an early return.
       resetStopwatch();
+      requestDigitsSwap();
       sessionIdentityRef.current = null;
       // The record froze the full session content (including the still-open
       // interval, closed at the click time above) — consume the stopwatch
@@ -892,6 +1057,7 @@ export default function TimerApp({
 
   const handleResetStopwatch = () => {
     resetStopwatch();
+    requestDigitsSwap();
     sessionIdentityRef.current = null;
     setIntervals([]);
     currentIntervalStartRef.current = null;
@@ -1093,6 +1259,17 @@ export default function TimerApp({
       state.timer.cycleCount,
       currentSettings
     );
+    // 방금(30분 안) 끝난 단계만 종료 안내 띠로 이어 준다. 오래된 것은 토스트로 충분하다.
+    if (Date.now() - targetTime < 30 * 60 * 1000) {
+      const finishedMode = state.timer.mode;
+      const configuredMinutes = finishedMode === 'focus' ? currentSettings.pomoTime
+        : finishedMode === 'shortBreak' ? currentSettings.shortBreak : currentSettings.longBreak;
+      setEnded({
+        mode: finishedMode,
+        duration: state.timer.duration ?? state.configuredDurations?.[finishedMode] ?? configuredMinutes * 60,
+        cycleCount: state.timer.cycleCount,
+      });
+    }
     setCycleCount(nextCycle);
     setTimerMode(nextMode);
     setTimeLeft(nextSeconds);
@@ -1115,10 +1292,10 @@ export default function TimerApp({
         savedDirectly
           ? '자리 비운 사이 뽀모도로가 완료되어 기록을 저장했어요. 휴식할 시간!'
           : '자리 비운 사이 뽀모도로가 완료되었어요.',
-        { icon: '✅' }
+        { icon: toastIcons.completed }
       );
     } else {
-      toast('휴식이 끝났어요. 다시 집중할 시간입니다!', { icon: '🔥' });
+      toast('휴식이 끝났어요. 다시 집중할 시간입니다!', { icon: toastIcons.focus });
     }
 
     // The session is settled: skip this mount's server-state sync so stale
@@ -1369,7 +1546,7 @@ export default function TimerApp({
         // The source device keeps its local time and can resume to publish ID.
         if (!isStudySessionIdentity({ id: data.study_session_id, progressStart: data.study_session_offset })) {
           if (data.study_start_time || data.total_stopwatch_time > 0) {
-            toast('다른 기기의 기록을 이어하려면 해당 기기를 새로고침한 뒤 한 번 재개해주세요.', { icon: '🔄' });
+            toast('다른 기기의 기록을 이어하려면 해당 기기를 새로고침한 뒤 한 번 재개해주세요.', { icon: toastIcons.refresh });
           }
           return;
         }
@@ -1446,7 +1623,7 @@ export default function TimerApp({
           setStopwatchTime(0);
           saveState('timer', mode, running, remaining, targetTime, cycle, logged,
             false, 0, null, importedIntervals, currentStart, duration);
-          if (running) toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
+          if (running) toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.');
           return;
         }
 
@@ -1496,7 +1673,7 @@ export default function TimerApp({
           running, elapsed, running ? startTime : null, importedIntervals, currentStart, focusDuration);
         if (snapshot?.autoPaused) {
           pauseRecoveredStopwatch(snapshot);
-        } else if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+        } else if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.');
       } catch (e) {
         console.error('Sync failed', e);
       }
@@ -1529,16 +1706,13 @@ export default function TimerApp({
     });
   }, [selectedTaskId, selectedTask, selectedSubjectId, getSelectedTaskSubjectId, storageOwner]);
 
+  // Space = 시작/일시정지. 포커스가 버튼·링크·탭·입력 같은 컨트롤에 있으면 그 컨트롤의
+  // 기본 동작(누르기)에 맡기고, 대화상자·팝오버가 열려 있을 때도 끼어들지 않는다.
   const handleSpaceToggle = useEffectEvent((event: KeyboardEvent) => {
     if (event.code !== 'Space' && event.key !== ' ') return;
-    const target = event.target as HTMLElement | null;
-    const tagName = target?.tagName;
-    const isFormField =
-      tagName === 'INPUT' ||
-      tagName === 'TEXTAREA' ||
-      tagName === 'SELECT' ||
-      target?.isContentEditable;
-    if (isFormField || taskModalOpen) return;
+    if (event.defaultPrevented || !isSpaceShortcutTarget(event.target)) return;
+    if (taskModalOpen || isSettingsOpen || isTaskSidebarOpen) return;
+    if (hasOpenLayer()) return;
     event.preventDefault();
     if (tab === 'timer') handleToggleTimer();
     else handleToggleStopwatch();
@@ -1553,10 +1727,14 @@ export default function TimerApp({
     return () => window.removeEventListener('keydown', listener);
   }, []);
 
-  const displayCycleCount = getDisplayCycleCount(
-    cycleCount,
-    settings.longBreakInterval
-  );
+  // 무대 색과 시트 접힘은 페이지가 그린다. 보이는 탭의 시계가 돌 때만 모드 색을 입힌다.
+  const stageTone: BeadTone | null = tab === 'stopwatch'
+    ? (isStopwatchRunning ? 'watch' : null)
+    : (isRunning ? (timerMode === 'focus' ? 'pomo' : 'rest') : null);
+  const stageBusy = clockRunning || ended !== null;
+  useEffect(() => {
+    onStageChange?.({ tone: stageTone, busy: stageBusy, startCount });
+  }, [onStageChange, stageTone, stageBusy, startCount]);
 
   // Update Document Title
   useEffect(() => {
@@ -1581,8 +1759,36 @@ export default function TimerApp({
   }, [tab, timerMode, timeLeft, stopwatchTime]);
 
 
+  // 끝난 단계를 보여 주는 동안은 그 단계의 탭을 고른 것으로 보인다(보드와 같게).
+  const selectedModeKey: TimerModeKey = tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode;
+  useLayoutEffect(() => {
+    const from = panelSwapFromRef.current;
+    panelSwapFromRef.current = null;
+    if (from !== null && from !== selectedModeKey) playMotion(panelRef.current, FADE_IN);
+  }, [panelSwap, selectedModeKey]);
+  useLayoutEffect(() => {
+    if (digitsSwap > 0) playMotion(panelRef.current?.querySelector('[role="timer"]'), FADE_IN);
+  }, [digitsSwap]);
+  const selectedTaskTitle = taskHandoff?.task.title || getSelectedTaskTitle() || selectedTask;
+  const selectedTaskSubject = getSubjectName(taskHandoff ? taskHandoff.task.subjectId : selectedSubjectId);
+  // 끝난 모습에서 초기화하면 준비된 다음 단계로 돌아가므로(모드 탭이 바뀐다) 패널을, 아니면 숫자만 비춘다.
+  const resetTimer = () => {
+    if (ended) requestPanelSwap();
+    else requestDigitsSwap();
+    setEnded(null);
+    setTaskHandoff(null);
+    completingTaskRef.current = false;
+    setIsCompletingTask(false);
+    const resetTime = resetTimerManual();
+    sessionIdentityRef.current = null;
+    setIntervals([]);
+    currentIntervalStartRef.current = null;
+    saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, resetTime);
+    updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
+  };
+
   return (
-    <>
+    <div className="flex flex-1 flex-col">
       <TaskModal
         isOpen={taskModalOpen}
         dbTasks={dbTasks}
@@ -1603,6 +1809,15 @@ export default function TimerApp({
         onDisablePopup={handleDisableTaskPopup}
       />
 
+      <TimerSettingsDialog
+        key={storageOwner}
+        open={isSettingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        onSave={handleSaveTimerSettings}
+        onPresetClick={handlePresetClick}
+      />
+
       <TaskSidebar
         userId={isLoggedIn ? getCurrentUserId() : null} onCreateTask={createTask}
         isOpen={isTaskSidebarOpen} onClose={closeTaskSidebar}
@@ -1610,6 +1825,7 @@ export default function TimerApp({
         pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId}
         choosingNextTask={Boolean(taskHandoff)} selectionDisabled={Boolean(taskHandoff?.completionPending)}
         excludedTaskId={taskHandoff?.task.id ?? null}
+        subjects={subjects} anchorRef={taskTriggerRef} contentId={taskPickerId} onOpenLogin={onOpenLogin}
         onSelectTask={selectTimerTask}
         onToggleTask={(task) => {
           if (task.id === selectedTaskId && task.status !== 'done' && timerOwnsFocusProgress) handleCompleteTask();
@@ -1623,57 +1839,52 @@ export default function TimerApp({
         }}
       />
 
-      <div className="relative w-full max-w-md mx-auto">
-        <ThemeBackground tab={tab} timerMode={timerMode} isRunning={isRunning} isStopwatchRunning={isStopwatchRunning} />
-        <div className={`relative w-full bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transition-all duration-300 transform ${(isRunning || isStopwatchRunning) ? 'shadow-2xl scale-[1.02] ring-2 ring-offset-2 dark:ring-offset-slate-900' : ''
-          } ${(isRunning || isStopwatchRunning) ? (
-            tab === 'stopwatch' ? 'ring-indigo-200 dark:ring-indigo-900' :
-              timerMode === 'focus' ? 'ring-rose-200 dark:ring-rose-900' :
-                'ring-emerald-200 dark:ring-emerald-900'
-          ) : ''
-          }`}>
+      <TimerModeTabs
+        value={selectedModeKey}
+        onSelect={handleSelectMode}
+        panelId={TIMER_PANEL_ID}
+      />
 
-          <div className="flex items-center gap-2 m-2">
-            <div className="flex-1 flex p-1 bg-gray-100 dark:bg-slate-900/50 rounded-2xl">
-              <button onClick={() => setTab('timer')} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'timer' ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm' : 'text-gray-400 dark:text-gray-500'}`}>타이머</button>
-              <button onClick={() => setTab('stopwatch')} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${tab === 'stopwatch' ? 'bg-white dark:bg-slate-800 text-gray-700 dark:text-white shadow-sm' : 'text-gray-400 dark:text-gray-500'}`}>스톱워치</button>
-            </div>
-            <button onClick={openTaskSidebar} aria-label="작업 목록 열기" className={`p-4 rounded-2xl transition-all shadow-sm border active:scale-95 ${selectedTaskId ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border-rose-100 dark:border-rose-900/50' : 'bg-white dark:bg-slate-800 text-gray-400 dark:text-gray-500 border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'}`}>
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 17.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
-            </button>
-          </div>
-
-          <div className={`px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center justify-center min-h-[360px] transition-colors duration-500 ${tab === 'stopwatch' ? 'bg-indigo-50 dark:bg-indigo-950/30' : (timerMode === 'focus' ? 'bg-rose-50 dark:bg-rose-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30')}`}>
-            {tab === 'timer' ? (
-              <TimerDisplay
-                timerMode={timerMode} timeLeft={timeLeft} isRunning={isRunning} isSaving={isSaving} cycleCount={displayCycleCount} longBreakInterval={settings.longBreakInterval} presets={settings.presets}
-                showSaveButton={timerMode === 'focus' && !isRunning && timerDuration - timeLeft - focusLoggedSeconds > 0}
-                showResetButton={!isRunning && timeLeft !== timerDuration}
-                onToggleTimer={handleToggleTimer}
-                onCompleteTask={handleCompleteTask}
-                canCompleteTask={isLoggedIn && timerOwnsFocusProgress && Boolean(selectedTaskItem && selectedTaskItem.status !== 'done')}
-                isCompletingTask={isCompletingTask}
-                isChoosingNextTask={Boolean(taskHandoff)}
-                onResetTimer={() => {
-                  setTaskHandoff(null);
-                  completingTaskRef.current = false;
-                  setIsCompletingTask(false);
-                  const resetTime = resetTimerManual();
-                  sessionIdentityRef.current = null;
-                  setIntervals([]);
-                  currentIntervalStartRef.current = null;
-                  saveState(tab, timerMode, false, resetTime, null, cycleCount, timerMode === 'focus' ? 0 : focusLoggedSeconds, isStopwatchRunning, stopwatchTime, null, [], null, resetTime);
-                  updateStatus('online', undefined, undefined, 0, 'timer', timerMode, 0);
-                }}
-                onSaveTimer={handleSaveTimer} onChangeMode={handleChangeTimerMode} onPresetClick={handlePresetClick}
-                selectedTaskId={selectedTaskId} selectedTaskTitle={taskHandoff?.task.title || getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); if (!taskHandoffRef.current) selectTimerTask(null); }}
-              />
-            ) : (
-              <StopwatchDisplay stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving} onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch} selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} onOpenTaskSidebar={openTaskSidebar} onClearTask={(e) => { e.stopPropagation(); setSelectedTaskId(null); setSelectedTask(''); setSelectedSubjectId(null); }} />
-            )}
-          </div>
-        </div>
-      </div>
-    </>
+      <section
+        ref={panelRef}
+        id={TIMER_PANEL_ID}
+        role="tabpanel"
+        aria-labelledby={getTimerTabId(selectedModeKey)}
+        className={cn(
+          'flex flex-1 flex-col items-center justify-center px-5 pt-3 pb-8 md:min-h-[600px] md:px-8 md:pt-6 md:pb-14',
+          // 색이 든 무대에서는 빈 구슬을 흰색으로 둔다.
+          stageTone && '[--bead-off:var(--color-white)]',
+        )}
+      >
+        {tab === 'timer' ? (
+          <TimerDisplay
+            timerMode={timerMode} timeLeft={timeLeft} timerDuration={timerDuration} isRunning={isRunning} isSaving={isSaving}
+            cycleCount={cycleCount} longBreakInterval={settings.longBreakInterval}
+            ended={ended} onEndedPrimary={handleEndedPrimary} onEndedSecondary={handleEndedSecondary}
+            showSaveButton={timerMode === 'focus' && !isRunning && timerDuration - timeLeft - focusLoggedSeconds > 0}
+            // 끝난 모습에서는 초기화로 안내를 닫고 준비된 다음 단계로 돌아간다(보드의 재설정).
+            showResetButton={ended !== null || (!isRunning && timeLeft !== timerDuration)}
+            onToggleTimer={handleToggleTimer}
+            onCompleteTask={handleCompleteTask}
+            canCompleteTask={isLoggedIn && timerOwnsFocusProgress && Boolean(selectedTaskItem && selectedTaskItem.status !== 'done')}
+            isCompletingTask={isCompletingTask}
+            isChoosingNextTask={Boolean(taskHandoff)}
+            onResetTimer={resetTimer}
+            onSaveTimer={handleSaveTimer}
+            onOpenSettings={() => setSettingsOpen(true)}
+            selectedTaskId={selectedTaskId} selectedTaskTitle={selectedTaskTitle} selectedTaskSubject={selectedTaskSubject}
+            isTaskPickerOpen={isTaskSidebarOpen} taskPickerId={taskPickerId} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
+          />
+        ) : (
+          <StopwatchDisplay
+            stopwatchTime={stopwatchTime} isStopwatchRunning={isStopwatchRunning} isSaving={isSaving}
+            onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch}
+            onOpenSettings={() => setSettingsOpen(true)}
+            selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} selectedTaskSubject={getSubjectName(selectedSubjectId)}
+            isTaskPickerOpen={isTaskSidebarOpen} taskPickerId={taskPickerId} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
+          />
+        )}
+      </section>
+    </div>
   );
 }

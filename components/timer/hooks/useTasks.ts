@@ -18,6 +18,7 @@ import {
   type LongTermTaskItem,
   type LongTermTaskRow,
 } from '@/lib/longTermTasks';
+import { countPomodorosByTask, getTaskPomodoroGoal } from '@/lib/pomodoroCounts';
 import {
   GUEST_OWNER,
   getScopedStorageKey,
@@ -44,6 +45,10 @@ export type TaskItem = {
   sourceLongTermTaskId?: string | null;
   parentTitle?: string;
   subjectId?: string | null;
+  /** 오늘 할 일의 목표 뽀모도로 수(estimated_pomodoros, 비었으면 1). 주·월 계획에는 없다. */
+  pomodoroGoal?: number;
+  /** 이 작업으로 끝낸 뽀모도로 수(lib/pomodoroCounts 규칙: 저장 배치마다 한 번) */
+  pomodoroCount?: number;
 };
 
 export type { LongTermSubtaskItem, LongTermTaskItem } from '@/lib/longTermTasks';
@@ -55,11 +60,17 @@ type TaskRow = {
   source_subtask_id?: string | null;
   source_long_term_task_id?: string | null;
   subject_id?: string | null;
+  estimated_pomodoros?: number | null;
 };
 
 type SessionDurationRow = {
+  id: number | string;
+  created_at: string;
   task_id: string | null;
   duration: number | null;
+  mode: string | null;
+  session_batch_id?: string | null;
+  group_id?: string | null;
 };
 
 const TABLE_BY_KIND: Record<TaskKind, string> = {
@@ -162,7 +173,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       // Daily tasks (완료 항목도 표시하므로 status 필터 없음)
       const { data: tasksData } = await supabase
         .from('tasks')
-        .select('id, title, status, source_subtask_id, source_long_term_task_id, subject_id')
+        .select('id, title, status, source_subtask_id, source_long_term_task_id, subject_id, estimated_pomodoros')
         .eq('user_id', user.id)
         .eq('due_date', today);
 
@@ -237,17 +248,20 @@ export const useTasks = (isLoggedIn: boolean) => {
         (row) => row.id
       );
       const durationByTaskId = new Map<string, number>();
+      let pomodorosByTaskId = new Map<string, number>();
       if (allIds.length > 0) {
         const { data: sessions, error: sessionsError } = await supabase
           .from('study_sessions')
-          .select('task_id, duration')
+          .select('id, created_at, task_id, duration, mode, session_batch_id, group_id')
           .eq('user_id', user.id)
           .in('task_id', allIds);
 
         if (sessionsError) {
           console.error('Error fetching task durations:', sessionsError);
         } else {
-          for (const row of (sessions ?? []) as SessionDurationRow[]) {
+          const sessionRows = (sessions ?? []) as SessionDurationRow[];
+          pomodorosByTaskId = countPomodorosByTask(sessionRows);
+          for (const row of sessionRows) {
             if (!row.task_id) continue;
             durationByTaskId.set(
               row.task_id,
@@ -269,6 +283,8 @@ export const useTasks = (isLoggedIn: boolean) => {
           subjectId: row.subject_id ?? null,
           ...(kind === 'daily'
             ? {
+                pomodoroGoal: getTaskPomodoroGoal(row.estimated_pomodoros),
+                pomodoroCount: pomodorosByTaskId.get(row.id) ?? 0,
                 sourceSubtaskId,
                 sourceLongTermTaskId,
                 parentTitle: sourceSubtaskId
@@ -418,7 +434,7 @@ export const useTasks = (isLoggedIn: boolean) => {
       }
 
       const { data, error } = await supabase.from(TABLE_BY_KIND[input.kind])
-        .insert({ user_id: owner, title, subject_id: input.subjectId, status: 'todo', ...period })
+        .insert({ user_id: owner, title, subject_id: input.subjectId || null, status: 'todo', ...period })
         .select('id, title, status, subject_id').single();
       if (!isCurrent()) return null;
       if (error) throw error;

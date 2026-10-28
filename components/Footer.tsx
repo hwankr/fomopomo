@@ -3,105 +3,57 @@
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 
+const FOOTER_LINKS = [
+  { href: '/', label: '타이머' },
+  { href: '/plan', label: '계획' },
+  { href: '/friends', label: '친구' },
+  { href: '/groups', label: '그룹' },
+  { href: '/contact', label: '문의하기' },
+  { href: '/support', label: '후원하기' },
+  { href: '/terms', label: '이용약관' },
+  { href: '/privacy', label: '개인정보처리방침' },
+];
+
+const CONTACT_EMAIL = 'fabronjeon@naver.com';
+
 export default function Footer() {
   const currentYear = new Date().getFullYear();
+  const linkClass = 'text-sm text-ink-muted transition-colors hover:text-pomo';
 
   return (
-    <footer className="bg-gray-50 dark:bg-slate-900 border-t border-gray-200 dark:border-slate-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
-          {/* Brand Section */}
-          <div className="space-y-4">
-            <Link href="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-rose-500 to-orange-500">
-              Fomopomo
-            </Link>
-            <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-              Fear of missing out your Pomodoro
-            </p>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Contact: <button 
-                onClick={() => {
-                  navigator.clipboard.writeText('fabronjeon@naver.com');
-                  toast.success('이메일이 복사되었습니다');
-                }}
-                className="hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
-              >fabronjeon@naver.com</button>
-            </p>
-          </div>
-
-          {/* Product Section */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider mb-4">
-              서비스
-            </h3>
-            <ul className="space-y-3">
-              <li>
-                <Link href="/" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  타이머
-                </Link>
-              </li>
-              <li>
-                <Link href="/plan" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  계획
-                </Link>
-              </li>
-              <li>
-                <Link href="/friends" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  친구
-                </Link>
-              </li>
-              <li>
-                <Link href="/groups" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  그룹
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Support Section */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider mb-4">
-              고객지원
-            </h3>
-            <ul className="space-y-3">
-              <li>
-                <Link href="/contact" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  문의하기
-                </Link>
-              </li>
-              <li>
-                <Link href="/support" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  후원하기 ☕
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Company/Legal Section */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider mb-4">
-              정보
-            </h3>
-            <ul className="space-y-3">
-              <li>
-                <Link href="/terms" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  이용약관
-                </Link>
-              </li>
-              <li>
-                <Link href="/privacy" className="text-sm text-gray-600 dark:text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
-                  개인정보처리방침
-                </Link>
-              </li>
-            </ul>
-          </div>
+    <footer className="bg-white text-ink">
+      <div className="mx-auto flex w-full max-w-[960px] flex-col gap-4 px-5 py-10 md:flex-row md:items-start md:justify-between md:gap-10 md:px-10 md:py-12">
+        <div className="flex flex-col gap-1.5">
+          <Link href="/" className="w-fit text-lg font-extrabold tracking-[-0.02em] text-pomo">
+            Fomopomo
+          </Link>
+          <p className="m-0 text-[13px] text-ink-subtle">&copy; {currentYear} Fomopomo. All rights reserved.</p>
         </div>
 
-        <div className="mt-12 border-t border-gray-200 dark:border-slate-800 pt-8">
-          <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
-            &copy; {currentYear} Fomopomo. All rights reserved.
+        <nav aria-label="사이트 정보" className="flex flex-col gap-2 md:items-end">
+          <ul className="m-0 flex list-none flex-wrap gap-x-5 gap-y-2 p-0 md:justify-end">
+            {FOOTER_LINKS.map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} className={linkClass}>
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <p className="m-0 text-sm text-ink-muted">
+            문의{' '}
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(CONTACT_EMAIL);
+                toast.success('이메일이 복사되었습니다');
+              }}
+              className={linkClass}
+            >
+              {CONTACT_EMAIL}
+            </button>
           </p>
-        </div>
+        </nav>
       </div>
     </footer>
   );

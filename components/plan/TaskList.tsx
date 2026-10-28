@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { format } from 'date-fns';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { format, parse } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
   Check,
-  CheckCircle2,
-  Circle,
   GripVertical,
+  MoreHorizontal,
   Pencil,
   Pin,
   Plus,
@@ -33,11 +32,25 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import ConfirmModal from '@/components/ConfirmModal';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
+import Beads, { type BeadState } from '@/components/ui/Beads';
+import ModalDialog from '@/components/ui/ModalDialog';
+import { playPop } from '@/components/ui/motion';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
+import {
+  clampPomodoroGoal,
+  countPomodorosByTask,
+  getTaskPomodoroGoal,
+  POMODORO_GOAL_MAX,
+  POMODORO_GOAL_MIN,
+  type PomodoroSessionRow,
+} from '@/lib/pomodoroCounts';
 import { notifyStudySubjectsChanged, type StudySubject } from '@/lib/studySubjects';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { formatDayLabel, formatStudyTime, sortableTransition } from './planUi';
+import { useEntrance, usePlayOnce } from '@/components/ui/usePlayOnce';
 
 interface Task {
   id: string;
@@ -46,6 +59,8 @@ interface Task {
   status: 'todo' | 'in_progress' | 'done';
   estimated_pomodoros: number;
   duration?: number;
+  /** 이 작업으로 끝낸 뽀모도로 수(lib/pomodoroCounts 규칙) */
+  pomodoros?: number;
   position: number;
   source_subtask_id: string | null;
   source_long_term_task_id?: string | null;
@@ -86,17 +101,27 @@ type PinnedTaskRow = {
   position: number | null;
 };
 
-type SessionDurationRow = {
-  task_id: string | null;
+type SessionDurationRow = PomodoroSessionRow & {
   duration: number | null;
 };
 
-const formatDuration = (seconds: number) => {
-  if (!seconds) return null;
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-};
+/** 방금 한 동작(추가·완료·고정)과 그 작업. 그 행에만 움직임을 한 번 붙인다(docs/design-system.md §8 새 항목, usePlayOnce). */
+type RowMotion = { type: 'add' | 'complete' | 'pin'; id: string };
+
+// 새 계획의 뽀모도로 목표 기본값(디자인 보드의 추가 양식과 같다)
+const DEFAULT_POMODORO_GOAL = 2;
+// 작업 행에 그리는 구슬 상한(목표를 넘겨 끝낸 경우)
+const MAX_ROW_BEADS = 12;
+
+function buildTaskBeads(done: number, goal: number, finished: boolean): BeadState[] {
+  const shownDone = Math.min(done, Math.max(goal, MAX_ROW_BEADS));
+  const remaining = Math.max(0, goal - shownDone);
+  return [
+    ...Array<BeadState>(shownDone).fill('done'),
+    // 끝낸 작업에 남은 칸은 더 계획한 것이 아니므로 빈 구슬로 둔다.
+    ...Array<BeadState>(remaining).fill(finished ? 'empty' : 'planned'),
+  ];
+}
 
 const normalizeTaskRows = (rows: TaskRow[] | null | undefined): Task[] =>
   (rows ?? []).map((row) => ({
@@ -130,6 +155,9 @@ interface SortableTaskItemProps {
   isPinned: boolean;
   subjects: StudySubject[];
   createSubject: (name: string) => Promise<StudySubject | null>;
+  isDesktop: boolean;
+  /** 이 행에서 방금 한 동작(없으면 null) */
+  motion: RowMotion['type'] | null;
 }
 
 function SortableTaskItem({
@@ -141,10 +169,19 @@ function SortableTaskItem({
   isPinned,
   subjects,
   createSubject,
+  isDesktop,
+  motion,
 }: SortableTaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.title);
   const [editedSubjectId, setEditedSubjectId] = useState(task.subject_id);
+  const [showActions, setShowActions] = useState(false);
+  const actionsId = useId();
+  const editorRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  // 열릴 때만 한 번 떠오른다(열린 채로 행이 옮겨져도 다시 돌지 않는다).
+  const editorEntering = useEntrance(isEditing, editorRef);
+  const actionsEntering = useEntrance(showActions, actionsRef);
 
   const {
     attributes,
@@ -153,7 +190,7 @@ function SortableTaskItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id });
+  } = useSortable({ id: task.id, transition: sortableTransition() });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -183,156 +220,234 @@ function SortableTaskItem({
     }
   };
 
+  const isDone = task.status === 'done';
+  const done = task.pomodoros ?? 0;
+  const goal = getTaskPomodoroGoal(task.estimated_pomodoros);
+  const subjectName = subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류';
+  // 데스크톱은 행에 마우스를 올리거나 포커스가 들어올 때만 보인다(포커스가 들어오면 Tab으로 닿는다).
+  const revealOnHover = 'hidden group-hover:inline-flex group-focus-within:inline-flex';
+
+  const actions = (
+    <>
+      <button
+        type="button"
+        onClick={() => pinTask(task)}
+        title={isPinned ? '작업 고정 해제' : '작업 고정'}
+        aria-label={isPinned ? `${task.title} 고정 해제` : `${task.title} 고정`}
+        className={cn(
+          isDesktop ? 'ui-icon-button size-8' : 'ui-button-ghost min-h-11 gap-1.5 rounded-control px-3 text-[13px]',
+          isPinned ? 'text-pomo' : cn('text-ink-muted', isDesktop && revealOnHover)
+        )}
+      >
+        <Pin aria-hidden="true" className={cn('size-4', isPinned && 'fill-current', isPinned && motion === 'pin' && 'animate-pop')} strokeWidth={1.8} />
+        {isDesktop ? null : isPinned ? '고정 해제' : '고정'}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setEditedTitle(task.title);
+          setEditedSubjectId(task.subject_id);
+          setShowActions(false);
+          setIsEditing(true);
+        }}
+        aria-label={`${task.title} 수정`}
+        className={cn(
+          'text-ink-muted',
+          isDesktop ? cn('ui-icon-button size-8', revealOnHover) : 'ui-button-ghost min-h-11 gap-1.5 rounded-control px-3 text-[13px]'
+        )}
+      >
+        <Pencil aria-hidden="true" className="size-4" strokeWidth={1.8} />
+        {isDesktop ? null : '수정'}
+      </button>
+      <button
+        type="button"
+        onClick={() => deleteTask(task.id)}
+        aria-label={`${task.title} 삭제`}
+        className={cn(
+          isDesktop
+            ? cn('ui-icon-button size-8 text-ink-muted hover:text-pomo-deep', revealOnHover)
+            : 'ui-button-ghost min-h-11 gap-1.5 rounded-control px-3 text-[13px] text-pomo-deep'
+        )}
+      >
+        <Trash2 aria-hidden="true" className="size-4" strokeWidth={1.8} />
+        {isDesktop ? null : '삭제'}
+      </button>
+    </>
+  );
+
   return (
-    <div
+    <li
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group flex items-center gap-3 rounded-xl border border-transparent bg-gray-50 p-4 transition-all hover:border-gray-200 dark:bg-gray-900/50 dark:hover:border-gray-700',
-        'max-sm:gap-2 max-sm:p-3',
-        isEditing && 'flex-wrap sm:flex-nowrap',
-        !isEditing && 'max-sm:grid max-sm:grid-cols-[auto_auto_minmax(0,1fr)]',
-        isDragging &&
-          'border-rose-200 bg-white shadow-lg dark:border-rose-900 dark:bg-gray-800'
+        'group relative -mx-3 flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-tile px-3 py-2 transition-colors md:min-h-14 md:gap-x-2.5',
+        isEditing ? 'bg-surface' : 'hover:bg-hover',
+        isDragging && 'bg-white shadow-popover',
+        motion === 'add' && 'animate-fade-up'
       )}
     >
       <div
         {...attributes}
         {...listeners}
-        className="shrink-0 cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+        aria-label={`${task.title} 순서 바꾸기`}
+        className={cn(
+          // 모바일은 손가락으로 잡기 쉽게 44px 칸(아이콘은 그대로), 행 왼쪽 여백까지 쓴다.
+          '-ml-3 flex size-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-chip text-ink-faint hover:text-ink-muted active:cursor-grabbing md:ml-0 md:h-9 md:w-4',
+          // 데스크톱은 행 왼쪽 바깥 여백에 띄워 체크 원이 제목 줄과 같은 선에서 시작하게 한다.
+          'md:absolute md:top-1/2 md:-left-4 md:-translate-y-1/2 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100'
+        )}
       >
-        <GripVertical className="h-5 w-5" />
+        <GripVertical aria-hidden="true" className="size-4" />
       </div>
 
       <button
+        type="button"
         onClick={() => toggleTaskStatus(task)}
-        className={cn(
-          'flex-shrink-0 transition-colors',
-          task.status === 'done'
-            ? 'text-rose-500'
-            : 'text-gray-300 hover:text-gray-400'
-        )}
+        aria-pressed={isDone}
+        aria-label={`${task.title} 완료`}
+        className={cn('-mx-2 flex size-11 shrink-0 items-center justify-center rounded-full md:-mx-1.5 md:size-9', isDone && 'ui-focus-ink')}
       >
-        {task.status === 'done' ? (
-          <CheckCircle2 className="h-6 w-6" />
-        ) : (
-          <Circle className="h-6 w-6" />
-        )}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex size-[22px] items-center justify-center rounded-full border-[1.5px] transition-colors',
+            isDone ? 'border-pomo bg-pomo text-white' : 'border-control text-transparent'
+          )}
+        >
+          <Check className={cn('size-3.5', isDone && motion === 'complete' && 'animate-pop-in')} strokeWidth={3} />
+        </span>
       </button>
 
       {isEditing ? (
-        <div className="order-last flex min-w-0 basis-full flex-wrap items-start gap-2 sm:order-none sm:flex-1 sm:basis-auto">
+        <div
+          ref={editorRef}
+          className={cn(
+            'flex min-w-0 flex-1 basis-[min(100%,16rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white',
+            editorEntering && 'animate-fade-up'
+          )}
+        >
           <input
             type="text"
             aria-label="작업 제목"
             value={editedTitle}
             onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-8 min-w-0 flex-[1_1_12rem] rounded-lg border border-gray-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            className="ui-input min-h-11 min-w-0 flex-[1_1_12rem] bg-white md:min-h-10"
             autoFocus
           />
-          <div className="flex min-w-0 flex-[1_1_16rem] items-start gap-2 max-sm:flex-wrap max-sm:justify-end">
-            <div className="min-w-0 flex-1 max-sm:basis-full">
-              <SubjectSelect
-                subjects={subjects}
-                value={editedSubjectId}
-                onChange={setEditedSubjectId}
-                onCreate={createSubject}
-                compact
-              />
-            </div>
+          <div className="min-w-0 flex-[1_1_10rem]">
+            <SubjectSelect
+              subjects={subjects}
+              value={editedSubjectId}
+              onChange={setEditedSubjectId}
+              onCreate={createSubject}
+              compact
+            />
+          </div>
+          <div className="ml-auto flex shrink-0 items-center">
             <button
+              type="button"
               onClick={handleSave}
               aria-label="작업 저장"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+              className="ui-icon-button size-11 text-pomo md:size-9"
             >
-              <Check className="h-4 w-4" />
+              <Check aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
             </button>
             <button
+              type="button"
               onClick={handleCancel}
               aria-label="작업 수정 취소"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="ui-icon-button size-11 text-ink-muted md:size-9"
             >
-              <X className="h-4 w-4" />
+              <X aria-hidden="true" className="size-[18px]" strokeWidth={2} />
             </button>
           </div>
         </div>
       ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          <button
-            onClick={() => pinTask(task)}
-            className={cn(
-              'flex-shrink-0 transition-colors',
-              isPinned
-                ? 'text-amber-500 hover:text-amber-600'
-                : 'text-gray-400 hover:text-amber-500'
-            )}
-            title={isPinned ? '작업 고정 해제' : '작업 고정'}
-          >
-            <Pin className={cn('h-4 w-4', isPinned && 'fill-current')} />
-          </button>
-          <span className="min-w-0 flex-1">
+        <>
+          <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
             <span
               title={task.title}
               className={cn(
-                'block truncate font-medium transition-all max-sm:line-clamp-2 max-sm:whitespace-normal max-sm:break-words',
-                task.status === 'done'
-                  ? 'text-gray-400 line-through'
-                  : 'text-gray-700 dark:text-gray-200'
+                'text-[15px] font-semibold break-words transition-colors max-md:line-clamp-2 md:truncate',
+                isDone ? 'text-ink-muted line-through' : 'text-ink'
               )}
             >
               {task.title}
             </span>
-            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-              {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
-            </span>
-            {task.parentTitle ? (
-              <span className="block truncate text-xs font-normal text-gray-400 dark:text-gray-500">
-                {task.parentTitle}
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <Beads label={`뽀모도로 ${done} / ${goal}`} states={buildTaskBeads(done, goal, isDone)} />
+              <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-ink-subtle">
+                <span className="shrink-0">{subjectName}</span>
+                {task.parentTitle ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="min-w-0 truncate">{task.parentTitle}</span>
+                  </>
+                ) : null}
+                {task.duration ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="shrink-0 whitespace-nowrap">{formatStudyTime(task.duration)}</span>
+                  </>
+                ) : null}
               </span>
-            ) : null}
-          </span>
-        </span>
+            </span>
+          </div>
+
+          {isDesktop ? (
+            // 평소에는 (고정 표시 +) 개수, 마우스를 올리면 개수 자리에 동작 버튼이 나온다.
+            <div className="flex min-w-[104px] shrink-0 items-center justify-end">
+              {actions}
+              <span aria-hidden="true" className="w-10 text-right text-[13px] text-ink-muted group-focus-within:hidden group-hover:hidden">
+                {done} / {goal}
+              </span>
+            </div>
+          ) : (
+            <>
+              {isPinned ? (
+                // 고정·해제 버튼은 더보기 안에 두고, 고정 상태는 항상 보인다.
+                <span role="img" aria-label="고정된 작업" className={cn('flex shrink-0 text-pomo', motion === 'pin' && 'animate-pop-in')}>
+                  <Pin aria-hidden="true" className="size-3.5 fill-current" strokeWidth={1.8} />
+                </span>
+              ) : null}
+              <span aria-hidden="true" className="shrink-0 text-[13px] text-ink-muted">
+                {done} / {goal}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowActions((current) => !current)}
+                aria-expanded={showActions}
+                aria-controls={actionsId}
+                aria-label={`${task.title} 더보기`}
+                className="ui-icon-button -mr-3 size-11 shrink-0 text-ink-muted"
+              >
+                <MoreHorizontal aria-hidden="true" className="size-[18px]" strokeWidth={1.8} />
+              </button>
+              <div
+                ref={actionsRef}
+                id={actionsId}
+                hidden={!showActions}
+                className={cn('basis-full pl-16', actionsEntering && 'animate-fade-up')}
+              >
+                <div className="flex flex-wrap gap-1">{actions}</div>
+              </div>
+            </>
+          )}
+        </>
       )}
-
-      <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:col-span-full max-sm:justify-end max-sm:gap-2">
-        {task.duration ? (
-          <span className="whitespace-nowrap rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-500 dark:bg-rose-900/30">
-            {formatDuration(task.duration)}
-          </span>
-        ) : null}
-
-        {!isEditing && (
-          <button
-            onClick={() => {
-              setEditedTitle(task.title);
-              setEditedSubjectId(task.subject_id);
-              setIsEditing(true);
-            }}
-            aria-label={`${task.title} 수정`}
-            className="p-2 text-gray-400 transition-all hover:text-rose-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
-        )}
-
-        <button
-          onClick={() => deleteTask(task.id)}
-          className="p-2 text-gray-400 transition-all hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+    </li>
   );
 }
 
 interface TaskListProps {
   selectedDate: Date;
   userId: string;
+  /** 선택한 날 끝낸 뽀모도로 수(계획이 없을 때 요약에 쓴다). 모르면 생략한다. */
+  dayPomodoros?: number;
 }
 
-export default function TaskList({ selectedDate, userId }: TaskListProps) {
+export default function TaskList({ selectedDate, userId, dayPomodoros }: TaskListProps) {
   const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
 
   // A new owner/date gets fresh UI state, including drafts and confirmations.
@@ -342,6 +457,7 @@ export default function TaskList({ selectedDate, userId }: TaskListProps) {
       key={`${userId}:${selectedDateKey}`}
       selectedDateKey={selectedDateKey}
       userId={userId}
+      dayPomodoros={dayPomodoros}
     />
   );
 }
@@ -355,18 +471,32 @@ const createRequestScope = () => ({
   pinMutations: new Set<string>(),
 });
 
-function ScopedTaskList({ selectedDateKey, userId }: {
+function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
   selectedDateKey: string;
   userId: string;
+  dayPomodoros?: number;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newGoal, setNewGoal] = useState(DEFAULT_POMODORO_GOAL);
   const { subjects, createSubject } = useStudySubjects(userId);
   const { subjectId: newSubjectId, isAutomatic, selectSubject, resetSubject } = useSuggestedSubject(newTaskTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
+  const isDesktop = useIsDesktop();
+  const formTitleId = useId();
+  const sheetTitleId = useId();
+  const goalLabelId = useId();
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const goalNumberRef = useRef<HTMLSpanElement>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [rowMotion, setRowMotion] = useState<RowMotion | null>(null);
   const scopeRef = useRef<ReturnType<typeof createRequestScope> | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // 방금 동작의 움직임은 한 번 돈 뒤 뗀다. 남겨 두면 실시간으로 행이 옮겨질 때 다시 돈다.
+  usePlayOnce(rowMotion, listRef, (played) => setRowMotion((current) => (current === played ? null : current)));
+  const formEntering = useEntrance(isDesktop && isAdding, formRef);
 
   useLayoutEffect(() => {
     const scope = createRequestScope();
@@ -556,13 +686,14 @@ function ScopedTaskList({ selectedDateKey, userId }: {
 
     const taskIds = taskRows.map((task) => task.id);
     const durationByTaskId = new Map<string, number>();
+    const pomodorosByTaskId = new Map<string, number>();
 
     if (taskIds.length > 0) {
       // RLS로 보이는 타인 세션(그룹/친구 조회 허용분)이 합산되지 않도록
       // 본인 세션으로 한정한다.
       const { data: sessions, error: sessionsError } = await supabase
         .from('study_sessions')
-        .select('task_id, duration')
+        .select('id, created_at, mode, task_id, session_batch_id, group_id, duration')
         .eq('user_id', userId)
         .in('task_id', taskIds);
 
@@ -570,13 +701,15 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       if (sessionsError) {
         console.error('Error fetching task study durations:', sessionsError);
       } else {
-        (sessions as SessionDurationRow[] | null | undefined)?.forEach((row) => {
+        const sessionRows = (sessions as SessionDurationRow[] | null | undefined) ?? [];
+        sessionRows.forEach((row) => {
           if (!row.task_id) return;
           durationByTaskId.set(
             row.task_id,
             (durationByTaskId.get(row.task_id) ?? 0) + (row.duration ?? 0)
           );
         });
+        countPomodorosByTask(sessionRows).forEach((count, taskId) => pomodorosByTaskId.set(taskId, count));
       }
     }
 
@@ -585,6 +718,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       taskRows.map((task) => ({
         ...task,
         duration: durationByTaskId.get(task.id) ?? 0,
+        pomodoros: pomodorosByTaskId.get(task.id) ?? 0,
       }))
     );
     setLoading(false);
@@ -698,6 +832,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
         const pin = normalizePinnedTaskRows([data as PinnedTaskRow])[0];
         setTasks((current) => current.map((row) => row.id === task.id
           ? { ...row, source_pinned_task_id: pin.id } : row));
+        setRowMotion({ type: 'pin', id: task.id });
       }
     } catch (error) {
       if (scope.active) {
@@ -730,6 +865,8 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       })
     );
 
+    // 행을 옮기면 붙어 있던 등장·팝 애니메이션이 다시 돌므로 함께 뗀다.
+    setRowMotion(null);
     setTasks(reorderedTasks);
 
     try {
@@ -773,6 +910,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           due_date: selectedDateKey,
           status: 'todo',
           position: maxPosition + 1,
+          estimated_pomodoros: clampPomodoroGoal(newGoal),
         })
         .select(
           'id, title, status, estimated_pomodoros, position, source_subtask_id, source_long_term_task_id, source_pinned_task_id, subject_id'
@@ -783,9 +921,11 @@ function ScopedTaskList({ selectedDateKey, userId }: {
       if (error) throw error;
 
       const createdTask = normalizeTaskRows([data as TaskRow])[0];
-      setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0 }]);
+      setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0, pomodoros: 0 }]);
+      setRowMotion({ type: 'add', id: createdTask.id });
       if (createdTask.subject_id) notifyStudySubjectsChanged();
       setNewTaskTitle('');
+      setNewGoal(DEFAULT_POMODORO_GOAL);
       resetSubject();
       setIsAdding(false);
     } catch (error) {
@@ -806,6 +946,7 @@ function ScopedTaskList({ selectedDateKey, userId }: {
           : currentTask
       )
     );
+    setRowMotion(nextStatus === 'done' ? { type: 'complete', id: task.id } : null);
 
     try {
       const { error } = await supabase
@@ -879,24 +1020,174 @@ function ScopedTaskList({ selectedDateKey, userId }: {
     }
   };
 
-  return (
-    <div className="flex h-full min-w-0 flex-col">
-      <div className="min-h-[300px] min-w-0 flex-1 space-y-3 overflow-y-auto">
-        {loading && tasks.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">작업을 불러오는 중...</div>
-        ) : tasks.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center py-10 text-gray-400">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
-              <span className="text-2xl">-</span>
-            </div>
-            <p>오늘은 작업이 없어요.</p>
+  const cancelAdding = () => {
+    setIsAdding(false);
+    setNewTaskTitle('');
+    setNewGoal(DEFAULT_POMODORO_GOAL);
+    resetSubject();
+  };
+
+  // 사용자가 목표를 바꿀 때만 숫자가 한 번 튄다(양식을 열 때는 그대로). 숫자를 새로 그리지 않고 playPop으로 재생한다.
+  const changeGoal = (delta: number) => {
+    playPop(goalNumberRef.current);
+    setNewGoal((goal) => clampPomodoroGoal(goal + delta));
+  };
+
+  // 다른 곳(실시간 갱신 등)에서 그 상태가 풀렸으면 표시를 뗀다. 다시 그 상태가 돼도 움직이지 않는다.
+  const motionTask = rowMotion ? tasks.find((task) => task.id === rowMotion.id) : undefined;
+  if (rowMotion && (
+    !motionTask
+    || (rowMotion.type === 'complete' && motionTask.status !== 'done')
+    || (rowMotion.type === 'pin' && !motionTask.source_pinned_task_id)
+  )) {
+    setRowMotion(null);
+  }
+
+  const selectedDate = parse(selectedDateKey, 'yyyy-MM-dd', new Date());
+  const dayLabel = formatDayLabel(selectedDate, !isDesktop);
+  const isToday = selectedDateKey === format(new Date(), 'yyyy-MM-dd');
+  const dayDone = tasks.reduce((sum, task) => sum + (task.pomodoros ?? 0), 0);
+  const dayGoal = tasks.reduce((sum, task) => sum + getTaskPomodoroGoal(task.estimated_pomodoros), 0);
+  let summary = '';
+  if (tasks.length > 0) {
+    summary = isDesktop
+      ? `뽀모도로 ${dayDone} / ${dayGoal}개${isToday ? ' (오늘)' : ''}`
+      : `${dayDone} / ${dayGoal} 뽀모도로`;
+  } else if (!loading) {
+    if (dayPomodoros) summary = isDesktop ? `계획 없이 뽀모도로 ${dayPomodoros}개를 했어요` : `계획 없이 ${dayPomodoros}개`;
+    else summary = isDesktop ? '아직 계획이 없어요' : '계획 없음';
+  }
+  const emptyText = dayPomodoros
+    ? '계획 없이 한 뽀모도로예요. 다음엔 계획을 세워 볼까요?'
+    : isDesktop ? '이날의 계획이 없어요. 계획 추가로 시작해 보세요.' : '이날의 계획이 없어요. + 버튼으로 추가해 보세요.';
+
+  const addForm = (
+    <form
+      ref={formRef}
+      onSubmit={addTask}
+      className={cn(
+        'flex min-w-0 flex-col',
+        // 데스크톱은 회색 판 위 흰 입력칸, 모바일 시트는 흰 바탕 위 회색 입력칸(보드 기준).
+        // 데스크톱 판은 열 때 떠오르고, 시트 안에서는 시트가 움직인다.
+        isDesktop
+          ? 'gap-3 rounded-panel bg-surface px-5 py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white'
+          : 'gap-4',
+        formEntering && 'animate-fade-up'
+      )}
+    >
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={formTitleId} className="text-[13px] font-semibold text-ink-muted">할 일</label>
+        <input
+          ref={titleInputRef}
+          id={formTitleId}
+          type="text"
+          value={newTaskTitle}
+          onChange={(event) => setNewTaskTitle(event.target.value)}
+          onKeyDown={(event) => {
+            // 시트는 대화상자가 Escape를 처리한다.
+            if (event.key === 'Escape' && isDesktop) { event.preventDefault(); cancelAdding(); }
+          }}
+          placeholder="예: 모의고사 풀이"
+          className={cn('ui-input w-full', isDesktop ? 'min-h-[46px]' : 'min-h-12 rounded-tile')}
+          autoFocus={isDesktop}
+        />
+      </div>
+      <div className="flex flex-wrap items-end gap-3 md:gap-4">
+        <div className="min-w-0 flex-[1_1_12rem]">
+          <SubjectSelect
+            subjects={subjects}
+            value={newSubjectId}
+            onChange={selectSubject}
+            onCreate={createSubject}
+            automatic={isAutomatic}
+            onAutoSelect={resetSubject}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span id={goalLabelId} className="text-[13px] font-semibold text-ink-muted">뽀모도로</span>
+          <div role="group" aria-labelledby={goalLabelId} className="flex items-center gap-1">
             <button
-              onClick={() => setIsAdding(true)}
-              className="mt-4 text-sm font-medium text-rose-500 hover:text-rose-600"
+              type="button"
+              aria-label="뽀모도로 줄이기"
+              disabled={newGoal <= POMODORO_GOAL_MIN}
+              onClick={() => changeGoal(-1)}
+              className={cn('ui-icon-button-surface text-xl leading-none', isDesktop ? 'size-[46px] bg-white' : 'size-11')}
             >
-              + 첫 작업 추가하기
+              −
+            </button>
+            <output aria-live="polite" className="min-w-10 text-center text-base font-bold">
+              <span ref={goalNumberRef} className="inline-block">{newGoal}</span>
+            </output>
+            <button
+              type="button"
+              aria-label="뽀모도로 늘리기"
+              disabled={newGoal >= POMODORO_GOAL_MAX}
+              onClick={() => changeGoal(1)}
+              className={cn('ui-icon-button-surface text-xl leading-none', isDesktop ? 'size-[46px] bg-white' : 'size-11')}
+            >
+              +
             </button>
           </div>
+        </div>
+      </div>
+      <div className={isDesktop ? 'flex justify-end gap-2' : 'flex gap-2 pt-1'}>
+        <button
+          type="button"
+          onClick={cancelAdding}
+          className={isDesktop ? 'ui-button-ghost min-h-[46px] px-4' : 'ui-button-secondary min-h-[50px] flex-1 rounded-tile'}
+        >
+          취소
+        </button>
+        <button
+          type="submit"
+          disabled={!newTaskTitle.trim()}
+          className={cn('ui-button-primary ui-press', isDesktop ? 'min-h-[46px] px-5' : 'min-h-[50px] flex-1 rounded-tile')}
+        >
+          추가
+        </button>
+      </div>
+    </form>
+  );
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2 md:gap-[18px]">
+      <div className="flex items-center justify-between gap-3 md:flex-wrap md:gap-4">
+        <div className="flex min-w-0 items-baseline gap-2 md:flex-col md:items-start md:gap-0.5">
+          <h2 className="m-0 text-[17px] font-extrabold tracking-[-0.01em] whitespace-nowrap md:text-[22px] md:tracking-[-0.02em]">
+            {dayLabel}
+          </h2>
+          <span className="min-w-0 truncate text-[13px] text-ink-muted md:text-[15px]">{summary || ' '}</span>
+        </div>
+        {isDesktop ? (
+          !isAdding ? (
+            <button
+              type="button"
+              onClick={() => setIsAdding(true)}
+              className="ui-button-primary ui-press min-h-11 shrink-0 rounded-tile px-[18px]"
+            >
+              <Plus aria-hidden="true" className="size-4" strokeWidth={2.5} />
+              계획 추가
+            </button>
+          ) : null
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsAdding(true)}
+            aria-label="계획 추가"
+            className="ui-icon-button ui-focus-ink ui-press shrink-0 bg-pomo text-white after:absolute after:-inset-0.5 after:rounded-full after:content-[''] hover:bg-pomo hover:brightness-96"
+          >
+            <Plus aria-hidden="true" className="size-[18px]" strokeWidth={2.5} />
+          </button>
+        )}
+      </div>
+
+      {isDesktop && isAdding ? addForm : null}
+
+      <div ref={listRef} className="min-w-0">
+        {loading && tasks.length === 0 ? (
+          <p className="m-0 py-3 text-sm text-ink-muted">작업을 불러오는 중...</p>
+        ) : tasks.length === 0 ? (
+          <p className="m-0 py-3 text-sm text-ink-muted md:text-[15px]">{emptyText}</p>
         ) : (
           <DndContext
             sensors={sensors}
@@ -907,84 +1198,51 @@ function ScopedTaskList({ selectedDateKey, userId }: {
               items={tasks.map((task) => task.id)}
               strategy={verticalListSortingStrategy}
             >
-              {tasks.map((task) => (
-                <SortableTaskItem
-                  key={task.id}
-                  task={task}
-                  toggleTaskStatus={toggleTaskStatus}
-                  deleteTask={(taskId) => setDeletingTaskId(taskId)}
-                  updateTask={updateTask}
-                  pinTask={pinTaskFromTask}
-                  subjects={subjects}
-                  createSubject={createSubject}
-                  isPinned={Boolean(task.source_pinned_task_id)}
-                />
-              ))}
+              <ul aria-label={`${dayLabel} 할 일`} className="m-0 flex list-none flex-col gap-0.5 p-0">
+                {tasks.map((task) => (
+                  <SortableTaskItem
+                    key={task.id}
+                    task={task}
+                    toggleTaskStatus={toggleTaskStatus}
+                    deleteTask={(taskId) => setDeletingTaskId(taskId)}
+                    updateTask={updateTask}
+                    pinTask={pinTaskFromTask}
+                    subjects={subjects}
+                    createSubject={createSubject}
+                    isPinned={Boolean(task.source_pinned_task_id)}
+                    isDesktop={isDesktop}
+                    motion={rowMotion?.id === task.id ? rowMotion.type : null}
+                  />
+                ))}
+              </ul>
             </SortableContext>
           </DndContext>
         )}
       </div>
 
-      <div className="mt-6 border-t border-gray-100 pt-6 dark:border-gray-700">
-        {isAdding ? (
-          <form onSubmit={addTask} className="flex min-w-0 flex-col gap-3">
-            <input
-              type="text"
-              value={newTaskTitle}
-              onChange={(event) => setNewTaskTitle(event.target.value)}
-              placeholder="작업 제목을 입력하세요"
-              className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-              autoFocus
-            />
-            <SubjectSelect
-              subjects={subjects}
-              value={newSubjectId}
-              onChange={selectSubject}
-              onCreate={createSubject}
-              automatic={isAutomatic}
-              onAutoSelect={resetSubject}
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsAdding(false);
-                  setNewTaskTitle('');
-                  resetSubject();
-                }}
-                className="rounded-xl px-4 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                취소
-              </button>
-              <button
-                type="submit"
-                disabled={!newTaskTitle.trim()}
-                className="rounded-xl bg-rose-500 px-6 py-2 font-bold text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                추가
-              </button>
-            </div>
-          </form>
-        ) : (
-          <button
-            onClick={() => setIsAdding(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-4 font-medium text-gray-400 transition-all hover:border-gray-300 hover:text-gray-600 dark:border-gray-700 dark:hover:border-gray-600 dark:hover:text-gray-300"
-          >
-            <Plus className="h-5 w-5" />
-            작업 추가
-          </button>
-        )}
-      </div>
+      {!isDesktop ? (
+        <ModalDialog
+          open={isAdding}
+          onClose={cancelAdding}
+          aria-labelledby={sheetTitleId}
+          initialFocusRef={titleInputRef}
+          className="md:max-w-[440px]"
+        >
+          <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+          <h2 id={sheetTitleId} className="ui-dialog-title">{dayLabel} 계획 추가</h2>
+          {addForm}
+        </ModalDialog>
+      ) : null}
 
       <ConfirmModal
         isOpen={!!deletingTaskId}
         onClose={() => setDeletingTaskId(null)}
         onConfirm={confirmDelete}
         title="작업 삭제"
-        message="이 작업을 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+        message="이 작업을 삭제할까요? 되돌릴 수 없어요."
         confirmText="삭제"
         cancelText="취소"
-        isDangerous={true}
+        confirmTone="danger"
       />
     </div>
   );

@@ -1,21 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  CartesianGrid,
-} from 'recharts';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import {
   startOfWeek,
   startOfMonth,
-  endOfMonth,
-  startOfYear,
   addDays,
   format,
   subMonths,
@@ -24,15 +12,37 @@ import {
   isSameMonth,
   isSameWeek,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react';
-import { useStudyStats, ChartData, ViewMode, StudyTotals, UNCLASSIFIED_SUBJECT } from '@/hooks/useStudyStats';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChartData, ViewMode, StudyTotals, UNCLASSIFIED_SUBJECT, type useStudyStats } from '@/hooks/useStudyStats';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { getDayStart } from '@/lib/dateUtils';
 import { StudySubject } from '@/lib/studySubjects';
+import { cn } from '@/lib/utils';
+import { playMotion } from '@/components/ui/motion';
+import { usePresence } from '@/components/ui/usePresence';
 import SubjectHistoryManager from '@/components/subjects/SubjectHistoryManager';
+import { formatRoundedHours, formatShortDuration, formatStudyDuration } from '@/components/profile/studyDuration';
 
-export default function StudyReport() {
+const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: 'week', label: '주간' },
+  { value: 'month', label: '월간' },
+  { value: 'year', label: '연간' },
+];
+const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+// 모바일 알약 탭 크기(보드: 32px · 13px)
+const SEGMENTED_MOBILE = 'max-md:[&>button]:h-8 max-md:[&>button]:px-3 max-md:[&>button]:text-[13px]';
+
+const parseBucketDate = (bucketKey: string) => {
+  const [year, month, day = 1] = bucketKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+// 프로필 머리의 오늘·누적 시간과 같은 집계를 쓰도록 페이지의 useStudyStats 하나를 받는다.
+// 기간을 넘길 때마다 다시 조회한 오늘 합계가 머리와 막대에 함께 반영된다.
+export type StudyStats = ReturnType<typeof useStudyStats>;
+
+export default function StudyReport({ stats }: { stats: StudyStats }) {
   const { session } = useAuthSession();
   const userId = session?.user?.id ?? null;
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -44,31 +54,22 @@ export default function StudyReport() {
   const [grouping, setGrouping] = useState<'subject' | 'task'>('subject');
   const [showHistoryManager, setShowHistoryManager] = useState(false);
   const { subjects, error: subjectsError } = useStudySubjects(userId);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
+  const statsTitleId = useId();
+  const totalsTitleId = useId();
+  const historyId = useId();
+  const chartRef = useRef<HTMLDivElement>(null);
+  const breakdownRef = useRef<HTMLDivElement>(null);
+  const totalsRef = useRef<HTMLDivElement>(null);
 
   const {
     loading,
     error: statsError,
-    totalFocusTime,
-    todayFocusTime,
     earliestYear,
     chartData,
     periodTotals,
     lifetimeTotals,
     fetchStats
-  } = useStudyStats(userId);
-
-  // Auto-scroll to end when chart data or view mode changes
-  useEffect(() => {
-    if (scrollRef.current) {
-        setTimeout(() => {
-            if (scrollRef.current) {
-               scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
-            }
-        }, 100);
-    }
-  }, [chartData, viewMode]);
+  } = stats;
 
   const today = useMemo(() => new Date(), []);
   const currentYear = today.getFullYear();
@@ -91,27 +92,7 @@ export default function StudyReport() {
 
   const canGoNextMonth = !isSameMonth(activeMonth, today);
   const canGoNextWeek = !isSameWeek(activeWeekStart, today, { weekStartsOn: 1 });
-
-  const formatDuration = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-  };
-
-  const formatTooltipDuration = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-  };
-
-  const formatAxisValue = (hours: number) => {
-    if (hours < 1) {
-      return `${Math.round(hours * 60)}m`;
-    }
-    return `${hours}h`;
-  };
+  const periodStart = (viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? startOfMonth(activeMonth) : new Date(activeYear, 0, 1)).getTime();
 
   // Fetch data when view mode or active date changes (로그인한 사용자에 한함)
   useEffect(() => {
@@ -133,6 +114,16 @@ export default function StudyReport() {
     return () => clearTimeout(timeoutId);
   }, [viewMode, activeYear, activeMonth, activeWeekStart, fetchStats, userId]);
 
+  const todayBucketKey = useMemo(() => {
+    const referenceDate =
+      viewMode === 'year'
+        ? new Date(activeYear, getDayStart(today).getMonth(), getDayStart(today).getDate())
+        : getDayStart(today);
+    return viewMode === 'year'
+      ? format(referenceDate, 'yyyy-MM')
+      : format(referenceDate, 'yyyy-MM-dd');
+  }, [activeYear, today, viewMode]);
+
   const selectedBucket = useMemo(() => {
     const manuallySelectedBucket = selectedBucketKey
       ? chartData.find((bucket) => bucket.bucketKey === selectedBucketKey) ?? null
@@ -146,356 +137,329 @@ export default function StudyReport() {
       return null;
     }
 
-    const referenceDate =
-      viewMode === 'year'
-        ? new Date(activeYear, getDayStart(today).getMonth(), getDayStart(today).getDate())
-        : getDayStart(today);
-    const todayKey =
-      viewMode === 'year'
-        ? format(referenceDate, 'yyyy-MM')
-        : format(referenceDate, 'yyyy-MM-dd');
-
     return (
-      chartData.find((bucket) => bucket.bucketKey === todayKey) ??
+      chartData.find((bucket) => bucket.bucketKey === todayBucketKey) ??
       chartData[chartData.length - 1] ??
       null
     );
-  }, [activeYear, chartData, selectedBucketKey, today, viewMode]);
+  }, [chartData, selectedBucketKey, todayBucketKey]);
 
+  // 막대 아래 이름과 고른 막대의 제목(예: "10월 27일", "2026년 10월")
+  const bucketTitle = (bucket: ChartData) => {
+    const date = parseBucketDate(bucket.bucketKey);
+    return viewMode === 'year' ? format(date, 'yyyy년 M월') : format(date, 'M월 d일');
+  };
+  const bucketAxisLabel = (bucket: ChartData) => {
+    const date = parseBucketDate(bucket.bucketKey);
+    if (viewMode === 'week') return DAY_NAMES[date.getDay()];
+    if (viewMode === 'year') return `${date.getMonth() + 1}월`;
+    const day = date.getDate();
+    return day === 1 || day % 5 === 0 ? String(day) : '';
+  };
+  const bucketAriaLabel = (bucket: ChartData) => {
+    const date = parseBucketDate(bucket.bucketKey);
+    const title = viewMode === 'week' ? `${bucketTitle(bucket)} ${DAY_NAMES[date.getDay()]}요일` : bucketTitle(bucket);
+    return `${title}, ${bucket.seconds > 0 ? formatStudyDuration(bucket.seconds) : '기록 없음'}`;
+  };
+  const maxBucketSeconds = Math.max(3600, ...chartData.map(bucket => bucket.seconds));
 
-  const tabBase = 'ui-press whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-lg transition-colors';
-  const tabActive =
-    'bg-white text-rose-600 shadow-sm dark:bg-slate-700 dark:text-rose-200';
-  const tabInactive =
-    'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200';
+  const range = viewMode === 'week'
+    ? {
+        label: `${format(activeWeekStart, 'M/d')} - ${format(addDays(activeWeekStart, 6), 'M/d')}`,
+        resetTitle: '이번 주로 이동',
+        onReset: () => setActiveWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 })),
+        prevLabel: '이전 주', onPrev: goToPrevWeek, canPrev: true,
+        nextLabel: '다음 주', onNext: goToNextWeek, canNext: canGoNextWeek,
+      }
+    : viewMode === 'month'
+      ? {
+          label: format(activeMonth, 'yyyy년 M월'),
+          resetTitle: '이번 달로 이동',
+          onReset: () => setActiveMonth(new Date()),
+          prevLabel: '이전 달', onPrev: goToPrevMonth, canPrev: true,
+          nextLabel: '다음 달', onNext: goToNextMonth, canNext: canGoNextMonth,
+        }
+      : {
+          label: `${activeYear}년`,
+          resetTitle: '올해로 이동',
+          onReset: () => setActiveYear(currentYear),
+          prevLabel: '이전 년도', onPrev: () => setActiveYear(prev => prev - 1), canPrev: !(earliestYear !== null && activeYear <= earliestYear),
+          nextLabel: '다음 년도', onNext: () => setActiveYear(prev => prev + 1), canNext: activeYear < currentYear,
+        };
+
+  // 사용자가 기간을 넘기고 새 기간의 집계가 도착하면 막대와 작업별 시간(선택 기간 합계도)이 넘긴 쪽에서 6px 들어오며
+  // 나타나고 막대는 바닥에서 자란다. 단위를 바꾸면 방향 없이 나타난다. 처음 불러올 때, 같은 기간을 다시 조회할 때
+  // (과목 정리 뒤 등)는 움직이지 않는다.
+  const shownPeriodRef = useRef<{ chartData: ChartData[]; viewMode: ViewMode; periodStart: number } | null>(null);
+  useLayoutEffect(() => {
+    const shown = shownPeriodRef.current;
+    if (loading || shown?.chartData === chartData) return;
+    shownPeriodRef.current = { chartData, viewMode, periodStart };
+    if (!shown || (shown.viewMode === viewMode && shown.periodStart === periodStart)) return;
+    const shift = shown.viewMode === viewMode ? Math.sign(periodStart - shown.periodStart) * 6 : 0;
+    const contents = [chartRef.current, breakdownRef.current, overviewScope === 'period' ? totalsRef.current : null];
+    for (const element of contents) playMotion(element, [{ opacity: 0, transform: `translateX(${shift}px)`, offset: 0 }]);
+    chartRef.current?.querySelectorAll('[data-bar]').forEach(bar => {
+      playMotion(bar, [{ transform: 'scaleY(0)', offset: 0 }], { duration: 'emphasized' });
+    });
+  }, [chartData, loading, viewMode, periodStart, overviewScope]);
+
+  // 합계 범위·묶는 기준을 바꾸면 새 목록이 살짝 나타난다.
+  const totalsViewRef = useRef(`${overviewScope}:${grouping}`);
+  useLayoutEffect(() => {
+    const view = `${overviewScope}:${grouping}`;
+    if (totalsViewRef.current === view) return;
+    totalsViewRef.current = view;
+    playMotion(totalsRef.current, [{ opacity: 0, offset: 0 }]);
+  }, [overviewScope, grouping]);
+
+  const selectBucket = (bucketKey: string) => {
+    // 다른 막대를 고르면 그날의 작업별 시간이 살짝 나타난다.
+    if (bucketKey !== selectedBucket?.bucketKey) playMotion(breakdownRef.current, [{ opacity: 0, offset: 0 }]);
+    setSelectedBucketKey(bucketKey);
+  };
+
+  const retryStats = () => void fetchStats(viewMode, viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? activeMonth : new Date(activeYear, 0, 1), userId ?? undefined);
+  const selectedTasks = selectedBucket ? Object.entries(selectedBucket.taskTotals).sort((a, b) => b[1] - a[1]) : [];
 
   return (
-    <div className="ui-panel-enter w-full">
-          <div className="mb-6 grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 sm:gap-4">
-            <div className="rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5 dark:border-slate-700 dark:bg-slate-800/50">
-              <div className="mb-3 text-xs font-medium text-slate-500 dark:text-slate-400">
-                총 누적 시간
-              </div>
-              <div className="text-2xl font-semibold tracking-tight tabular-nums text-slate-800 sm:text-3xl dark:text-white">
-                {formatDuration(totalFocusTime)}
-              </div>
-              <div className="mt-2 text-xs text-slate-400">전체 기간</div>
+    <div className="flex w-full flex-col gap-9 md:gap-10">
+      <section aria-labelledby={statsTitleId} className="flex flex-col gap-3.5 md:gap-5">
+        <div className="flex flex-col gap-3.5 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-4">
+          <h2 id={statsTitleId} className="ui-h2">집중 통계</h2>
+          <div className="flex flex-wrap items-center gap-y-3.5 md:flex-nowrap">
+            <div role="group" aria-label="기간 단위" className={cn('ui-segmented order-1 mr-auto md:mr-3', SEGMENTED_MOBILE)}>
+              {VIEW_OPTIONS.map(option => (
+                <button key={option.value} type="button" aria-pressed={viewMode === option.value} onClick={() => setViewMode(option.value)}>
+                  {option.label}
+                </button>
+              ))}
             </div>
-            <div className="rounded-2xl border border-rose-100 bg-rose-50/40 p-4 sm:p-5 dark:border-rose-900/40 dark:bg-rose-950/15">
-              <div className="mb-3 text-xs font-medium text-slate-500 dark:text-slate-400">
-                오늘 집중 시간
-              </div>
-              <div className="text-2xl font-semibold tracking-tight tabular-nums text-rose-500 sm:text-3xl dark:text-rose-300">
-                {formatDuration(todayFocusTime)}
-              </div>
-              <div className="mt-2 text-xs text-slate-400">오전 5시부터 새로운 하루</div>
+            <button type="button" onClick={range.onPrev} disabled={!range.canPrev} aria-label={range.prevLabel} className="ui-icon-button order-2 size-9">
+              <ChevronLeft size={18} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+            <div className="order-4 basis-full md:order-3 md:basis-auto md:px-0.5">
+              <button
+                type="button"
+                onClick={range.onReset}
+                title={range.resetTitle}
+                className="ui-press -ml-2 min-h-8 rounded-[9px] px-2 text-[15px] font-bold transition-[background-color,scale] hover:bg-hover md:ml-0 md:min-h-9 md:min-w-[120px] md:rounded-chip md:px-2.5 md:font-semibold"
+              >
+                {range.label}
+              </button>
             </div>
+            <button type="button" onClick={range.onNext} disabled={!range.canNext} aria-label={range.nextLabel} className="ui-icon-button order-3 size-9 md:order-4">
+              <ChevronRight size={18} strokeWidth={2.2} aria-hidden="true" />
+            </button>
           </div>
+        </div>
 
-          <div className="rounded-2xl border-slate-200/80 bg-white p-0 sm:border sm:p-5 dark:border-slate-700 dark:bg-slate-800/30">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-              <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                집중 통계
-              </h3>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="ui-segmented flex">
-                  <button
-                    onClick={() => setViewMode('week')}
-                    aria-pressed={viewMode === 'week'}
-                    className={`${tabBase} ${viewMode === 'week' ? tabActive : tabInactive
-                      }`}
-                  >
-                    주간
-                  </button>
-                  <button
-                    onClick={() => setViewMode('month')}
-                    aria-pressed={viewMode === 'month'}
-                    className={`${tabBase} ${viewMode === 'month' ? tabActive : tabInactive
-                      }`}
-                  >
-                    월간
-                  </button>
-                  <button
-                    onClick={() => setViewMode('year')}
-                    aria-pressed={viewMode === 'year'}
-                    className={`${tabBase} ${viewMode === 'year' ? tabActive : tabInactive
-                      }`}
-                  >
-                    연간
-                  </button>
-                </div>
-                {viewMode === 'year' && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setActiveYear(prev => prev - 1)}
-                      disabled={earliestYear !== null && activeYear <= earliestYear}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        earliestYear !== null && activeYear <= earliestYear
-                          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                          : 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
-                      }`}
-                      aria-label="이전 년도"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <button
-                      onClick={() => setActiveYear(currentYear)}
-                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[60px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
-                      title="올해로 이동"
-                    >
-                      {activeYear}년
-                    </button>
-                    <button
-                      onClick={() => setActiveYear(prev => prev + 1)}
-                      disabled={activeYear >= currentYear}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        activeYear >= currentYear
-                          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                          : 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
-                      }`}
-                      aria-label="다음 년도"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                )}
-                {viewMode === 'month' && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={goToPrevMonth}
-                      className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400 transition-colors"
-                      aria-label="이전 달"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <button
-                      onClick={() => setActiveMonth(new Date())}
-                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[100px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
-                      title="이번 달로 이동"
-                    >
-                      {format(activeMonth, 'yyyy년 M월')}
-                    </button>
-                    <button
-                      onClick={goToNextMonth}
-                      disabled={!canGoNextMonth}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        canGoNextMonth
-                          ? 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
-                          : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                      }`}
-                      aria-label="다음 달"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                )}
-                {viewMode === 'week' && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={goToPrevWeek}
-                      className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400 transition-colors"
-                      aria-label="이전 주"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <button
-                      onClick={() => setActiveWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
-                      className="text-sm font-semibold text-gray-700 dark:text-gray-200 min-w-[120px] text-center hover:text-rose-500 dark:hover:text-rose-400 transition-colors cursor-pointer"
-                      title="이번 주로 이동"
-                    >
-                      {format(activeWeekStart, 'M/d')} - {format(addDays(activeWeekStart, 6), 'M/d')}
-                    </button>
-                    <button
-                      onClick={goToNextWeek}
-                      disabled={!canGoNextWeek}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        canGoNextWeek
-                          ? 'hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400'
-                          : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                      }`}
-                      aria-label="다음 주"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div ref={scrollRef} className="w-full overflow-x-auto pb-4 scrollbar-hide">
-                <div className="h-64 min-w-[600px] relative">
-                  {loading ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-slate-800/50 z-10 transition-opacity duration-300">
-                      <div className="text-gray-400 animate-pulse text-sm">
-                        Loading data...
-                      </div>
-                    </div>
+        <div aria-busy={loading} className="relative">
+          {loading ? (
+            <p role="status" className="absolute top-0 left-0 m-0 text-[13px] text-ink-muted">통계를 불러오는 중이에요…</p>
+          ) : null}
+          <div
+            ref={chartRef}
+            className={cn(
+              // 보드의 막대 상자는 content-box(높이 + 아래 여백): 모바일 180 + 22, 데스크톱 220 + 24
+              'flex h-[202px] items-end pb-[22px] [--bar-max:120px] md:h-[244px] md:pb-6 md:[--bar-max:150px]',
+              viewMode === 'month' ? 'gap-0.5 md:gap-1' : 'gap-2 md:gap-3',
+              loading && 'opacity-50',
+            )}
+          >
+            {chartData.map(bucket => {
+              const isSelected = bucket.bucketKey === selectedBucket?.bucketKey;
+              const isToday = bucket.bucketKey === todayBucketKey;
+              const ratio = bucket.seconds / maxBucketSeconds;
+              const barStyle = {
+                height: `max(${bucket.seconds > 0 ? 6 : 3}px, calc(var(--bar-max) * ${ratio.toFixed(4)}))`,
+              } as CSSProperties;
+              return (
+                <button
+                  key={bucket.bucketKey}
+                  type="button"
+                  aria-pressed={isSelected}
+                  aria-label={bucketAriaLabel(bucket)}
+                  onClick={() => selectBucket(bucket.bucketKey)}
+                  className="ui-press relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-[5px] rounded-[6px] p-0 transition-[scale] hover:brightness-92 md:gap-1.5"
+                >
+                  {viewMode !== 'month' ? (
+                    <span aria-hidden="true" className={cn('text-[10px] font-semibold whitespace-nowrap transition-colors md:text-[11px]', isSelected ? 'text-ink' : 'text-ink-muted')}>
+                      {viewMode === 'year' ? (
+                        <>
+                          {/* 모바일 연간은 12칸이 좁아 반올림한 시간만 쓴다. 정확한 값은 버튼 이름과 아래 작업별 시간에 있다. */}
+                          <span className="md:hidden">{formatRoundedHours(bucket.seconds)}</span>
+                          <span className="max-md:hidden">{formatShortDuration(bucket.seconds)}</span>
+                        </>
+                      ) : formatShortDuration(bucket.seconds)}
+                    </span>
                   ) : null}
-
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={chartData}
-                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        vertical={false}
-                        stroke="#e5e7eb"
-                        className="dark:stroke-slate-600"
-                      />
-                      <XAxis
-                        dataKey="displayLabel"
-                        stroke="#9ca3af"
-                        fontSize={viewMode === 'month' ? 9 : 11}
-                        tickLine={false}
-                        axisLine={false}
-                        dy={10}
-                        interval={0}
-                      />
-                      <YAxis
-                        stroke="#9ca3af"
-                        fontSize={11}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) => formatAxisValue(value)}
-                      />
-                      <Tooltip
-                        cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                        contentStyle={{
-                          backgroundColor: '#ffffff',
-                          borderColor: '#e5e7eb',
-                          color: '#111827',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.12)',
-                        }}
-                        labelStyle={{ color: '#111827', fontWeight: 700 }}
-                        labelFormatter={(label) => `${label}`}
-                        formatter={(_, __, props) => [
-                          formatTooltipDuration(props?.payload?.seconds ?? 0),
-                          '집중 시간',
-                        ]}
-                      />
-                      <Bar
-                        dataKey="hours"
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={50}
-                        onClick={(data) => {
-                          if (data && 'payload' in data) {
-                            setSelectedBucketKey((data.payload as ChartData).bucketKey);
-                          }
-                        }}
-                      >
-                        {chartData.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            className={
-                              entry.hours > 0
-                                ? 'fill-rose-400 dark:fill-rose-500'
-                                : 'fill-gray-100 dark:fill-slate-700'
-                            }
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-            </div>
-
-            <div className="text-center mt-4 text-xs text-gray-400">
-              {viewMode === 'week' &&
-                `${format(activeWeekStart, 'M/dd')} - ${format(addDays(activeWeekStart, 6), 'M/dd')} (월~일)`}
-              {viewMode === 'month' &&
-                `${format(startOfMonth(activeMonth), 'yyyy.MM')} (1일~${endOfMonth(activeMonth).getDate()}일)`}
-              {viewMode === 'year' &&
-                `${format(startOfYear(new Date(activeYear, 0, 1)), 'yyyy')}년 (1월~12월)`}
-            </div>
-
-            <div className="mt-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl p-4 border border-gray-100 dark:border-slate-700">
-              <div className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">
-                {selectedBucket
-                  ? selectedBucket.breakdownLabel
-                  : '작업별 집중 시간'}
-              </div>
-              {selectedBucket && Object.keys(selectedBucket.taskTotals).length > 0 ? (
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {Object.entries(selectedBucket.taskTotals)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([task, secs]) => (
-                      <span
-                        key={task}
-                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-slate-600"
-                      >
-                        {`${task}: ${formatDuration(secs)}`}
-                      </span>
-                    ))}
-                </div>
-              ) : (
-                <div className="text-gray-400 text-xs">데이터가 없습니다.</div>
-              )}
-            </div>
-
-            <section className="mt-6 rounded-2xl border border-slate-200/80 p-4 sm:p-5 dark:border-slate-700" aria-label="과목과 할 일별 누적 통계">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="ui-segmented flex">
-                  <button type="button" aria-pressed={overviewScope === 'period'} onClick={() => setOverviewScope('period')} className={`${tabBase} ${overviewScope === 'period' ? tabActive : tabInactive}`}>선택 기간 합계</button>
-                  <button type="button" aria-pressed={overviewScope === 'lifetime'} onClick={() => setOverviewScope('lifetime')} className={`${tabBase} ${overviewScope === 'lifetime' ? tabActive : tabInactive}`}>전체 누적</button>
-                </div>
-                <div className="ui-segmented flex">
-                  <button type="button" aria-pressed={grouping === 'subject'} onClick={() => setGrouping('subject')} className={`${tabBase} ${grouping === 'subject' ? tabActive : tabInactive}`}>과목별</button>
-                  <button type="button" aria-pressed={grouping === 'task'} onClick={() => setGrouping('task')} className={`${tabBase} ${grouping === 'task' ? tabActive : tabInactive}`}>할 일별</button>
-                </div>
-              </div>
-              {(subjectsError || statsError) && <p role="alert" className="mt-3 text-xs text-red-500">{subjectsError || statsError}</p>}
-              {statsError && <button type="button" onClick={() => void fetchStats(viewMode, viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? activeMonth : new Date(activeYear, 0, 1), userId ?? undefined)} className="mt-2 text-xs font-semibold text-rose-600">통계 다시 조회</button>}
-              {loading ? <p role="status" className="mt-4 text-xs text-gray-400">통계를 불러오는 중…</p> : <StudyTotalsOverview key={`${userId}:${overviewScope}:${grouping}`} totals={overviewScope === 'period' ? periodTotals : lifetimeTotals} subjects={subjects} grouping={grouping} formatDuration={formatDuration} />}
-            </section>
-
-            {userId && <div className="mt-5">
-              <button type="button" aria-expanded={showHistoryManager} onClick={() => setShowHistoryManager(value => !value)} className="ui-button-secondary ui-press inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium"><SlidersHorizontal size={15} aria-hidden="true" />{showHistoryManager ? '기존 기록 과목 정리 닫기' : '기존 기록 과목 정리'}</button>
-              {showHistoryManager && <SubjectHistoryManager userId={userId} />}
-            </div>}
+                  <span
+                    data-bar
+                    aria-hidden="true"
+                    style={barStyle}
+                    className={cn(
+                      'block w-full max-w-9 origin-bottom rounded-t-[5px] rounded-b-[3px] transition-colors md:max-w-11 md:rounded-t-[6px]',
+                      isSelected ? 'bg-pomo' : bucket.seconds > 0 ? 'bg-pomo-soft' : 'bg-line-soft',
+                    )}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute -bottom-5 text-[11px] whitespace-nowrap md:-bottom-[22px]',
+                      isToday ? 'font-bold text-ink' : 'font-medium text-ink-muted',
+                    )}
+                  >
+                    {bucketAxisLabel(bucket)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+        </div>
+
+        <div ref={breakdownRef} className="flex flex-col gap-2 pt-1 md:gap-2.5 md:pt-2">
+          <h3 className="m-0 text-sm font-semibold">
+            {selectedBucket ? `${bucketTitle(selectedBucket)} 작업별 집중 시간` : '작업별 집중 시간'}
+          </h3>
+          {selectedTasks.length > 0 ? (
+            <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0 md:gap-2">
+              {selectedTasks.map(([task, secs]) => (
+                <li key={task} className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] md:h-[34px] md:gap-2 md:px-3">
+                  <span className="min-w-0 truncate font-semibold">{task}</span>
+                  <span className="shrink-0 text-ink-muted">{formatStudyDuration(secs)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="m-0 text-[13px] text-ink-muted">기록이 없어요.</p>
+          )}
+        </div>
+      </section>
+
+      <section aria-labelledby={totalsTitleId} className="flex flex-col gap-3.5 md:gap-4">
+        <div className="flex flex-col gap-3.5 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-4">
+          <h2 id={totalsTitleId} className="ui-h2">과목과 할 일별 누적</h2>
+          <div className="flex flex-wrap gap-2 md:gap-2.5">
+            <div role="group" aria-label="합계 범위" className={cn('ui-segmented', SEGMENTED_MOBILE)}>
+              <button type="button" aria-pressed={overviewScope === 'period'} onClick={() => setOverviewScope('period')}>선택 기간<span className="max-md:hidden"> 합계</span></button>
+              <button type="button" aria-pressed={overviewScope === 'lifetime'} onClick={() => setOverviewScope('lifetime')}>전체 누적</button>
+            </div>
+            <div role="group" aria-label="묶는 기준" className={cn('ui-segmented', SEGMENTED_MOBILE)}>
+              <button type="button" aria-pressed={grouping === 'subject'} onClick={() => setGrouping('subject')}>과목별</button>
+              <button type="button" aria-pressed={grouping === 'task'} onClick={() => setGrouping('task')}>할 일별</button>
+            </div>
+          </div>
+        </div>
+        {(subjectsError || statsError) && <p role="alert" className="m-0 text-sm text-pomo-deep">{subjectsError || statsError}</p>}
+        {statsError && <button type="button" onClick={retryStats} className="ui-button-ghost -ml-3 self-start text-pomo">통계 다시 조회</button>}
+        {loading ? <p role="status" className="m-0 text-[13px] text-ink-muted">통계를 불러오는 중…</p> : <StudyTotalsOverview ref={totalsRef} key={`${userId}:${overviewScope}:${grouping}`} totals={overviewScope === 'period' ? periodTotals : lifetimeTotals} hasAnyRecord={lifetimeTotals.seconds > 0} subjects={subjects} grouping={grouping} />}
+
+        {userId && <div className="flex flex-col gap-3 pt-1">
+          <button type="button" aria-expanded={showHistoryManager} aria-controls={showHistoryManager ? historyId : undefined} onClick={() => setShowHistoryManager(value => !value)} className="ui-button-secondary ui-press self-start rounded-tile px-4">
+            {showHistoryManager ? '기존 기록 과목 정리 닫기' : '기존 기록 과목 정리'}
+          </button>
+          {showHistoryManager && <div id={historyId}><SubjectHistoryManager userId={userId} /></div>}
+        </div>}
+      </section>
     </div>
   );
 }
 
-function StudyTotalsOverview({ totals, subjects, grouping, formatDuration }: {
+type TotalsRow = { id: string; name: string; seconds: number; taskTotals: Record<string, number>; unclassified: boolean };
+
+function StudyTotalsOverview({ ref, totals, hasAnyRecord, subjects, grouping }: {
+  ref?: Ref<HTMLDivElement>;
   totals: StudyTotals;
+  hasAnyRecord: boolean;
   subjects: StudySubject[];
   grouping: 'subject' | 'task';
-  formatDuration: (seconds: number) => string;
 }) {
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
+  const listId = useId();
   const names = new Map(subjects.map(subject => [subject.id, subject.name]));
-  const rows = grouping === 'subject'
-    ? Object.entries(totals.subjects).map(([id, value]) => ({ id, name: id === UNCLASSIFIED_SUBJECT ? '미분류' : names.get(id) ?? '알 수 없는 과목', ...value }))
-    : Object.entries(totals.taskTotals).map(([task, seconds]) => ({ id: task, name: task, seconds, taskTotals: {} as Record<string, number> }));
+  const rows: TotalsRow[] = grouping === 'subject'
+    ? Object.entries(totals.subjects).map(([id, value]) => ({ id, name: id === UNCLASSIFIED_SUBJECT ? '미분류' : names.get(id) ?? '알 수 없는 과목', unclassified: id === UNCLASSIFIED_SUBJECT, ...value }))
+    : Object.entries(totals.taskTotals).map(([task, seconds]) => ({ id: task, name: task, seconds, taskTotals: {}, unclassified: false }));
   rows.sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
+  const maxSeconds = Math.max(1, ...rows.map(row => row.seconds));
+
+  const toggle = (id: string) => setOpenRows(previous => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   return (
-    <div className="ui-panel-enter mt-5">
-      <p className="mb-4 text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">합계 {formatDuration(totals.seconds)}</p>
-      {!rows.length ? <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-400 dark:bg-slate-800/50">데이터가 없습니다.</p> : <ul className="space-y-2">
-        {rows.map(row => {
-          const share = totals.seconds > 0 ? row.seconds / totals.seconds * 100 : 0;
-          const content = <span className="flex min-w-0 flex-1 flex-col gap-2.5">
-            <span className="flex items-center justify-between gap-3">
-              <span className="min-w-0 break-words font-medium">{row.name}</span>
-              <span className="flex shrink-0 items-baseline gap-2 text-xs tabular-nums"><span className="font-semibold">{formatDuration(row.seconds)}</span><span className="w-12 text-right text-slate-400">{share.toFixed(1)}%</span></span>
-            </span>
-            <span aria-hidden="true" className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700/70"><span className="block h-full rounded-full bg-rose-300 transition-[width] duration-300 motion-reduce:transition-none dark:bg-rose-400/70" style={{ width: `${share}%` }} /></span>
-          </span>;
-          return <li key={row.id} className="overflow-hidden rounded-xl border border-slate-100 bg-white transition-colors hover:border-rose-100 dark:border-slate-700 dark:bg-slate-800/30 dark:hover:border-rose-900/50">
-            {grouping === 'subject' ? <details className="group">
-              <summary className="flex cursor-pointer list-none items-center gap-3 p-3.5 text-sm text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rose-300 dark:text-slate-200">{content}<ChevronRight aria-hidden="true" size={14} className="shrink-0 text-slate-400 transition-transform group-open:rotate-90 motion-reduce:transition-none" /></summary>
-              <ul className="ui-panel-enter space-y-3 border-t border-slate-100 bg-slate-50/60 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/20" aria-label={`${row.name} 세부 할 일`}>
-                {Object.entries(row.taskTotals).sort((a, b) => b[1] - a[1]).map(([task, seconds]) => <li key={task} className="flex justify-between gap-4 text-xs leading-relaxed text-slate-600 dark:text-slate-300"><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{task}</span><span className="shrink-0 font-medium tabular-nums">{formatDuration(seconds)}</span></li>)}
-              </ul>
-            </details> : <div className="flex p-3.5 text-sm text-slate-700 dark:text-slate-200">{content}</div>}
-          </li>;
-        })}
-      </ul>}
-      {grouping === 'subject' && rows.length > 0 && <p className="mt-3 text-xs text-gray-400">과목을 누르면 세부 할 일별 시간을 볼 수 있습니다.</p>}
+    <div ref={ref} className="flex flex-col gap-2">
+      <p className="m-0 text-sm font-semibold text-ink-muted">합계 {formatStudyDuration(totals.seconds)}</p>
+      {!rows.length ? (
+        <p className="m-0 py-4 text-sm text-ink-muted">
+          {hasAnyRecord ? '이 기간에는 기록이 없어요.' : '아직 기록이 없어요. 첫 뽀모도로를 시작하면 여기에 쌓여요.'}
+        </p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {rows.map((row, index) => {
+            const share = totals.seconds > 0 ? row.seconds / totals.seconds * 100 : 0;
+            const expandable = grouping === 'subject';
+            const open = expandable && openRows.has(row.id);
+            const childrenId = `${listId}-${index}`;
+            const content = <>
+              <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 font-semibold md:gap-2">
+                <span className="truncate">{row.name}</span>
+                {expandable ? <ChevronDown aria-hidden="true" size={14} strokeWidth={2.2} className={cn('shrink-0 text-ink-muted transition-transform duration-(--duration-enter) motion-reduce:transition-none', open && 'rotate-180')} /> : null}
+              </span>
+              <span aria-hidden="true" className="col-span-2 row-start-2 block h-1.5 overflow-hidden rounded-full bg-surface md:col-span-1 md:col-start-2 md:row-start-1 md:h-2">
+                <span className={cn('block h-full rounded-full', row.unclassified ? 'bg-bar' : 'bg-pomo')} style={{ width: `${Math.max(2, row.seconds / maxSeconds * 100)}%` }} />
+              </span>
+              <span className="col-start-2 row-start-1 flex items-baseline justify-end gap-2 whitespace-nowrap md:col-start-3">
+                <span className="text-xs font-medium text-ink-subtle">{share.toFixed(1)}%</span>
+                <span className="font-bold">{formatStudyDuration(row.seconds)}</span>
+              </span>
+            </>;
+            const rowClass = 'grid w-[calc(100%+20px)] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-2 rounded-control -mx-2.5 px-2.5 py-2.5 text-left md:-mx-3 md:w-[calc(100%+24px)] md:min-h-[52px] md:grid-cols-[180px_minmax(0,1fr)_150px] md:gap-x-4 md:rounded-tile md:px-3 md:py-1.5';
+            return (
+              <li key={row.id} className="flex flex-col">
+                {expandable ? (
+                  <button type="button" aria-expanded={open} aria-controls={open ? childrenId : undefined} onClick={() => toggle(row.id)} className={cn(rowClass, 'hover:bg-hover')}>
+                    {content}
+                  </button>
+                ) : (
+                  <div className={rowClass}>{content}</div>
+                )}
+                {expandable ? <SubjectTasks id={childrenId} name={row.name} open={open} taskTotals={row.taskTotals} /> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// 과목 줄의 세부 할 일. 펼치면 아래로 열리고, 접으면 다 접힌 뒤 목록을 내린다(docs/design-system.md §8 ui-collapse).
+// 안에는 포커스를 받는 요소가 없으므로 접을 때 옮길 포커스도 없다.
+function SubjectTasks({ id, name, open, taskTotals }: { id: string; name: string; open: boolean; taskTotals: Record<string, number> }) {
+  const { ref, mounted } = usePresence<HTMLDivElement>(open);
+  const tasks = Object.entries(taskTotals).sort((a, b) => b[1] - a[1]);
+  const childMax = Math.max(1, tasks[0]?.[1] ?? 0);
+  return (
+    <div ref={ref} className="ui-collapse" data-state={open ? 'open' : 'closed'} inert={!open || undefined}>
+      <div>
+        {mounted ? (
+          <ul id={id} aria-label={`${name} 세부 할 일`} className="m-0 mb-1.5 flex list-none flex-col p-0 pl-3.5 md:pl-5">
+            {tasks.map(([task, seconds]) => (
+              <li key={task} className="grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 text-sm text-ink-muted md:min-h-10 md:grid-cols-[160px_minmax(0,1fr)_150px] md:gap-4">
+                <span className="min-w-0 truncate" title={task}>{task}</span>
+                <span aria-hidden="true" className="hidden h-1.5 overflow-hidden rounded-full bg-surface md:block">
+                  <span className="block h-full rounded-full bg-bar" style={{ width: `${Math.max(2, seconds / childMax * 100)}%` }} />
+                </span>
+                <span className="text-right whitespace-nowrap">{formatStudyDuration(seconds)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

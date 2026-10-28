@@ -10,6 +10,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
@@ -515,8 +516,8 @@ describe('LongTermTasks', () => {
     expect(within(courses).getByText('데이터베이스')).toBeInTheDocument();
     expect(screen.getAllByText('데이터베이스')).toHaveLength(1);
     expect(within(getRowForTitle('빅데이터분석기사')).getByText('1/3')).toBeInTheDocument();
-    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 30m 0s')).toBeInTheDocument();
-    expect(within(getRowForTitle('데이터베이스')).getByText('누적 10m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 30분')).toBeInTheDocument();
+    expect(within(getRowForTitle('데이터베이스')).getByText('누적 10분')).toBeInTheDocument();
     expect(within(courses).queryByRole('button', { name: '과목 추가' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '데이터베이스 접기' }));
     expect(screen.getByText('정규화 복습')).not.toBeVisible();
@@ -700,20 +701,20 @@ describe('LongTermTasks', () => {
     renderTasks();
 
     await screen.findByText('빅데이터분석기사');
-    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 1h 5m')).toBeInTheDocument();
-    expect(within(getRowForTitle('영어 읽기')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 1시간 5분')).toBeInTheDocument();
+    expect(within(getRowForTitle('영어 읽기')).getByText('누적 0분')).toBeInTheDocument();
     expect(screen.queryByText('1/2')).not.toBeInTheDocument();
   });
 
   it('refreshes cumulative time when a study session changes', async () => {
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 600]]));
     renderTasks();
-    await screen.findByText('누적 10m 0s');
+    await screen.findByText('누적 10분');
 
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 1800]]));
     await fireRealtime('long-term-task-session-updates');
-    expect(await screen.findByText('누적 30m 0s')).toBeInTheDocument();
-    expect(screen.queryByText('누적 10m 0s')).not.toBeInTheDocument();
+    expect(await screen.findByText('누적 30분')).toBeInTheDocument();
+    expect(screen.queryByText('누적 10분')).not.toBeInTheDocument();
   });
 
   it('keeps tasks visible and shows a failed total instead of inventing zero, then recovers on refresh', async () => {
@@ -723,11 +724,11 @@ describe('LongTermTasks', () => {
 
     await screen.findByText('빅데이터분석기사');
     expect(screen.getByText('누적 시간 조회 실패')).toBeInTheDocument();
-    expect(screen.queryByText('누적 0m 0s')).not.toBeInTheDocument();
+    expect(screen.queryByText('누적 0분')).not.toBeInTheDocument();
 
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
     await fireRealtime('long-term-task-session-updates');
-    expect(await screen.findByText('누적 2m 0s')).toBeInTheDocument();
+    expect(await screen.findByText('누적 2분')).toBeInTheDocument();
     expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
   });
 
@@ -735,7 +736,7 @@ describe('LongTermTasks', () => {
     const oldDurations = createDeferred<Map<string, number>>();
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 60]]));
     const { rerender } = renderTasks();
-    await screen.findByText('누적 1m 0s');
+    await screen.findByText('누적 1분');
     fetchDurationsMock.mockImplementationOnce(() => oldDurations.promise);
     const oldChannels = [...channelMocks];
     await fireRealtime('long-term-task-session-updates');
@@ -743,7 +744,7 @@ describe('LongTermTasks', () => {
     longTermTasks = [{ id: 'task-1', title: '새 사용자 공부', position: 0 }];
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
     rerender(<LongTermTasks userId="user-2" />);
-    expect(screen.queryByText('누적 1m 0s')).not.toBeInTheDocument();
+    expect(screen.queryByText('누적 1분')).not.toBeInTheDocument();
     await screen.findByText('새 사용자 공부');
     const count = fetchDurationsMock.mock.calls.length;
     await act(async () => {
@@ -753,7 +754,7 @@ describe('LongTermTasks', () => {
     });
 
     expect(fetchDurationsMock).toHaveBeenCalledTimes(count);
-    expect(screen.getByText('누적 2m 0s')).toBeInTheDocument();
+    expect(screen.getByText('누적 2분')).toBeInTheDocument();
     expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
   });
 
@@ -767,7 +768,7 @@ describe('LongTermTasks', () => {
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('코딩테스트');
 
-    expect(within(getRowForTitle('코딩테스트')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('코딩테스트')).getByText('누적 0분')).toBeInTheDocument();
     expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 시간 조회 실패')).toBeInTheDocument();
   });
 
@@ -1524,6 +1525,207 @@ describe('LongTermTasks', () => {
     });
     expect(subtasksTable.update).toHaveBeenCalledTimes(1);
     expect(screen.getByText('챕터 2')).toHaveClass('line-through');
+  });
+
+  describe('motion', () => {
+    // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다.
+    let animations: ReturnType<typeof simulateRunningAnimations>;
+    beforeEach(() => { animations = simulateRunningAnimations(); });
+    afterEach(() => animations.restore());
+
+    const subtaskCheck = (title: string) =>
+      within(getRowForTitle(title)).getAllByRole('button')[SUBTASK_TOGGLE].querySelector('svg')!;
+    const projectOf = (title: string) =>
+      screen.getByText(title).closest('[data-long-term-task]') as HTMLElement;
+    const progressFill = (title: string) =>
+      projectOf(title).querySelector(':scope > .bg-track > div') as HTMLElement;
+    const animated = () => [...document.querySelectorAll('[class*="animate-"], .transition-transform.bg-pomo')];
+    const completeRemotely = async (id: string, completedAt: string | null = '2026-03-19T03:00:00.000Z') => {
+      subtasks = subtasks.map((subtask) => subtask.id === id ? { ...subtask, completed_at: completedAt } : subtask);
+      await fireRealtime('long-term-subtask-updates');
+    };
+
+    it('keeps rows mounted during a refetch and plays each action’s motion only once', async () => {
+      renderTasks();
+      await screen.findByText('챕터 2');
+      const project = projectOf('빅데이터분석기사');
+      const chapterTwo = getRowForTitle('챕터 2');
+      // 처음 불러온 목록은 움직이지 않는다.
+      expect(animated()).toEqual([]);
+
+      fireEvent.click(screen.getByRole('button', { name: '세부 할 일 추가' }));
+      const form = screen.getByRole('textbox', { name: '세부 할 일' }).closest('form')!;
+      expect(form).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(form).not.toHaveClass('animate-fade-up');
+      fireEvent.change(screen.getByRole('textbox', { name: '세부 할 일' }), { target: { value: '챕터 3' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      await screen.findByText('챕터 3');
+      const chapterThree = getRowForTitle('챕터 3');
+      expect(animated()).toEqual([chapterThree]);
+      await animations.finish();
+      expect(animated()).toEqual([]);
+
+      // 다른 곳에서 순서를 바꿔도(같은 노드가 옮겨진다) 방금 추가한 행이 다시 돌지 않는다.
+      subtasks = subtasks.map((subtask) => ({ ...subtask, position: { 'subtask-3': 0, 'subtask-1': 1, 'subtask-2': 2 }[subtask.id] ?? subtask.position }));
+      await fireRealtime('long-term-subtask-updates');
+      await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('챕터 3'));
+      expect(getRowForTitle('챕터 3')).toBe(chapterThree);
+      expect(animated()).toEqual([]);
+
+      fireEvent.click(within(chapterTwo).getAllByRole('button')[SUBTASK_TOGGLE]);
+      await waitFor(() => expect(subtasks.find((subtask) => subtask.id === 'subtask-2')?.completed_at).not.toBeNull());
+      expect(subtaskCheck('챕터 2')).toHaveClass('animate-pop-in');
+      expect(within(chapterTwo).getByText(/완료$/)).toHaveClass('animate-fade-in');
+      await animations.finish();
+      expect(animated()).toEqual([]);
+
+      // 완료 날짜는 편집을 닫아 다시 붙어도 다시 나타나지 않는다.
+      fireEvent.click(within(chapterTwo).getAllByRole('button')[SUBTASK_EDIT]);
+      const editor = screen.getByRole('textbox', { name: '세부 할 일 제목' }).parentElement!;
+      expect(editor).toHaveClass('animate-fade-up');
+      await animations.finish();
+      fireEvent.click(screen.getByRole('button', { name: '세부 할 일 수정 취소' }));
+      expect(within(chapterTwo).getByText(/완료$/)).not.toHaveClass('animate-fade-in');
+      expect(animated()).toEqual([]);
+
+      // 다시 불러오는 동안에도 목록을 그대로 둔다(불러오는 중 문구로 바꾸지 않는다).
+      deferFetch = true;
+      await fireRealtime('long-term-subtask-updates');
+      expect(pendingFetchResolvers.length).toBeGreaterThan(0);
+      expect(screen.queryByText('불러오는 중...')).not.toBeInTheDocument();
+      expect(getRowForTitle('챕터 2')).toBe(chapterTwo);
+      deferFetch = false;
+      await act(async () => pendingFetchResolvers.forEach((resolve) => resolve()));
+      expect(projectOf('빅데이터분석기사')).toBe(project);
+      expect(animated()).toEqual([]);
+    });
+
+    it('does not re-pop a completion that a refresh undoes and redoes while it plays', async () => {
+      renderTasks();
+      await screen.findByText('챕터 2');
+      fireEvent.click(within(getRowForTitle('챕터 2')).getAllByRole('button')[SUBTASK_TOGGLE]);
+      expect(subtaskCheck('챕터 2')).toHaveClass('animate-pop-in');
+      await waitFor(() => expect(subtasks.find((subtask) => subtask.id === 'subtask-2')?.completed_at).not.toBeNull());
+      await completeRemotely('subtask-2', null);
+      await waitFor(() => expect(screen.getByText('챕터 2')).not.toHaveClass('line-through'));
+      await completeRemotely('subtask-2');
+      await waitFor(() => expect(screen.getByText('챕터 2')).toHaveClass('line-through'));
+      expect(subtaskCheck('챕터 2')).not.toHaveClass('animate-pop-in');
+    });
+
+    it('slides a progress bar only for the user’s own toggle; a later remote change in the same project jumps', async () => {
+      // 빅데이터분석기사: 직접 세부 할 일 2개(1개 완료) + 과목 항목 데이터베이스(세부 할 일 2개)
+      addCourseFixture();
+      subtasks.push(
+        { id: 'course-a', long_term_task_id: 'course-1', title: '정규화 복습', position: 0, completed_at: null },
+        { id: 'course-b', long_term_task_id: 'course-1', title: '인덱스 복습', position: 1, completed_at: null },
+      );
+      renderTasks();
+      await screen.findByText('정규화 복습');
+      const parent = progressFill('빅데이터분석기사');
+      const course = progressFill('데이터베이스');
+      expect(parent.style.transform).toBe('translateX(-75%)');
+      expect(course.style.transform).toBe('translateX(-100%)');
+      expect(animated()).toEqual([]);
+
+      // 사용자가 과목 항목의 세부 할 일을 완료하면 그 항목과 상위 과제의 막대가 한 번 움직인다.
+      fireEvent.click(within(getRowForTitle('정규화 복습')).getAllByRole('button')[SUBTASK_TOGGLE]);
+      expect(course.style.transform).toBe('translateX(-50%)');
+      expect(parent.style.transform).toBe('translateX(-50%)');
+      expect(course).toHaveClass('transition-transform', 'duration-(--duration-emphasized)');
+      expect(parent).toHaveClass('transition-transform', 'duration-(--duration-emphasized)');
+      await waitFor(() => expect(subtasks.find((subtask) => subtask.id === 'course-a')?.completed_at).not.toBeNull());
+      await animations.finish();
+      expect(course).not.toHaveClass('transition-transform');
+      expect(parent).not.toHaveClass('transition-transform');
+
+      // 같은 과목 항목의 다른 세부 할 일이 다른 곳에서 완료되면 두 막대 모두 움직이지 않고 바로 바뀐다.
+      await completeRemotely('course-b');
+      await waitFor(() => expect(course.style.transform).toBe('translateX(0%)'));
+      expect(parent.style.transform).toBe('translateX(-25%)');
+      expect(course).not.toHaveClass('transition-transform');
+      expect(parent).not.toHaveClass('transition-transform');
+
+      // 상위 과제의 직접 세부 할 일도 같다.
+      fireEvent.click(within(getRowForTitle('챕터 2')).getAllByRole('button')[SUBTASK_TOGGLE]);
+      expect(parent).toHaveClass('transition-transform');
+      expect(course).not.toHaveClass('transition-transform');
+      await waitFor(() => expect(subtasks.find((subtask) => subtask.id === 'subtask-2')?.completed_at).not.toBeNull());
+      await animations.finish();
+      await completeRemotely('subtask-1', null);
+      await waitFor(() => expect(parent.style.transform).toBe('translateX(-25%)'));
+      expect(parent).not.toHaveClass('transition-transform');
+    });
+
+    it('animates a new project once and fades a subject group in each time the user expands it', async () => {
+      addCourseFixture();
+      subtasks.push({ id: 'course-subtask', long_term_task_id: 'course-1', title: '정규화 복습', position: 0, completed_at: null });
+      renderTasks();
+      await screen.findByText('정규화 복습');
+      const details = document.getElementById('long-term-details-course-1')!;
+      expect(animated()).toEqual([]);
+
+      fireEvent.click(screen.getByRole('button', { name: '데이터베이스 접기' }));
+      expect(details).toHaveAttribute('hidden');
+      expect(details).not.toHaveClass('animate-fade-up');
+      fireEvent.click(screen.getByRole('button', { name: '데이터베이스 펼치기' }));
+      expect(details).not.toHaveAttribute('hidden');
+      expect(details).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(details).not.toHaveClass('animate-fade-up');
+      fireEvent.click(screen.getByRole('button', { name: '데이터베이스 접기' }));
+      fireEvent.click(screen.getByRole('button', { name: '데이터베이스 펼치기' }));
+      expect(details).toHaveClass('animate-fade-up');
+      await animations.finish();
+
+      fireEvent.click(screen.getByRole('button', { name: '빅데이터분석기사 수정' }));
+      const editor = screen.getByRole('textbox', { name: '장기 과제 제목' }).parentElement!;
+      expect(editor).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(editor).not.toHaveClass('animate-fade-up');
+      fireEvent.click(screen.getByRole('button', { name: '장기 과제 수정 취소' }));
+
+      fireEvent.click(screen.getByRole('button', { name: '장기 과제 추가' }));
+      expect(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)').closest('form')).toHaveClass('animate-fade-up');
+      fireEvent.change(screen.getByPlaceholderText('장기 과제를 입력하세요 (예: 빅데이터분석기사)'), { target: { value: '정보처리기사' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      await screen.findByText('정보처리기사');
+      expect(projectOf('정보처리기사')).toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(animated()).toEqual([]);
+    });
+
+    it('plays an open subtask editor’s entrance only when it opens, not when a reorder moves it', async () => {
+      renderTasks();
+      await screen.findByText('챕터 2');
+      fireEvent.click(within(getRowForTitle('챕터 2')).getAllByRole('button')[SUBTASK_EDIT]);
+      const input = screen.getByRole('textbox', { name: '세부 할 일 제목' });
+      expect(input.parentElement).toHaveClass('animate-fade-up');
+      fireEvent.change(input, { target: { value: '고치는 중' } });
+      await animations.finish();
+
+      act(() => dragHandlers.at(-1)!({ active: { id: 'subtask-2' }, over: { id: 'subtask-1' } } as DragEndEvent));
+      expect(screen.getAllByRole('listitem')[0]).toContainElement(input);
+      expect(input).toHaveValue('고치는 중');
+      expect(animated()).toEqual([]);
+      await act(async () => {});
+    });
+
+    it('drops the motion markers when the user reorders subtasks (moved rows would replay them)', async () => {
+      renderTasks();
+      await screen.findByText('챕터 2');
+      fireEvent.click(screen.getByRole('button', { name: '세부 할 일 추가' }));
+      fireEvent.change(screen.getByRole('textbox', { name: '세부 할 일' }), { target: { value: '챕터 3' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      await screen.findByText('챕터 3');
+      expect(getRowForTitle('챕터 3')).toHaveClass('animate-fade-up');
+
+      act(() => dragHandlers.at(-1)!({ active: { id: 'subtask-3' }, over: { id: 'subtask-1' } } as DragEndEvent));
+      expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('챕터 3');
+      expect(getRowForTitle('챕터 3')).not.toHaveClass('animate-fade-up');
+      await act(async () => {});
+    });
   });
 });
 

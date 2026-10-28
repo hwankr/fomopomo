@@ -1,55 +1,37 @@
 'use client';
 
-import { signOutWithPushCleanup } from '@/lib/pushSubscriptionLifecycle';
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
+import Link from 'next/link';
+import { SlidersVertical } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-// import { User } from '@supabase/supabase-js'; // Removed unused
 import ProfileHeader from '@/components/profile/ProfileHeader';
 import ContributionGraph from '@/components/profile/ContributionGraph';
+import LogoutDialog from '@/components/LogoutDialog';
 import StudyReport from '@/components/StudyReport';
 import { useStudyStats } from '@/hooks/useStudyStats';
 import Navbar from '@/components/Navbar';
+import MobileTopBar, { TopBarTitle } from '@/components/layout/MobileTopBar';
 import LoginModal from '@/components/LoginModal';
-import SettingsModal from '@/components/SettingsModal';
-import { useTheme } from '@/components/ThemeProvider';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
-import AppSelect from '@/components/ui/AppSelect';
 
 export default function ProfilePage() {
   const { session, loading: sessionLoading } = useAuthSession();
   const userId = session?.user?.id ?? null;
+  // 머리(누적·오늘)·공부 기록·상세 리포트가 집계 하나를 함께 쓴다. 조회는 리포트가 기간을 바꿀 때마다
+  // 하고, 그때 오늘 합계(getStudyDayRange, 오전 5시 기준)도 새로 받아 머리와 막대가 같은 값을 보인다.
+  const stats = useStudyStats(userId);
   const {
-    fetchStats,
     heatmapData,
     totalFocusTime,
+    todayFocusTime,
     earliestYear,
     loading: statsLoading,
-  } = useStudyStats(userId);
-  const { theme, isDarkMode, toggleDarkMode } = useTheme();
-
-  const currentYear = new Date().getFullYear();
-  const [selectedYear, setSelectedYear] = useState(currentYear);
-
-  const availableYears = useMemo(() => {
-    const startYear = earliestYear ?? currentYear;
-    const years: number[] = [];
-    for (let year = currentYear; year >= startYear; year -= 1) {
-      years.push(year);
-    }
-    return years;
-  }, [earliestYear, currentYear]);
+  } = stats;
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
-  useEffect(() => {
-    if (userId) {
-        // Fetch stats to populate heatmap and total time
-        fetchStats('year', new Date());
-    }
-  }, [userId, fetchStats]);
+  const [isLogoutOpen, setIsLogoutOpen] = useState(false);
 
   const handleGoogleLogin = async () => {
     if (isInAppBrowser()) {
@@ -74,84 +56,67 @@ export default function ProfilePage() {
   if (sessionLoading) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-20 transition-colors duration-300">
+    <>
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onGoogleLogin={handleGoogleLogin}
       />
-
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        onSave={() => {
-          fetchStats('year', new Date(selectedYear, 0, 1));
-        }}
-      />
+      <LogoutDialog open={isLogoutOpen} onClose={() => setIsLogoutOpen(false)} />
 
       <Navbar
         session={session}
-        theme={theme}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => signOutWithPushCleanup()}
+        mobileTopBar={
+          <MobileTopBar
+            start={<TopBarTitle title="프로필" titleClassName="text-xl" />}
+            end={
+              <Link href="/settings" aria-label="설정" className="ui-icon-button-surface">
+                <SlidersVertical size={19} strokeWidth={1.8} aria-hidden="true" />
+              </Link>
+            }
+          />
+        }
       />
 
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8 animate-fade-in mt-16">
-        
-        {/* Header Section */}
-        <section>
-          <ProfileHeader user={session?.user || null} totalFocusTime={totalFocusTime} />
-        </section>
-
+      {/* 레이아웃이 이미 <main>을 그리므로 여기서는 div로 감싼다. */}
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-9 px-4 pt-2 pb-8 md:gap-14 md:px-10 md:pt-4 md:pb-20">
         {/* 로그인한 사용자에게만 개인 데이터 섹션을 렌더링한다 (로그아웃 후 잔존 데이터 방지) */}
         {session ? (
           <>
-            {/* Contribution Graph Section */}
-            <section className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold text-gray-800 dark:text-white">공부 기록</h2>
-                <AppSelect
-                  aria-label="연도"
-                  value={String(selectedYear)}
-                  onValueChange={(value) => setSelectedYear(Number(value))}
-                  options={availableYears.map((year) => ({ value: String(year), label: `${year}년` }))}
-                  compact
-                  className="w-28"
-                />
-              </div>
-              {statsLoading && heatmapData.length === 0 ? (
-                   <div className="h-32 flex items-center justify-center text-gray-400 text-sm">잔디 심는 중...</div>
-              ) : (
-                   <ContributionGraph data={heatmapData} year={selectedYear} />
-              )}
-            </section>
-
-            {/* Detailed Report Section */}
-            <section>
-               <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4 px-2">상세 리포트</h2>
-               <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-slate-700">
-                 <StudyReport key={userId ?? 'guest'} />
-               </div>
-            </section>
+            <ProfileHeader
+              user={session.user}
+              totalFocusTime={totalFocusTime}
+              todayFocusTime={todayFocusTime}
+              loading={statsLoading}
+              onLogout={() => setIsLogoutOpen(true)}
+            />
+            <ContributionGraph data={heatmapData} earliestYear={earliestYear} loading={statsLoading} />
+            <StudyReport key={userId ?? 'guest'} stats={stats} />
+            <button
+              type="button"
+              onClick={() => setIsLogoutOpen(true)}
+              className="ui-button-ghost -ml-3 self-start rounded-control text-ink-muted md:hidden"
+            >
+              로그아웃
+            </button>
           </>
         ) : (
-          <section className="bg-white dark:bg-slate-800 rounded-2xl p-10 text-center shadow-sm border border-gray-100 dark:border-slate-700">
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              로그인하고 공부 기록과 상세 리포트를 확인해보세요!
+          <section aria-labelledby="profile-guest-title" className="flex flex-col items-start gap-3 py-4 md:gap-4 md:py-10">
+            <h1 id="profile-guest-title" className="ui-h1 hidden md:block">프로필</h1>
+            <p className="m-0 text-[15px] text-ink-muted">
+              로그인하면 공부 기록과 상세 리포트를 볼 수 있어요.
             </p>
             <button
+              type="button"
               onClick={() => setIsLoginModalOpen(true)}
-              className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+              className="ui-button-primary ui-press mt-1 rounded-tile px-5"
             >
               로그인하기
             </button>
           </section>
         )}
-
       </div>
-    </div>
+    </>
   );
 }

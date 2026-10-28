@@ -8,11 +8,16 @@ export default function PlanPage() {
 
   if (loading) {
     return (
-      <div 
-        className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900"
+      <div
+        role="status"
+        aria-label="불러오는 중"
+        className="flex min-h-[60vh] items-center justify-center"
         suppressHydrationWarning
       >
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white"></div>
+        <span
+          aria-hidden="true"
+          className="size-8 animate-spin rounded-full border-2 border-bead border-t-pomo motion-reduce:animate-none"
+        />
       </div>
     );
   }

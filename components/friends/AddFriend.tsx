@@ -1,13 +1,30 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import Avatar from '@/components/ui/Avatar';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
+import { cn } from '@/lib/utils';
 
 interface AddFriendProps {
   session: Session;
   onFriendAdded: () => void;
+  /** 이 패널이 보이는지(찾기 탭). 숨으면 남은 피드백 표시를 바로 뗀다. */
+  active?: boolean;
 }
+
+// 줄을 보여 줄지 정하는 느슨한 검사. 실제 검증은 input[type=email]과 서버가 한다.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// 서버가 돌려주는 영문 오류를 알아들을 수 있는 말로 바꾼다. 모르는 오류는 그대로 보여 준다.
+const RPC_ERROR_COPY: Array<[RegExp, string]> = [
+  [/not found/i, '이 이메일로 가입한 사람을 찾지 못했어요.'],
+  [/yourself|own sender/i, '나에게는 친구 요청을 보낼 수 없어요.'],
+  [/already friends/i, '이미 친구예요.'],
+  [/already sent|exists/i, '이미 요청을 보냈거나 이 사람에게서 받은 요청이 있어요.'],
+];
 
 function getRpcErrorMessage(error: unknown) {
   if (typeof error === 'object' && error !== null) {
@@ -16,29 +33,44 @@ function getRpcErrorMessage(error: unknown) {
       error_description?: string;
     };
 
-    return (
-      errorRecord.message ||
-      errorRecord.error_description ||
-      '요청 전송에 실패했습니다.'
-    );
+    const message = errorRecord.message || errorRecord.error_description;
+    if (message) {
+      return RPC_ERROR_COPY.find(([pattern]) => pattern.test(message))?.[1] ?? message;
+    }
   }
 
-  return '요청 전송에 실패했습니다.';
+  return '요청을 보내지 못했어요.';
 }
 
-export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
+export default function AddFriend({ session, onFriendAdded, active = true }: AddFriendProps) {
   const [email, setEmail] = useState('');
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  // 사용자 동작으로 나타난 결과 줄·보냄 체크·안내 문구는 한 번만 움직인다. 탭 패널은 숨겼다(hidden) 보이면
+  // CSS 애니메이션이 다시 돌므로, 다 돌면(usePlayOnce) 또는 패널이 숨으면 클래스를 뗀다.
+  const [rowEntering, setRowEntering] = useState(false);
+  const [sentPopping, setSentPopping] = useState(false);
+  const [messageEntering, setMessageEntering] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  const checkRef = useRef<SVGSVGElement>(null);
+  const messageRef = useRef<HTMLParagraphElement>(null);
+  const formId = useId();
+  const inputId = useId();
 
   void session;
 
+  const showMessage = (next: { type: 'success' | 'error'; text: string }) => {
+    setMessage(next);
+    setMessageEntering(true);
+  };
+
   const handleAddFriend = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!email) return;
+    if (!email || loading) return;
 
     setLoading(true);
     setMessage(null);
@@ -50,56 +82,126 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
 
       if (error) throw error;
 
-      setMessage({ type: 'success', text: '친구 요청을 보냈습니다.' });
+      showMessage({ type: 'success', text: '친구 요청을 보냈어요. 상대가 수락하면 순위에 함께 보여요.' });
+      setSentTo(email);
+      setSentPopping(true);
       setEmail('');
       onFriendAdded();
     } catch (error: unknown) {
       console.error('Error adding friend:', JSON.stringify(error, null, 2));
-      setMessage({ type: 'error', text: getRpcErrorMessage(error) });
+      showMessage({ type: 'error', text: getRpcErrorMessage(error) });
     } finally {
       setLoading(false);
     }
   };
 
+  const typed = email.trim();
+  // 입력 중이면 입력한 주소를, 막 보냈으면 보낸 주소를 결과 줄로 보여 준다.
+  const target = typed ? (EMAIL_PATTERN.test(typed) ? typed : null) : sentTo;
+  const isSent = !typed && target !== null;
+  const hint = typed
+    ? '이메일 주소를 끝까지 입력해 주세요.'
+    : '친구가 가입한 이메일을 입력하면 여기에서 친구 요청을 보낼 수 있어요.';
+
+  // 입력한 주소가 이메일 모양이 되어 결과 줄이 새로 생길 때 한 번 떠오른다.
+  const hasTarget = target !== null;
+  const [lastHasTarget, setLastHasTarget] = useState(hasTarget);
+  if (hasTarget !== lastHasTarget) {
+    setLastHasTarget(hasTarget);
+    setRowEntering(hasTarget);
+  }
+  // 다른 탭을 고르면 패널을 숨기는 그 렌더에서 뗀다. 숨김으로 취소된 애니메이션의 소식은 패널이 다시 보인 뒤에 올 수 있다.
+  if (!active && (rowEntering || sentPopping || messageEntering)) {
+    setRowEntering(false);
+    setSentPopping(false);
+    setMessageEntering(false);
+  }
+  usePlayOnce(rowEntering || null, rowRef, () => setRowEntering(false));
+  usePlayOnce(sentPopping || null, checkRef, () => setSentPopping(false));
+  usePlayOnce(message && messageEntering ? message : null, messageRef, () => setMessageEntering(false));
+
   return (
-    <form onSubmit={handleAddFriend} className="space-y-4">
-      <div>
-        <label
-          htmlFor="email"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          친구 이메일
+    <section aria-label="친구 찾기" className="flex flex-col gap-3 md:gap-4">
+      <form
+        id={formId}
+        onSubmit={handleAddFriend}
+        className="flex flex-col gap-1.5 px-1 md:max-w-[480px] md:px-3"
+      >
+        <label htmlFor={inputId} className="sr-only text-[13px] font-semibold text-ink-muted md:not-sr-only">
+          이메일로 찾기
         </label>
         <input
           type="email"
-          id="email"
+          id={inputId}
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="이메일 주소를 입력하세요"
-          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-gray-900 transition-all focus:border-transparent focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900/50 dark:text-white"
+          onChange={(event) => {
+            setEmail(event.target.value);
+            setMessage(null);
+            setSentPopping(false);
+          }}
+          placeholder="친구의 가입 이메일"
+          autoComplete="off"
+          className="ui-input h-12 w-full rounded-tile px-4 md:h-[50px] md:text-base"
           required
         />
-      </div>
+      </form>
 
-      {message && (
-        <div
-          className={`text-sm p-3 rounded-lg ${
-            message.type === 'success'
-              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-              : 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400'
-          }`}
-        >
-          {message.text}
-        </div>
+      {target ? (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          <li
+            ref={rowRef}
+            className={cn(
+              'flex min-h-[72px] items-center gap-3 rounded-tile px-2 py-1.5 md:min-h-[82px] md:gap-4 md:rounded-2xl md:px-3 md:py-2',
+              rowEntering && 'animate-fade-up',
+            )}
+          >
+            <Avatar name={target} className="bg-surface text-ink md:size-10 md:text-[15px]" />
+            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold md:text-base" title={target}>
+              {target}
+            </span>
+            {isSent ? (
+              <button
+                type="button"
+                disabled
+                className="ui-button-secondary min-h-10 shrink-0 gap-1.5 rounded-control px-3 text-sm md:min-h-11 md:rounded-tile md:px-4 md:text-[15px]"
+              >
+                <Check
+                  aria-hidden="true"
+                  size={16}
+                  strokeWidth={2.2}
+                  ref={checkRef}
+                  className={cn('shrink-0', sentPopping && 'animate-pop-in')}
+                />
+                요청 보냄
+              </button>
+            ) : (
+              <button
+                type="submit"
+                form={formId}
+                disabled={loading}
+                className="ui-button-primary ui-press min-h-10 shrink-0 rounded-control px-3.5 text-sm md:min-h-11 md:rounded-tile md:px-[18px] md:text-[15px]"
+              >
+                {loading ? '보내는 중…' : '친구 요청'}
+              </button>
+            )}
+          </li>
+        </ul>
+      ) : (
+        <p className="m-0 px-2 pt-2 pb-4 text-sm text-ink-muted md:px-3 md:pt-3 md:pb-6 md:text-[15px]">{hint}</p>
       )}
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 font-medium text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+      {/* 늘 그려 두는 알림 영역이라 결과가 바뀔 때마다 보조기기가 읽는다. */}
+      <p
+        role="status"
+        ref={messageRef}
+        className={cn(
+          'm-0 px-2 text-sm empty:hidden md:px-3',
+          message?.type === 'error' ? 'text-pomo-deep' : 'text-ink-muted',
+          message && messageEntering && 'animate-fade-in',
+        )}
       >
-        {loading ? '전송 중...' : '친구 요청 보내기'}
-      </button>
-    </form>
+        {message?.text}
+      </p>
+    </section>
   );
 }

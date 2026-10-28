@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,13 +84,12 @@ function renderSidebar(over: Partial<Parameters<typeof TaskSidebar>[0]> = {}) {
   );
 }
 
-async function choosePeriod(label: string) {
-  const trigger = screen.getByRole('combobox', { name: '기간' });
-  trigger.focus();
-  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  fireEvent.click(await screen.findByRole('option', { name: label }));
-  await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
-}
+// 기간은 작업 추가 폼 안의 알약 버튼 묶음이다.
+const period = (label: string) => within(screen.getByRole('group', { name: '기간' })).getByRole('button', { name: label });
+const choosePeriod = (label: string) => fireEvent.click(period(label));
+// 데스크톱 선택기는 팝오버라 body로 포털된다. 닫기 버튼 없이 Escape로 닫는다.
+const pickerText = () => document.body.textContent ?? '';
+const pressEscape = () => fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
 
 describe('TaskSidebar', () => {
   afterEach(() => {
@@ -100,7 +100,7 @@ describe('TaskSidebar', () => {
 
   it('does not offer creation to signed-out users', () => {
     renderSidebar({ onCreateTask: vi.fn() });
-    expect(screen.queryByRole('button', { name: '일정 추가' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '작업 추가' })).not.toBeInTheDocument();
   });
 
   it('adds an inferred subject and chosen period without selecting a task or closing the sidebar', async () => {
@@ -108,40 +108,42 @@ describe('TaskSidebar', () => {
     const onSelectTask = vi.fn();
     const onClose = vi.fn();
     renderSidebar({ userId: 'user-1', onCreateTask, onSelectTask, onClose });
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
     expect(screen.getByRole('button', { name: '추가' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '  수학 공부  ' } });
-    await choosePeriod('이번 달');
-    fireEvent.submit(screen.getByRole('form', { name: '일정 추가' }));
-    await waitFor(() => expect(screen.queryByLabelText('일정 제목')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('새 작업 이름'), { target: { value: '  수학 공부  ' } });
+    expect(screen.getByText('제목으로 보아 수학 과목에 넣을게요')).toBeInTheDocument();
+    choosePeriod('이번 달');
+    expect(period('이번 달')).toHaveAttribute('aria-pressed', 'true');
+    await act(async () => { fireEvent.submit(screen.getByRole('form', { name: '작업 추가' })); });
+    expect(screen.queryByLabelText('새 작업 이름')).not.toBeInTheDocument();
     expect(onCreateTask).toHaveBeenCalledWith({ title: '수학 공부', kind: 'monthly', subjectId: 'math' });
     expect(onSelectTask).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
-    expect(screen.getByLabelText('일정 제목')).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: '기간' })).toHaveTextContent('오늘');
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    expect(screen.getByLabelText('새 작업 이름')).toHaveValue('');
+    expect(period('오늘')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('keeps failed input for retry, prevents duplicate submits and clears it on cancel', async () => {
     let resolve!: (value: null) => void;
     const onCreateTask = vi.fn().mockImplementation(() => new Promise<null>(done => { resolve = done; }));
     renderSidebar({ userId: 'user-1', onCreateTask });
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
-    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: '수학 복습' } });
-    await choosePeriod('이번 주');
-    const form = screen.getByRole('form', { name: '일정 추가' });
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByLabelText('새 작업 이름'), { target: { value: '수학 복습' } });
+    choosePeriod('이번 주');
+    const form = screen.getByRole('form', { name: '작업 추가' });
     fireEvent.submit(form);
     fireEvent.submit(form);
     expect(onCreateTask).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: '추가 중…' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: '기간' })).toBeDisabled();
+    expect(period('이번 주')).toBeDisabled();
     await act(async () => resolve(null));
-    expect(screen.getByRole('alert')).toHaveTextContent('일정을 추가하지 못했어요');
-    expect(screen.getByLabelText('일정 제목')).toHaveValue('수학 복습');
-    expect(screen.getByRole('combobox', { name: '기간' })).toHaveTextContent('이번 주');
+    expect(screen.getByRole('alert')).toHaveTextContent('작업을 추가하지 못했어요');
+    expect(screen.getByLabelText('새 작업 이름')).toHaveValue('수학 복습');
+    expect(period('이번 주')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
-    expect(screen.getByLabelText('일정 제목')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    expect(screen.getByLabelText('새 작업 이름')).toHaveValue('');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -151,18 +153,18 @@ describe('TaskSidebar', () => {
     const props = { isOpen: true, onClose: noop, tasks: [], onSelectTask: noop, onToggleTask: noop,
       onSelectSubtask: noopSelectSubtask, onSelectLongTermTask: noopSelectSubtask, onToggleSubtask: noop, selectedTaskId: null, onCreateTask };
     const { rerender } = render(<TaskSidebar {...props} userId="user-1" />);
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
-    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: 'old draft' } });
-    fireEvent.submit(screen.getByRole('form', { name: '일정 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByLabelText('새 작업 이름'), { target: { value: 'old draft' } });
+    fireEvent.submit(screen.getByRole('form', { name: '작업 추가' }));
     rerender(<TaskSidebar {...props} userId="user-2" />);
-    fireEvent.click(screen.getByRole('button', { name: '일정 추가' }));
-    fireEvent.change(screen.getByLabelText('일정 제목'), { target: { value: 'new draft' } });
+    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.change(screen.getByLabelText('새 작업 이름'), { target: { value: 'new draft' } });
     await act(async () => resolve(makeTask({ id: 'old', title: 'old draft' })));
-    expect(screen.getByLabelText('일정 제목')).toHaveValue('new draft');
+    expect(screen.getByLabelText('새 작업 이름')).toHaveValue('new draft');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('renders all three sections with duration badges', () => {
+  it('renders all three sections with accumulated durations', () => {
     renderSidebar({
       tasks: [makeTask({ id: 't1', title: '오늘 작업', durationSeconds: 5400 })],
       weeklyPlans: [
@@ -177,9 +179,9 @@ describe('TaskSidebar', () => {
     expect(screen.getByRole('heading', { name: '이번 주' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '이번 달' })).toBeInTheDocument();
     expect(screen.getByText('오늘 작업')).toBeInTheDocument();
-    expect(screen.getByText('1h 30m')).toBeInTheDocument();
-    expect(screen.getByText('10m')).toBeInTheDocument();
-    expect(screen.getByText('1m')).toBeInTheDocument();
+    expect(screen.getByText('누적 1h 30m')).toBeInTheDocument();
+    expect(screen.getByText('누적 10m')).toBeInTheDocument();
+    expect(screen.getByText('누적 1m')).toBeInTheDocument();
   });
 
   it('does not render a duration badge for zero seconds', () => {
@@ -188,18 +190,18 @@ describe('TaskSidebar', () => {
     });
 
     expect(screen.getByText('시간 없음')).toBeInTheDocument();
-    expect(screen.queryByText('0m')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0m/)).not.toBeInTheDocument();
   });
 
   it('sorts done tasks below todo tasks and strikes them through', () => {
-    const { container } = renderSidebar({
+    renderSidebar({
       tasks: [
         makeTask({ id: 't1', title: '끝난 작업', status: 'done' }),
         makeTask({ id: 't2', title: '남은 작업' }),
       ],
     });
 
-    const text = container.textContent ?? '';
+    const text = pickerText();
     expect(text.indexOf('남은 작업')).toBeLessThan(text.indexOf('끝난 작업'));
     expect(screen.getByText('끝난 작업').closest('button')).toHaveClass(
       'line-through'
@@ -217,7 +219,9 @@ describe('TaskSidebar', () => {
 
     renderSidebar({ tasks: [task], onSelectTask, onToggleTask, onClose });
 
-    fireEvent.click(screen.getByRole('button', { name: '완료로 표시' }));
+    const check = screen.getByRole('checkbox', { name: '작업 완료' });
+    expect(check).not.toBeChecked();
+    fireEvent.click(check);
 
     expect(onToggleTask).toHaveBeenCalledWith(task);
     expect(onSelectTask).not.toHaveBeenCalled();
@@ -269,7 +273,7 @@ describe('TaskSidebar', () => {
     const onSelectTask = vi.fn();
     const onClose = vi.fn();
     renderSidebar({ choosingNextTask: true, onSelectTask, onClose });
-    fireEvent.click(screen.getByRole('button', { name: '작업 목록 닫기' }));
+    pressEscape();
     expect(onSelectTask).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -375,7 +379,7 @@ describe('TaskSidebar', () => {
     expect(toastMock.error).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '코딩 테스트 공부하기' }));
-    fireEvent.click(screen.getByRole('button', { name: '작업 목록 닫기' }));
+    pressEscape();
     await act(async () => { resolve(null); });
     expect(toastMock.error).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
@@ -445,7 +449,7 @@ describe('TaskSidebar', () => {
       ] });
       fireEvent.click(screen.getByRole('button', { name: '중간고사' }));
       fireEvent.click(screen.getByRole('button', { name: '중간고사 › A과목' }));
-      fireEvent.click(screen.getByRole('button', { name: '완료로 표시' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: `${detail.title} 완료` }));
       expect(onToggleSubtask).toHaveBeenCalledWith(detail);
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: detail.title })); });
       expect(onSelectSubtask).toHaveBeenCalledWith(detail);
@@ -537,7 +541,7 @@ describe('TaskSidebar', () => {
       renderSidebar({ longTermTasks: [exam], choosingNextTask: true, onSelectSubtask, onClose });
       fireEvent.click(screen.getByText('빅데이터분석기사'));
       fireEvent.click(screen.getByText('챕터1'));
-      fireEvent.click(screen.getByRole('button', { name: '작업 목록 닫기' }));
+      pressEscape();
       await act(async () => { resolveSelect(null); });
       expect(onClose).toHaveBeenCalledOnce();
       expect(toastMock.error).not.toHaveBeenCalled();
@@ -601,7 +605,9 @@ describe('TaskSidebar', () => {
       });
 
       fireEvent.click(screen.getByText('자격증'));
-      fireEvent.click(screen.getByRole('button', { name: '완료 해제' }));
+      const check = screen.getByRole('checkbox', { name: '챕터2 완료' });
+      expect(check).toBeChecked();
+      fireEvent.click(check);
 
       expect(onToggleSubtask).toHaveBeenCalledWith(chapter2);
       expect(onSelectSubtask).not.toHaveBeenCalled();
@@ -624,7 +630,7 @@ describe('TaskSidebar', () => {
       });
 
       fireEvent.click(screen.getByText('자격증'));
-      const toggle = screen.getByRole('button', { name: '완료 해제' });
+      const toggle = screen.getByRole('checkbox', { name: '챕터2 완료' });
 
       expect(toggle).toBeDisabled();
       expect(toggle).toHaveAttribute('aria-busy', 'true');
@@ -633,23 +639,21 @@ describe('TaskSidebar', () => {
     });
 
     it('sorts completed chapters last and strikes them through', () => {
-      const { container } = renderSidebar({ longTermTasks: [exam] });
+      renderSidebar({ longTermTasks: [exam] });
 
       fireEvent.click(screen.getByText('빅데이터분석기사'));
 
-      const text = container.textContent ?? '';
+      const text = pickerText();
       expect(text.indexOf('챕터1')).toBeLessThan(text.indexOf('챕터2'));
       expect(text.indexOf('챕터3')).toBeLessThan(text.indexOf('챕터2'));
-      expect(screen.getByText('챕터2').parentElement).toHaveClass(
-        'line-through'
-      );
-      expect(screen.getByText('챕터1').parentElement).not.toHaveClass(
+      expect(screen.getByText('챕터2')).toHaveClass('line-through');
+      expect(screen.getByText('챕터1').closest('button')).not.toHaveClass(
         'line-through'
       );
     });
 
     it('offers direct study without a disclosure for a task with no chapters', () => {
-      const { container } = renderSidebar({
+      renderSidebar({
         longTermTasks: [makeLongTermTask({ id: 'lt2', title: '빈 과제' })],
       });
 
@@ -659,7 +663,7 @@ describe('TaskSidebar', () => {
       expect(screen.queryByText('완료 0/0')).not.toBeInTheDocument();
       // 제목이 버튼이 아니고 aria-expanded 디스클로저도 노출하지 않는다.
       expect(screen.getByText('빈 과제').closest('button')).toBeNull();
-      expect(container.querySelector('[aria-expanded]')).toBeNull();
+      expect(screen.getByRole('dialog', { name: '작업 목록' }).querySelector('[aria-expanded]')).toBeNull();
     });
 
     it("marks chapters materialized today with an '오늘' chip", () => {
@@ -673,6 +677,121 @@ describe('TaskSidebar', () => {
       expect(screen.getAllByText('오늘', { selector: 'span' })).toHaveLength(1);
       const chip = screen.getByText('오늘', { selector: 'span' });
       expect(chip.closest('div')).toContainElement(screen.getAllByText('챕터1')[1]);
+    });
+  });
+
+  describe('picker rows', () => {
+    it('shows the subject, the active-task badge and goal beads for today tasks', () => {
+      renderSidebar({
+        selectedTaskId: 'algo',
+        subjects: [{ id: 'cs', user_id: 'user-1', name: '컴퓨터과학' }],
+        tasks: [
+          makeTask({ id: 'algo', title: '알고리즘 문제 풀기', subjectId: 'cs', pomodoroGoal: 4, pomodoroCount: 2 }),
+          makeTask({ id: 'eng', title: '영어 단어', pomodoroGoal: 2, pomodoroCount: 5 }),
+        ],
+        weeklyPlans: [makeTask({ id: 'week', title: '주간 정리', kind: 'weekly' })],
+      });
+
+      const active = screen.getByRole('button', { name: /알고리즘 문제 풀기/ });
+      expect(active).toHaveAttribute('aria-pressed', 'true');
+      expect(within(active).getByText('컴퓨터과학')).toBeInTheDocument();
+      expect(within(active).getByText('지금')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '영어 단어' })).toHaveAttribute('aria-pressed', 'false');
+
+      const goal = screen.getByRole('img', { name: '뽀모도로 2 / 4' });
+      expect(Array.from(goal.children).map(bead => bead.getAttribute('data-state'))).toEqual(['done', 'done', 'empty', 'empty']);
+      // 목표를 넘긴 작업은 목표만큼만 채운다.
+      const over = screen.getByRole('img', { name: '뽀모도로 5 / 2' });
+      expect(Array.from(over.children).map(bead => bead.getAttribute('data-state'))).toEqual(['done', 'done']);
+      // 주·월 계획에는 목표가 없어 구슬을 그리지 않는다.
+      expect(screen.getAllByRole('img')).toHaveLength(2);
+    });
+
+    it('gives the completion circle a 44px hit area that toggles without selecting the task', () => {
+      const onToggleTask = vi.fn();
+      const onSelectTask = vi.fn();
+      const task = makeTask({ id: 'a', title: '작업 A' });
+      renderSidebar({ tasks: [task], onToggleTask, onSelectTask });
+
+      const check = screen.getByRole('checkbox', { name: '작업 A 완료' });
+      const hitArea = check.closest('label')!;
+      expect(hitArea).toHaveClass('size-11');
+      // 원 바깥(라벨 여백)을 눌러도 완료만 바뀐다.
+      fireEvent.click(hitArea);
+      expect(onToggleTask).toHaveBeenCalledWith(task);
+      expect(onSelectTask).not.toHaveBeenCalled();
+    });
+
+    it('uses the deep rose for small badge text on the pink tint', () => {
+      renderSidebar({ selectedTaskId: 'a', tasks: [makeTask({ id: 'a', title: '작업 A' })] });
+      expect(screen.getByText('지금')).toHaveClass('text-pomo-deep', 'bg-pomo-tint');
+    });
+
+    it('focuses the active task when the popover opens', () => {
+      renderSidebar({
+        selectedTaskId: 'b',
+        tasks: [makeTask({ id: 'a', title: '작업 A' }), makeTask({ id: 'b', title: '작업 B' })],
+      });
+      expect(screen.getByRole('button', { name: /작업 B/ })).toHaveFocus();
+    });
+
+    it('invites signed-out users to log in instead of offering creation', () => {
+      const onOpenLogin = vi.fn();
+      const onClose = vi.fn();
+      renderSidebar({ onOpenLogin, onClose });
+
+      expect(screen.getByText('로그인하면 할 일을 추가하고 기록에 연결할 수 있어요.')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onOpenLogin).toHaveBeenCalledOnce();
+    });
+
+    it('closes only the add form on Escape and keeps the picker open', () => {
+      const onClose = vi.fn();
+      renderSidebar({ userId: 'user-1', onCreateTask: vi.fn(), onClose });
+      fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+      const input = screen.getByLabelText('새 작업 이름');
+      input.focus();
+      fireEvent.keyDown(input, { key: 'Escape' });
+
+      expect(screen.queryByLabelText('새 작업 이름')).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '작업 목록' })).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("offers '+ 새 과목' inside the subject list and explains where it goes", async () => {
+      renderSidebar({ userId: 'user-1', onCreateTask: vi.fn() });
+      fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+      const subject = screen.getByRole('combobox', { name: '과목' });
+      expect(subject).toHaveTextContent('제목에 맞춰 선택');
+      subject.focus();
+      fireEvent.keyDown(subject, { key: 'ArrowDown' });
+      expect((await screen.findAllByRole('option')).map(option => option.textContent))
+        .toEqual(['제목에 맞춰 선택', '미분류', '수학', '+ 새 과목']);
+      fireEvent.click(screen.getByRole('option', { name: '+ 새 과목' }));
+
+      expect(await screen.findByLabelText('새 과목 이름')).toBeInTheDocument();
+      expect(screen.getByText('새 과목은 설정의 과목 관리에도 들어가요')).toBeInTheDocument();
+    });
+  });
+
+  describe('mobile sheet', () => {
+    const originalMatchMedia = window.matchMedia;
+    afterEach(() => { window.matchMedia = originalMatchMedia; });
+
+    it('opens as a bottom sheet with a title and a close button', () => {
+      window.matchMedia = ((query: string) => ({
+        ...originalMatchMedia(query), matches: false,
+        addEventListener: () => {}, removeEventListener: () => {},
+      })) as typeof window.matchMedia;
+      const onClose = vi.fn();
+      renderSidebar({ tasks: [makeTask({ id: 'a', title: '작업 A' })], onClose });
+
+      const sheet = screen.getByRole('dialog', { name: '작업 목록' });
+      expect(sheet).toHaveAttribute('aria-modal', 'true');
+      expect(within(sheet).getByText('작업 A')).toBeInTheDocument();
+      fireEvent.click(within(sheet).getByRole('button', { name: '닫기' }));
+      expect(onClose).toHaveBeenCalledOnce();
     });
   });
 });

@@ -1,18 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import {
-  format,
-  getHours,
-  getMinutes,
-  subSeconds,
-} from 'date-fns';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { usePersistedState } from '@/hooks/usePersistedState';
+import { format, subSeconds } from 'date-fns';
+import Beads, { Bead } from '@/components/ui/Beads';
+import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
 import { supabase } from '@/lib/supabase';
 import { getCalendarStudyDayRange } from '@/lib/dateUtils';
+import { getSessionBatchKey, isPomodoroMode } from '@/lib/pomodoroCounts';
 import { cn } from '@/lib/utils';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { formatClock, formatStudyTime } from './planUi';
 import { usePlanRequestScope } from './usePlanRequestScope';
 
 interface TimelineProps {
@@ -27,6 +25,8 @@ interface SessionRow {
   mode: string;
   task: string | null;
   task_id: string | null;
+  session_batch_id?: string | null;
+  group_id?: string | null;
 }
 
 interface ProcessedSession extends SessionRow {
@@ -35,33 +35,130 @@ interface ProcessedSession extends SessionRow {
   _displayDuration: number;
 }
 
-const formatDuration = (seconds: number) => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
+// 같은 작업을 이어서 한 세션(사이 쉬는 시간 포함)은 블록 하나로 묶는다.
+interface TimelineBlock {
+  id: string;
+  tone: 'pomo' | 'watch';
+  title: string;
+  taskId: string | null;
+  start: Date;
+  end: Date;
+  seconds: number;
+  pomodoros: number;
+  sessions: ProcessedSession[];
+  /** 이 블록의 작업을 끝냈는지(완료한 작업의 블록은 채운 색으로 그린다) */
+  done: boolean;
+}
 
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
-  return `${remainingSeconds}s`;
-};
+const HOUR_HEIGHT = 60; // 1분 = 1px
+const DEFAULT_FIRST_HOUR = 8;
+const DEFAULT_LAST_HOUR = 21;
+const MERGE_GAP_MS = 10 * 60 * 1000;
+const BLOCK_MIN_HEIGHT = 28; // 제목 한 줄이 들어가는 높이
+const BLOCK_GAP = 2;
 
-function TimelineSessionBar({ session, leftPercent, widthPercent, open, onOpenChange }: {
-  session: ProcessedSession;
-  leftPercent: number;
-  widthPercent: number;
+const minutesFrom = (origin: Date, date: Date) => (date.getTime() - origin.getTime()) / 60000;
+
+type PlacedBlock = { block: TimelineBlock; top: number; height: number; lane: number; lanes: number };
+
+// 블록은 실제 시각 위치에 두고, 그려지는 높이(최소 높이 포함)가 겹치는 블록끼리 묶어
+// 묶음 안에서 비어 있는 칸(lane)에 나란히 놓는다. 그래서 짧은 기록도 서로 가리지 않는다.
+function placeTimelineBlocks(blocks: TimelineBlock[], origin: Date, firstHour: number): PlacedBlock[] {
+  const placed = blocks
+    .map((block) => {
+      const start = minutesFrom(origin, block.start);
+      const end = minutesFrom(origin, block.end);
+      return {
+        block,
+        top: start - firstHour * 60 + BLOCK_GAP,
+        height: Math.max(BLOCK_MIN_HEIGHT, end - start - BLOCK_GAP),
+        lane: 0,
+        lanes: 1,
+      };
+    })
+    .sort((a, b) => a.top - b.top);
+
+  let cluster: PlacedBlock[] = [];
+  let clusterBottom = -Infinity;
+  const laneBottoms: number[] = [];
+  const closeCluster = () => {
+    for (const item of cluster) item.lanes = laneBottoms.length;
+    cluster = [];
+    clusterBottom = -Infinity;
+    laneBottoms.length = 0;
+  };
+  for (const item of placed) {
+    if (cluster.length > 0 && item.top >= clusterBottom + BLOCK_GAP) closeCluster();
+    let lane = laneBottoms.findIndex((bottom) => item.top >= bottom + BLOCK_GAP);
+    if (lane === -1) lane = laneBottoms.length;
+    laneBottoms[lane] = item.top + item.height;
+    item.lane = lane;
+    cluster.push(item);
+    clusterBottom = Math.max(clusterBottom, item.top + item.height);
+  }
+  closeCluster();
+  return placed;
+}
+
+// 칸 위치는 정적 클래스가 --lane / --lanes로 계산한다(시각 눈금 칸 56px 오른쪽을 칸 수만큼 나눈다).
+const laneStyle = ({ top, height, lane, lanes }: PlacedBlock) =>
+  ({ top, height, '--lane': lane, '--lanes': lanes }) as CSSProperties;
+const LANE_CLASSES = 'left-[calc(56px_+_(100%_-_56px)_*_var(--lane)_/_var(--lanes))] w-[calc((100%_-_56px)_/_var(--lanes)_-_4px)]';
+
+function buildBlocks(sessions: ProcessedSession[], doneTaskIds: ReadonlySet<string>): TimelineBlock[] {
+  const blocks: TimelineBlock[] = [];
+  for (const session of [...sessions].sort((a, b) => a._displayStart.getTime() - b._displayStart.getTime())) {
+    const tone = isPomodoroMode(session.mode) ? 'pomo' : 'watch';
+    const title = session.task?.trim() || (tone === 'pomo' ? '뽀모도로' : '스톱워치');
+    const previous = blocks.at(-1);
+    const sameTask = previous && previous.tone === tone && (session.task_id
+      ? previous.taskId === session.task_id
+      : !previous.taskId && previous.title === title);
+    if (previous && sameTask && session._displayStart.getTime() - previous.end.getTime() <= MERGE_GAP_MS) {
+      previous.sessions.push(session);
+      if (session._displayEnd > previous.end) previous.end = session._displayEnd;
+      previous.seconds += session._displayDuration;
+      continue;
+    }
+    blocks.push({
+      id: session.id,
+      tone,
+      title,
+      taskId: session.task_id,
+      start: session._displayStart,
+      end: session._displayEnd,
+      seconds: session._displayDuration,
+      pomodoros: 0,
+      sessions: [session],
+      done: Boolean(session.task_id && doneTaskIds.has(session.task_id)),
+    });
+  }
+  for (const block of blocks) {
+    block.pomodoros = block.tone === 'pomo'
+      ? new Set(block.sessions.map((session) => getSessionBatchKey(session))).size
+      : 0;
+  }
+  return blocks;
+}
+
+// 블록(데스크톱)과 목록 행(모바일)이 같이 쓰는 상세 트리거: 마우스 올림·포커스·탭으로 열고 Escape·밖 누르기로 닫는다.
+function TimelineBlockTrigger({ block, origin, open, onOpenChange, className, style, children, ...dataAttributes }: {
+  block: TimelineBlock;
+  origin: Date;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  className: string;
+  style?: CSSProperties;
+  children: ReactNode;
+  [dataAttribute: `data-${string}`]: string | number;
 }) {
   const titleId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isFocus = session.mode === 'focus' || session.mode === 'pomo';
-  const task = session.task?.trim() || '작업 메모 없음';
-  const hours = Math.floor(session._displayDuration / 3600);
-  const minutes = Math.floor((session._displayDuration % 3600) / 60);
-  const seconds = session._displayDuration % 60;
-  const duration = [hours > 0 && `${hours}시간`, minutes > 0 && `${minutes}분`, (seconds > 0 || (!hours && !minutes)) && `${seconds}초`].filter(Boolean).join(' ');
+  const isPomo = block.tone === 'pomo';
+  const range = `${formatClock(minutesFrom(origin, block.start))}–${formatClock(minutesFrom(origin, block.end))}`;
+  const duration = formatStudyTime(block.seconds);
 
   const clearCloseTimer = () => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
@@ -86,7 +183,7 @@ function TimelineSessionBar({ session, leftPercent, widthPercent, open, onOpenCh
         <button
           ref={triggerRef}
           type="button"
-          aria-label={`${task} 세션 정보`}
+          aria-label={`${block.title} 기록 정보, ${range}, ${isPomo ? `뽀모도로 ${block.pomodoros}개` : `스톱워치 ${duration}`}`}
           onPointerEnter={event => { if (event.pointerType !== 'touch') show(); }}
           onPointerLeave={event => { if (event.pointerType !== 'touch') scheduleHide(); }}
           onFocus={show}
@@ -94,14 +191,14 @@ function TimelineSessionBar({ session, leftPercent, widthPercent, open, onOpenCh
           onClick={event => { event.preventDefault(); show(); }}
           onKeyDown={event => {
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hide(); }
-            if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
+            stopActivationKeys(event);
           }}
-          className={cn(
-            'absolute h-full cursor-pointer opacity-80 transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-900/60 dark:focus-visible:ring-white/80',
-            isFocus ? 'bg-rose-500' : 'bg-sky-500',
-          )}
-          style={{ left: `${leftPercent}%`, width: `${Math.max(widthPercent, 0.5)}%` }}
-        />
+          className={className}
+          style={style}
+          {...dataAttributes}
+        >
+          {children}
+        </button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
@@ -111,32 +208,46 @@ function TimelineSessionBar({ session, leftPercent, widthPercent, open, onOpenCh
           collisionPadding={12}
           aria-labelledby={titleId}
           onOpenAutoFocus={event => event.preventDefault()}
+          // 트리거가 포커스로 열리므로 닫힐 때 포커스를 트리거로 돌려주지 않는다(guardClosingPopovers도 안의 포커스만 놓는다).
           onCloseAutoFocus={event => event.preventDefault()}
+          data-close-autofocus="off"
           onPointerEnter={clearCloseTimer}
           onPointerLeave={scheduleHide}
           onEscapeKeyDown={event => event.stopPropagation()}
-          className="ui-popover z-80 max-h-(--radix-popover-content-available-height) w-70 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xl shadow-slate-900/10 outline-none dark:border-slate-700 dark:bg-slate-800 dark:shadow-black/30"
+          onKeyDown={stopAllKeys}
+          className="ui-popover ui-popover-surface z-80 max-h-(--radix-popover-content-available-height) w-70 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto p-4 outline-none"
         >
-          <span className={cn(
-            'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium',
-            isFocus ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300',
-          )}>
-            <span aria-hidden="true" className={cn('h-1.5 w-1.5 rounded-full', isFocus ? 'bg-rose-500' : 'bg-sky-500')} />
-            {isFocus ? '뽀모도로' : '스톱워치'}
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted">
+            <Bead state="done" tone={block.tone} size={6} />
+            {isPomo ? '뽀모도로' : '스톱워치'}
           </span>
-          <h4 id={titleId} className="mt-2 text-sm font-semibold leading-6 text-slate-800 [overflow-wrap:anywhere] dark:text-slate-100">{task}</h4>
-          <dl className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-t border-slate-100 pt-3 text-xs dark:border-slate-700">
+          <h4 id={titleId} className="mt-1.5 text-[15px] font-semibold leading-6 [overflow-wrap:anywhere]">{block.title}</h4>
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
             <div>
-              <dt className="text-[11px] text-slate-400">시간</dt>
-              <dd className="mt-1 whitespace-nowrap font-medium tabular-nums text-slate-600 dark:text-slate-300">
-                {format(session._displayStart, 'HH:mm')}–{format(session._displayEnd, 'HH:mm')}
-              </dd>
+              <dt className="text-ink-subtle">시간</dt>
+              <dd className="mt-0.5 font-semibold whitespace-nowrap">{range}</dd>
             </div>
             <div>
-              <dt className="text-[11px] text-slate-400">집중시간</dt>
-              <dd className={cn('mt-1 font-semibold tabular-nums', isFocus ? 'text-rose-600 dark:text-rose-300' : 'text-sky-600 dark:text-sky-300')}>{duration}</dd>
+              <dt className="text-ink-subtle">집중 시간</dt>
+              <dd className={cn('mt-0.5 font-semibold', isPomo ? 'text-pomo-deep' : 'text-watch-deep')}>{duration}</dd>
             </div>
+            {isPomo ? (
+              <div>
+                <dt className="text-ink-subtle">끝낸 뽀모도로</dt>
+                <dd className="mt-0.5 font-semibold">{block.pomodoros}개</dd>
+              </div>
+            ) : null}
           </dl>
+          {block.sessions.length > 1 ? (
+            <ul className="mt-3 flex flex-col gap-0.5 text-[13px] text-ink-muted">
+              {block.sessions.map((session) => (
+                <li key={session.id}>
+                  {formatClock(minutesFrom(origin, session._displayStart))}–{formatClock(minutesFrom(origin, session._displayEnd))}
+                  {' · '}{formatStudyTime(session._displayDuration)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
@@ -156,12 +267,10 @@ export default function Timeline({ selectedDate, userId }: TimelineProps) {
 function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
   const scopeRef = usePlanRequestScope();
   const [sessions, setSessions] = useState<ProcessedSession[]>([]);
+  const [doneTaskIds, setDoneTaskIds] = useState<ReadonlySet<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
-  const [activeBarId, setActiveBarId] = useState<string | null>(null);
-  const [isExpanded, setIsExpanded] = usePersistedState(
-    'timeline_expanded',
-    true
-  );
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const isDesktop = useIsDesktop();
 
   const fetchSessions = useCallback(async () => {
     const scope = scopeRef.current;
@@ -186,7 +295,7 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
 
     const { data, error } = await supabase
       .from('study_sessions')
-      .select('id, created_at, duration, mode, task, task_id')
+      .select('id, created_at, duration, mode, task, task_id, session_batch_id, group_id')
       .eq('user_id', userId)
       .gte('created_at', queryStart.toISOString())
       .lte('created_at', dayEnd.toISOString())
@@ -233,7 +342,27 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
       })
       .filter((session): session is ProcessedSession => session !== null);
 
+    // 끝낸 작업의 블록은 채운 색으로 그리므로 연결된 작업의 상태를 읽는다.
+    const taskIds = [...new Set(processedSessions.flatMap((session) => session.task_id ? [session.task_id] : []))];
+    const nextDoneTaskIds = new Set<string>();
+    if (taskIds.length > 0) {
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .select('id, status')
+        .eq('user_id', userId)
+        .in('id', taskIds);
+      if (!isCurrent()) return;
+      if (taskError) {
+        console.error('Error fetching timeline task status:', taskError);
+      } else {
+        for (const task of (taskData ?? []) as Array<{ id: string; status: string }>) {
+          if (task.status === 'done') nextDoneTaskIds.add(task.id);
+        }
+      }
+    }
+
     setSessions(processedSessions);
+    setDoneTaskIds(nextDoneTaskIds);
     setLoading(false);
   }, [scopeRef, selectedDate, userId]);
 
@@ -263,6 +392,18 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
           refresh();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'tasks',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          refresh();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -272,149 +413,111 @@ function ScopedTimeline({ selectedDate, userId }: TimelineProps) {
   }, [fetchSessions, scopeRef, userId]);
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">타임라인을 불러오는 중...</div>;
+    return <p className="m-0 py-4 text-sm text-ink-muted">타임라인을 불러오는 중...</p>;
   }
 
-  if (sessions.length === 0) {
+  // 축은 선택한 날짜 0시 기준 분. 공부일이 다음날 04:59까지라 24시를 넘을 수 있다.
+  const origin = new Date(selectedDate);
+  origin.setHours(0, 0, 0, 0);
+  const blocks = buildBlocks(sessions, doneTaskIds);
+  const firstHour = Math.min(DEFAULT_FIRST_HOUR, ...blocks.map((block) => Math.floor(minutesFrom(origin, block.start) / 60)));
+  const lastHour = Math.max(DEFAULT_LAST_HOUR, ...blocks.map((block) => Math.ceil(minutesFrom(origin, block.end) / 60) - 1));
+  const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
+  const toggleBlock = (blockId: string) => (next: boolean) =>
+    setActiveBlockId(current => next ? blockId : current === blockId ? null : current);
+  const emptyText = '이날 기록된 활동이 없어요.';
+
+  // 모바일 보드의 목록 행: min-height 58px + 위아래 6px(content-box) = 바깥 70px.
+  // 행 전체가 상세 트리거라 끝 시각, 긴 제목 전체, 묶인 기록마다의 시간을 볼 수 있다.
+  if (!isDesktop) {
+    if (blocks.length === 0) return <p className="m-0 text-sm text-ink-muted">{emptyText}</p>;
     return (
-      <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800">
-        <p>이날 기록된 활동이 없어요.</p>
-      </div>
+      <ul className="m-0 flex list-none flex-col p-0">
+        {blocks.map((block) => (
+          <li key={block.id} className="-mx-3">
+            <TimelineBlockTrigger
+              block={block}
+              origin={origin}
+              open={activeBlockId === block.id}
+              onOpenChange={toggleBlock(block.id)}
+              className="flex min-h-[70px] w-full items-center gap-3 rounded-tile px-3 py-1.5 text-left transition-colors hover:bg-hover"
+            >
+              <span className="w-[46px] shrink-0 text-[13px] font-semibold text-ink-muted">
+                {formatClock(minutesFrom(origin, block.start))}
+              </span>
+              <span
+                aria-hidden="true"
+                className={cn('h-9 w-1 shrink-0 rounded-[2px]', block.tone === 'pomo' ? 'bg-pomo' : 'bg-watch')}
+              />
+              <span className="flex min-w-0 flex-1 flex-col gap-[5px]">
+                <span className={cn('truncate text-[15px] font-semibold', block.done ? 'text-ink-muted' : 'text-ink')}>
+                  {block.title}
+                </span>
+                <span className="flex min-w-0 items-center gap-2 text-xs text-ink-subtle">
+                  {block.tone === 'pomo' ? (
+                    <Beads label={`뽀모도로 ${block.pomodoros}개`} done={block.pomodoros} />
+                  ) : (
+                    <span>스톱워치</span>
+                  )}
+                  <span className="whitespace-nowrap">
+                    {formatClock(minutesFrom(origin, block.start))}–{formatClock(minutesFrom(origin, block.end))}
+                  </span>
+                </span>
+              </span>
+              <span className="shrink-0 text-[13px] text-ink-muted">{formatStudyTime(block.seconds)}</span>
+            </TimelineBlockTrigger>
+          </li>
+        ))}
+      </ul>
     );
   }
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <div
-        className="mb-6 flex cursor-pointer items-center justify-between lg:cursor-default"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-          타임라인
-        </h3>
-        <div className="text-gray-400 lg:hidden">
-          {isExpanded ? (
-            <ChevronUp className="h-5 w-5" />
-          ) : (
-            <ChevronDown className="h-5 w-5" />
-          )}
+    <div className="relative" style={{ height: hours.length * HOUR_HEIGHT }}>
+      {hours.map((hour, index) => (
+        <div
+          key={hour}
+          className="absolute right-0 left-0 h-[60px] border-t border-line-faint"
+          style={{ top: index * HOUR_HEIGHT }}
+        >
+          <span className="block w-12 pt-1.5 text-xs font-medium text-ink-faint">{formatClock(hour * 60)}</span>
         </div>
-      </div>
-
-      <div className="mb-8">
-        <div className="relative flex h-4 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-          {[0, 6, 12, 18, 24].map((hour) => (
-            <div
-              key={hour}
-              className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-gray-300 dark:border-gray-600"
-              style={{ left: `${(hour / 24) * 100}%` }}
-            />
-          ))}
-
-          {sessions.flatMap((session) => {
-            // 05:00 분할 도입 후 행이 자정을 가로지를 수 있어, 00:00~24:00
-            // 시계 축 막대는 자정에서 조각내 각각 제 위치에 그린다.
-            const segments: { start: Date; end: Date }[] = [];
-            let segmentStart = session._displayStart;
-            while (segmentStart < session._displayEnd) {
-              const nextMidnight = new Date(segmentStart);
-              nextMidnight.setDate(nextMidnight.getDate() + 1);
-              nextMidnight.setHours(0, 0, 0, 0);
-              const segmentEnd =
-                nextMidnight < session._displayEnd ? nextMidnight : session._displayEnd;
-              segments.push({ start: segmentStart, end: segmentEnd });
-              segmentStart = segmentEnd;
-            }
-
-            return segments.map((segment, segmentIndex) => {
-              const startMinutes =
-                getHours(segment.start) * 60 + getMinutes(segment.start);
-              const durationMinutes =
-                (segment.end.getTime() - segment.start.getTime()) / 60000;
-              const leftPercent = (startMinutes / 1440) * 100;
-              const widthPercent = (durationMinutes / 1440) * 100;
-              const barId = `${session.id}-${segmentIndex}`;
-
-              return (
-                <TimelineSessionBar
-                  key={barId}
-                  session={session}
-                  leftPercent={leftPercent}
-                  widthPercent={widthPercent}
-                  open={activeBarId === barId}
-                  onOpenChange={next => setActiveBarId(current => next ? barId : current === barId ? null : current)}
-                />
-              );
-            });
-          })}
-        </div>
-        <div className="mt-1 flex justify-between px-1 text-xs text-gray-400">
-          <span>00:00</span>
-          <span>06:00</span>
-          <span>12:00</span>
-          <span>18:00</span>
-          <span>24:00</span>
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          'relative ml-3 space-y-6 border-l-2 border-gray-200 transition-all duration-300 dark:border-gray-700',
-          !isExpanded && 'hidden lg:block'
-        )}
-      >
-        {sessions.map((session) => {
-          const startTime = session._displayStart;
-          const endTime = session._displayEnd;
-          const displayDuration = session._displayDuration;
-          const isFocus = session.mode === 'focus' || session.mode === 'pomo';
-          const isBreak =
-            session.mode === 'shortBreak' || session.mode === 'longBreak';
-
-          let dotColor = 'bg-sky-500';
-          let cardBackground = 'bg-sky-50 dark:bg-sky-900/20';
-          let textColor = 'text-sky-900 dark:text-sky-100';
-          let borderColor = 'border-sky-100 dark:border-sky-800/50';
-
-          if (isFocus) {
-            dotColor = 'bg-rose-500';
-            cardBackground = 'bg-rose-50 dark:bg-rose-900/20';
-            textColor = 'text-rose-900 dark:text-rose-100';
-            borderColor = 'border-rose-100 dark:border-rose-800/50';
-          } else if (isBreak) {
-            dotColor = 'bg-emerald-500';
-            cardBackground = 'bg-emerald-50 dark:bg-emerald-900/20';
-            textColor = 'text-emerald-900 dark:text-emerald-100';
-            borderColor = 'border-emerald-100 dark:border-emerald-800/50';
-          }
-
-          return (
-            <div key={session.id} className="relative pl-6">
-              <div
-                className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white dark:border-gray-800 ${dotColor}`}
-              />
-
-              <div className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
-                {format(startTime, 'HH:mm')} - {format(endTime, 'HH:mm')}
-                <span className="ml-2 text-gray-400">
-                  ({formatDuration(displayDuration)})
-                </span>
-              </div>
-
-              <div className={`rounded-lg border p-3 ${borderColor} ${cardBackground}`}>
-                <div className={`font-medium [overflow-wrap:anywhere] ${textColor}`}>
-                  {session.task || (isFocus ? 'Focus Session' : 'Session')}
-                </div>
-                {session.mode && (
-                  <div className="mt-1 text-xs capitalize opacity-75">
-                    {session.mode.replace(/([A-Z])/g, ' $1').trim()}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      ))}
+      {placeTimelineBlocks(blocks, origin, firstHour).map((item) => {
+        const { block, height, lanes } = item;
+        const isPomo = block.tone === 'pomo';
+        const compact = height < 32;
+        return (
+          <TimelineBlockTrigger
+            key={block.id}
+            block={block}
+            origin={origin}
+            open={activeBlockId === block.id}
+            onOpenChange={toggleBlock(block.id)}
+            data-lane={item.lane}
+            data-lanes={lanes}
+            className={cn(
+              'absolute flex items-start justify-between gap-2 overflow-hidden rounded-control text-left text-sm leading-[1.3] transition-[filter] hover:brightness-97',
+              lanes > 1 ? cn(LANE_CLASSES, 'px-2.5') : 'right-0 left-14 px-3.5',
+              compact ? 'py-1' : 'py-1.5',
+              isPomo
+                ? block.done ? 'ui-focus-ink bg-pomo text-white [--bead-on:var(--color-white)]' : 'bg-pomo-tint text-pomo-deep'
+                : block.done ? 'ui-focus-ink bg-watch text-white' : 'bg-watch-tint text-watch-deep',
+            )}
+            style={laneStyle(item)}
+          >
+            <span className="min-w-0 truncate font-semibold">{block.title}</span>
+            {isPomo ? (
+              <Beads label={`뽀모도로 ${block.pomodoros}개`} done={block.pomodoros} className={compact ? 'pt-1' : 'pt-[5px]'} />
+            ) : (
+              <span className="shrink-0 text-[13px] font-semibold">{formatStudyTime(block.seconds)}</span>
+            )}
+          </TimelineBlockTrigger>
+        );
+      })}
+      {blocks.length === 0 ? (
+        <p className="absolute top-[18px] left-14 m-0 text-ink-muted">{emptyText}</p>
+      ) : null}
     </div>
   );
 }

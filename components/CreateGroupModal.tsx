@@ -1,20 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'react-hot-toast';
+import ModalDialog from '@/components/ui/ModalDialog';
+import { readGroupId } from '@/components/groups/groupUtils';
 
 interface CreateGroupModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onCreated: () => void;
+    /** 만든 그룹의 id(RPC가 돌려준 경우)를 넘긴다. */
+    onCreated: (groupId?: string) => void;
 }
 
 export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateGroupModalProps) {
+    const titleId = useId();
+    const inputId = useId();
+    const inputRef = useRef<HTMLInputElement>(null);
     const [name, setName] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    if (!isOpen) return null;
+    const handleClose = () => {
+        setName('');
+        onClose();
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -24,67 +33,71 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                toast.error('로그인이 필요합니다');
+                toast.error('로그인이 필요해요.');
                 return;
             }
 
-            const { error: groupError } = await supabase
+            const { data, error: groupError } = await supabase
                 .rpc('create_group', {
                     p_name: name.trim(),
                 });
 
             if (groupError) throw groupError;
 
-            toast.success('그룹이 생성되었습니다!');
+            toast.success('그룹을 만들었어요.');
             setName('');
-            onCreated();
+            onCreated(readGroupId(data));
             onClose();
         } catch (error) {
             console.error('Error creating group:', error);
-            toast.error('그룹 생성에 실패했습니다');
+            toast.error('그룹을 만들지 못했어요.');
         } finally {
             setIsSubmitting(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
-                <div className="p-4 sm:p-6">
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">새 그룹 만들기</h2>
-                    <form onSubmit={handleSubmit}>
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                그룹 이름
-                            </label>
-                            <input
-                                type="text"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                placeholder="예: 아침형 인간 🌞"
-                                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-rose-500 focus:border-transparent outline-none transition-all"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-3">
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="px-5 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl font-medium transition-colors"
-                            >
-                                취소
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={!name.trim() || isSubmitting}
-                                className="px-5 py-2.5 bg-rose-500 text-white rounded-xl font-bold shadow-lg hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform active:scale-95"
-                            >
-                                {isSubmitting ? '생성 중...' : '그룹 만들기'}
-                            </button>
-                        </div>
-                    </form>
+        <ModalDialog
+            open={isOpen}
+            onClose={handleClose}
+            aria-labelledby={titleId}
+            initialFocusRef={inputRef}
+        >
+            <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+            <h2 id={titleId} className="ui-dialog-title">새 그룹</h2>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4 md:gap-5">
+                <div className="flex flex-col gap-1.5">
+                    <label htmlFor={inputId} className="text-[13px] font-semibold text-ink-muted">
+                        그룹 이름
+                    </label>
+                    <input
+                        ref={inputRef}
+                        id={inputId}
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="예: 기말고사 2주 작전"
+                        autoComplete="off"
+                        className="ui-input min-h-12 rounded-tile"
+                    />
                 </div>
-            </div>
-        </div>
+                <div className="flex gap-2 pt-1 md:justify-end md:pt-0">
+                    <button
+                        type="button"
+                        onClick={handleClose}
+                        className="ui-button-secondary min-h-[50px] flex-1 rounded-tile px-5 md:min-h-12 md:flex-none"
+                    >
+                        취소
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={!name.trim() || isSubmitting}
+                        className="ui-button-primary ui-press min-h-[50px] flex-1 rounded-tile px-6 md:min-h-12 md:flex-none"
+                    >
+                        {isSubmitting ? '만드는 중…' : '만들기'}
+                    </button>
+                </div>
+            </form>
+        </ModalDialog>
     );
 }

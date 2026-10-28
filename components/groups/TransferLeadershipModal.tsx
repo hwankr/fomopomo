@@ -1,8 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
+import ConfirmModal from '@/components/ConfirmModal';
+import Avatar from '@/components/ui/Avatar';
+import ModalDialog from '@/components/ui/ModalDialog';
+import { cn } from '@/lib/utils';
+import { getMemberDisplayName } from './groupUtils';
 
 interface Member {
     id: string;
@@ -39,7 +45,10 @@ export default function TransferLeadershipModal({
     currentUserId,
     onTransferred,
 }: TransferLeadershipModalProps) {
+    const titleId = useId();
+    const descriptionId = useId();
     const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [isTransferring, setIsTransferring] = useState(false);
 
     const getErrorMessage = (error: unknown) => {
@@ -55,22 +64,22 @@ export default function TransferLeadershipModal({
 
     // 본인을 제외한 멤버 목록
     const otherMembers = members.filter((m) => m.user_id !== currentUserId);
+    const selectedMember = otherMembers.find((m) => m.user_id === selectedMemberId);
+    const selectedName = selectedMember ? getMemberDisplayName(selectedMember) : '멤버';
+
+    const handleRequestTransfer = () => {
+        if (!selectedMemberId) {
+            toast.error('새 그룹장을 골라 주세요.');
+            return;
+        }
+        setIsConfirmOpen(true);
+    };
 
     const handleTransfer = async () => {
-        if (!selectedMemberId) {
-            toast.error('새 그룹장을 선택해주세요.');
-            return;
-        }
-
-        const selectedMember = otherMembers.find((m) => m.user_id === selectedMemberId);
-        const memberName = selectedMember?.nickname || selectedMember?.profiles.email.split('@')[0] || '멤버';
-
-        if (!confirm(`${memberName}님에게 그룹장을 넘기시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
-            return;
-        }
+        if (!selectedMemberId) return;
 
         setIsTransferring(true);
-        const toastId = toast.loading('그룹장 이양 중...');
+        const toastId = toast.loading('그룹장을 넘기는 중이에요…');
 
         try {
             const { error } = await supabase
@@ -81,112 +90,105 @@ export default function TransferLeadershipModal({
 
             if (error) throw error;
 
-            toast.success(`${memberName}님이 새 그룹장이 되었습니다!`, { id: toastId });
+            toast.success(`${selectedName}님이 새 그룹장이 됐어요.`, { id: toastId });
             onTransferred();
             onClose();
         } catch (error) {
             console.error('Error transferring leadership:', error);
             const errorMessage = getErrorMessage(error);
-            toast.error(errorMessage || '그룹장 이양에 실패했습니다.', { id: toastId });
+            toast.error(errorMessage || '그룹장을 넘기지 못했어요.', { id: toastId });
         } finally {
             setIsTransferring(false);
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col">
-                {/* Header */}
-                <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-gray-100 dark:border-slate-700">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">그룹장 이양</h2>
-                    <p className="break-words text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        {groupName}의 새 그룹장을 선택하세요
+        <>
+            <ModalDialog
+                open={isOpen}
+                onClose={onClose}
+                aria-labelledby={titleId}
+                aria-describedby={descriptionId}
+            >
+                <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+                <div className="flex flex-col gap-1">
+                    <h2 id={titleId} className="ui-dialog-title">그룹장 넘기기</h2>
+                    <p id={descriptionId} className="m-0 text-sm break-words text-ink-muted md:text-[15px]">
+                        {groupName}의 새 그룹장을 골라 주세요.
                     </p>
                 </div>
 
-                {/* Content */}
-                <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
-                    {otherMembers.length === 0 ? (
-                        <div className="text-center py-8">
-                            <div className="text-4xl mb-3">👤</div>
-                            <p className="text-gray-500 dark:text-gray-400">
-                                그룹에 다른 멤버가 없습니다.
-                            </p>
-                            <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                                그룹장을 이양하려면 먼저 멤버를 초대하세요.
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="space-y-2">
+                {otherMembers.length === 0 ? (
+                    <p className="m-0 text-sm text-ink-muted md:text-[15px]">
+                        그룹에 다른 멤버가 없어요. 먼저 멤버를 초대해 주세요.
+                    </p>
+                ) : (
+                    <div className="flex flex-col gap-2">
+                        <ul aria-label="멤버" className="m-0 flex list-none flex-col gap-0.5 p-0">
                             {otherMembers.map((member) => {
-                                const displayName = member.nickname || member.profiles.email.split('@')[0];
+                                const displayName = getMemberDisplayName(member);
                                 const isSelected = selectedMemberId === member.user_id;
 
                                 return (
-                                    <button
-                                        key={member.id}
-                                        onClick={() => setSelectedMemberId(member.user_id)}
-                                        className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${isSelected
-                                                ? 'bg-rose-50 dark:bg-rose-900/20 border-2 border-rose-500'
-                                                : 'bg-gray-50 dark:bg-slate-700 border-2 border-transparent hover:bg-gray-100 dark:hover:bg-slate-600'
-                                            }`}
-                                    >
-                                        <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-orange-400 flex items-center justify-center text-white font-bold">
-                                            {displayName.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="min-w-0 flex-1 text-left">
-                                            <p className="truncate font-medium text-gray-900 dark:text-white" title={displayName}>{displayName}</p>
-                                            <p className="truncate text-xs text-gray-500 dark:text-gray-400" title={member.profiles.email}>
-                                                {member.profiles.email}
-                                            </p>
-                                        </div>
-                                        {isSelected && (
-                                            <div className="shrink-0 w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center">
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                                </svg>
-                                            </div>
-                                        )}
-                                    </button>
+                                    <li key={member.id}>
+                                        <button
+                                            type="button"
+                                            aria-pressed={isSelected}
+                                            onClick={() => setSelectedMemberId(member.user_id)}
+                                            className={cn(
+                                                '-mx-3 flex min-h-14 w-[calc(100%+24px)] items-center gap-3 rounded-tile px-3 text-left transition-colors',
+                                                isSelected ? 'bg-surface' : 'hover:bg-hover',
+                                            )}
+                                        >
+                                            <Avatar name={displayName} />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate font-semibold" title={displayName}>{displayName}</span>
+                                                <span className="block truncate text-xs text-ink-subtle" title={member.profiles.email}>
+                                                    {member.profiles.email}
+                                                </span>
+                                            </span>
+                                            {isSelected && (
+                                                <Check aria-hidden="true" size={20} strokeWidth={2.2} className="shrink-0 text-pomo" />
+                                            )}
+                                        </button>
+                                    </li>
                                 );
                             })}
-                        </div>
-                    )}
+                        </ul>
+                        <p className="m-0 text-[13px] text-ink-muted">그룹장을 넘기면 되돌릴 수 없어요.</p>
+                    </div>
+                )}
 
-                    {/* Warning */}
-                    {otherMembers.length > 0 && (
-                        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-                            <div className="flex gap-2">
-                                <span className="text-amber-500">⚠️</span>
-                                <p className="text-sm text-amber-700 dark:text-amber-300">
-                                    그룹장을 넘기면 되돌릴 수 없습니다. 신중하게 선택하세요.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer */}
-                <div className="shrink-0 px-4 sm:px-6 py-4 bg-gray-50 dark:bg-slate-700/50 flex flex-wrap gap-3 justify-end">
+                <div className="flex gap-2 pt-1 md:justify-end md:pt-0">
                     <button
+                        type="button"
                         onClick={onClose}
-                        className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600 rounded-lg transition-colors"
+                        className="ui-button-secondary min-h-[50px] flex-1 rounded-tile px-5 md:min-h-12 md:flex-none"
                     >
                         취소
                     </button>
                     {otherMembers.length > 0 && (
                         <button
-                            onClick={handleTransfer}
+                            type="button"
+                            onClick={handleRequestTransfer}
                             disabled={!selectedMemberId || isTransferring}
-                            className="px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="ui-button-primary ui-press min-h-[50px] flex-1 rounded-tile px-6 md:min-h-12 md:flex-none"
                         >
-                            {isTransferring ? '이양 중...' : '그룹장 이양'}
+                            {isTransferring ? '넘기는 중…' : '그룹장 넘기기'}
                         </button>
                     )}
                 </div>
-            </div>
-        </div>
+            </ModalDialog>
+
+            <ConfirmModal
+                isOpen={isOpen && isConfirmOpen}
+                onClose={() => setIsConfirmOpen(false)}
+                onConfirm={() => void handleTransfer()}
+                title="그룹장을 넘길까요?"
+                message={`${selectedName}님이 새 그룹장이 돼요. 넘긴 뒤에는 되돌릴 수 없어요.`}
+                confirmText="넘기기"
+                confirmTone="danger"
+            />
+        </>
     );
 }

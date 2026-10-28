@@ -104,6 +104,18 @@ describe('timer task creation', () => {
     }
   });
 
+  it('never writes an empty subject id (a uuid column would reject it)', async () => {
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.dbTasks).toHaveLength(1));
+
+    await act(async () => {
+      const created = await result.current.createTask({ title: '빈 과목 값', kind: 'weekly', subjectId: '' });
+      expect(created).toMatchObject({ subjectId: null });
+    });
+
+    expect(writes).toEqual([{ table: 'weekly_plans', input: expect.objectContaining({ subject_id: null }) }]);
+  });
+
   it('rejects blank titles, signed-out writes and mismatched authenticated owners', async () => {
     const { result, rerender } = renderHook(({ loggedIn }) => useTasks(loggedIn), { initialProps: { loggedIn: false } });
     const input = { title: '작업', kind: 'weekly' as TaskKind, subjectId: null };

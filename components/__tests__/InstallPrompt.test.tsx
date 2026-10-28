@@ -145,6 +145,128 @@ describe('InstallPrompt', () => {
     ).toBeNull();
   });
 
+  it('shows the prompt as a modal dialog and closes it from the backdrop with a cooldown', () => {
+    render(<InstallPrompt />);
+
+    const dialog = screen.getByRole('dialog', {
+      name: '더 빠르게 이용하려면 앱을 설치하세요.',
+    });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    const backdrop = dialog.parentElement as HTMLElement;
+
+    // 패널 안을 눌러도 닫히지 않는다.
+    fireEvent.click(dialog);
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).toBeNull();
+
+    act(() => {
+      fireEvent.click(backdrop);
+    });
+    // 따로 기다리지 않는다: 퇴장 애니메이션이 없으면(테스트 환경·동작 줄이기) 바로 닫힌다.
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
+    expect(
+      window.localStorage.getItem('pwa_prompt_permanently_dismissed')
+    ).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps keyboard focus in the prompt, makes the page inert and closes on Escape with a cooldown', () => {
+    const { container } = render(
+      <>
+        <button type="button">배경 버튼</button>
+        <InstallPrompt />
+      </>
+    );
+
+    const close = screen.getByRole('button', { name: '설치 안내 닫기' });
+    const neverAgain = screen.getByRole('button', { name: '다시 보지 않기' });
+    expect(close).toHaveFocus();
+    expect(container).toHaveAttribute('inert');
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(neverAgain).toHaveFocus();
+    fireEvent.keyDown(neverAgain, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    act(() => {
+      fireEvent.keyDown(close, { key: 'Escape' });
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
+    expect(
+      window.localStorage.getItem('pwa_prompt_permanently_dismissed')
+    ).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(container).not.toHaveAttribute('inert');
+  });
+
+  it('closes through the shared dialog exit: the page is released at once, the panel leaves after its animation', async () => {
+    // 브라우저처럼 닫힌 덮개에서 퇴장 애니메이션이 도는 것으로 꾸민다.
+    let finishExit!: () => void;
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value(this: Element) {
+        if (!this.classList.contains('ui-dialog-overlay') || this.getAttribute('data-state') !== 'closed') return [];
+        const finished = new Promise<void>((resolve) => { finishExit = resolve; });
+        return [{ playState: 'running', currentTime: 0, finished, effect: { getTiming: () => ({ iterations: 1 }), getComputedTiming: () => ({ endTime: 200 }) } }];
+      },
+    });
+    try {
+      const { container } = render(
+        <>
+          <button type="button">배경 버튼</button>
+          <InstallPrompt />
+        </>
+      );
+      expect(container).toHaveAttribute('inert');
+
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: '설치 안내 닫기' }));
+      });
+
+      const overlay = document.querySelector('.ui-dialog-overlay');
+      expect(overlay).toHaveAttribute('data-state', 'closed');
+      expect(overlay).toHaveAttribute('inert');
+      expect(container).not.toHaveAttribute('inert');
+      expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
+      // 사라지는 동안에도 마지막 내용(iOS 안내)을 그대로 보여 준다.
+      expect(overlay).toHaveTextContent('홈 화면에 추가를 선택하세요.');
+
+      await act(async () => finishExit());
+      expect(document.querySelector('.ui-dialog-overlay')).toBeNull();
+    } finally {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+    }
+  });
+
+  it('closes immediately with reduced motion even if an exit animation would run', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes('prefers-reduced-motion'), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+    });
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value: () => [{ playState: 'running', currentTime: 0, finished: new Promise(() => {}), effect: { getTiming: () => ({ iterations: 1 }), getComputedTiming: () => ({ endTime: 200 }) } }],
+    });
+    try {
+      const { container } = render(
+        <>
+          <button type="button">배경 버튼</button>
+          <InstallPrompt />
+        </>
+      );
+
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: '다시 보지 않기' }));
+      });
+
+      expect(document.querySelector('.ui-dialog-overlay')).toBeNull();
+      expect(container).not.toHaveAttribute('inert');
+      expect(window.localStorage.getItem('pwa_prompt_permanently_dismissed')).toBe('true');
+    } finally {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+    }
+  });
+
   it('stores a permanent dismissal and hides the prompt', () => {
     render(<InstallPrompt />);
 
@@ -227,6 +349,7 @@ describe('InstallPrompt', () => {
 
       expect(onRecoverableError).not.toHaveBeenCalled();
       expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     }
   );
 
@@ -240,6 +363,7 @@ describe('InstallPrompt', () => {
 
     expect(onRecoverableError).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows the iOS prompt after hydration when the dismissal cooldown has expired', async () => {
@@ -260,6 +384,7 @@ describe('InstallPrompt', () => {
 
     expect(onRecoverableError).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     let installEvent!: BeforeInstallPromptEvent;
     act(() => {
@@ -273,5 +398,6 @@ describe('InstallPrompt', () => {
 
     expect(installEvent.prompt).toHaveBeenCalledOnce();
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

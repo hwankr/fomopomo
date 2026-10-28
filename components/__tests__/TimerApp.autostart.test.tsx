@@ -1,5 +1,7 @@
+import { isValidElement, type ReactElement } from 'react';
 import { render, act } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import toast from 'react-hot-toast';
 import TimerApp from '../TimerApp';
 
 // Regression test for the auto-start expired-deadline loop:
@@ -133,8 +135,9 @@ vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({
   StopwatchDisplay: () => null,
 }));
 
-vi.mock('@/components/timer/ui/ThemeBackground', () => ({
-  ThemeBackground: () => null,
+// 과목 이름은 작업 선택기 표시에만 쓰인다. 실제 조회(Supabase)는 하지 않는다.
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
 }));
 
 vi.mock('react-hot-toast', () => {
@@ -247,5 +250,43 @@ describe('TimerApp auto-start (regression: expired deadline loop)', () => {
     expect(mocks.playAlarm).toHaveBeenCalledTimes(2);
     expect(lastTimerProps().timerMode).toBe('focus');
     expect(lastTimerProps().isRunning).toBe(false); // autoStartPomos is off
+  });
+
+  it('announces each phase change with a token-colored line icon instead of emoji', async () => {
+    vi.mocked(toast).mockClear();
+    seedRunningFocusTimer(3);
+
+    render(
+      <TimerApp settingsUpdated={0} onRecordSaved={vi.fn()} isLoggedIn={false} />
+    );
+
+    const iconClass = (call: unknown[]) => {
+      const icon = (call[1] as { icon?: unknown } | undefined)?.icon;
+      expect(isValidElement(icon)).toBe(true);
+      return (icon as ReactElement<{ className?: string }>).props.className;
+    };
+
+    // Focus ends → break-start toast with the rest-colored icon
+    await act(async () => {
+      vi.advanceTimersByTime(3400);
+    });
+    const breakStart = vi.mocked(toast).mock.calls.at(-1)!;
+    expect(breakStart[0]).toBe('잠시 휴식하세요.');
+    expect(iconClass(breakStart)).toContain('text-rest');
+
+    // Auto-started break ends → focus-start toast with the pomo-colored icon
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60 * 1000 + 400);
+    });
+    const focusStart = vi.mocked(toast).mock.calls.at(-1)!;
+    expect(focusStart[0]).toBe('다시 집중할 시간입니다!');
+    expect(iconClass(focusStart)).toContain('text-pomo');
+
+    for (const [message] of vi.mocked(toast).mock.calls) {
+      if (typeof message === 'string') expect(message).not.toMatch(/\p{Extended_Pictographic}/u);
+    }
   });
 });

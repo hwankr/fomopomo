@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudySubject } from '@/lib/studySubjects';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const db = vi.hoisted(() => ({
   subjects: [] as StudySubject[],
@@ -121,5 +122,87 @@ describe('SubjectManager', () => {
     expect(imported).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue('B subject')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('A subject')).not.toBeInTheDocument();
+  });
+
+  it('reports add, rename and duplicate results in the status line', async () => {
+    render(<SubjectManager userId="user-a" />);
+    fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '영어' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('영어 과목을 추가했어요.');
+    fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: ' 영어 ' } });
+    // The board keeps the result line's slot; typing only clears its text.
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('이미 있는 과목이에요.');
+    expect(db.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '영어 이름 변경' }));
+    fireEvent.change(screen.getByLabelText('과목 이름 수정'), { target: { value: '영어 회화' } });
+    fireEvent.keyDown(screen.getByLabelText('과목 이름 수정'), { key: 'Enter' });
+    expect(await screen.findByRole('status')).toHaveTextContent('과목 이름을 바꿨어요. 기록은 그대로예요.');
+    expect(db.rename).toHaveBeenCalledWith('1', '영어 회화');
+  });
+
+  it('cancels a rename with Escape without letting the key reach the page', () => {
+    db.subjects = [{ id: 's1', user_id: 'user-a', name: '통계' }];
+    const pageKeyDown = vi.fn();
+    render(<div onKeyDown={pageKeyDown}><SubjectManager userId="user-a" /></div>);
+    fireEvent.click(screen.getByRole('button', { name: '통계 이름 변경' }));
+    fireEvent.keyDown(screen.getByLabelText('과목 이름 수정'), { key: 'Escape' });
+    expect(screen.queryByLabelText('과목 이름 수정')).not.toBeInTheDocument();
+    expect(pageKeyDown).not.toHaveBeenCalled();
+    expect(db.rename).not.toHaveBeenCalled();
+  });
+
+  it('lets the settings page own the heading and offer login to guests', () => {
+    const onLogin = vi.fn();
+    const { rerender } = render(<SubjectManager userId="user-a" showHeading={false} />);
+    expect(screen.queryByRole('heading', { name: '과목 관리' })).not.toBeInTheDocument();
+    rerender(<SubjectManager userId="user-a" compact />);
+    expect(screen.getByRole('heading', { name: '과목 관리' })).toBeInTheDocument();
+    rerender(<SubjectManager userId={null} onLogin={onLogin} />);
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+    expect(onLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it('reserves the result line on the settings page but not in the compact panel', () => {
+    const { rerender } = render(<SubjectManager userId="user-a" />);
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    rerender(<SubjectManager userId="user-a" compact />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+  it('marks only the subject just added and fades the inline editor and result line in, each once', async () => {
+    // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다(usePlayOnce).
+    const animations = simulateRunningAnimations();
+    try {
+      db.subjects = [{ id: 'existing', user_id: 'user-a', name: 'SQL' }];
+      const view = render(<SubjectManager userId="user-a" />);
+      fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '블록체인' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      const added = (await screen.findByText('블록체인')).closest('li')!;
+      const existing = screen.getByText('SQL').closest('li')!;
+      expect(added).toHaveClass('animate-fade-up');
+      expect(existing).not.toHaveClass('animate-fade-up');
+      expect(screen.getByText('블록체인 과목을 추가했어요.')).toHaveClass('animate-fade-in');
+      await animations.finish();
+      expect(added).not.toHaveClass('animate-fade-up');
+
+      // 다시 읽어 순서가 바뀌어도(서버는 코드 순서) 옮겨진 줄이 다시 떠오르지 않는다.
+      db.subjects = [db.subjects[1], db.subjects[0]];
+      view.rerender(<SubjectManager userId="user-a" />);
+      expect(screen.getAllByRole('listitem').map((item) => item.textContent?.slice(0, 4))).toEqual(['블록체인', 'SQL']);
+      expect(screen.getByText('블록체인').closest('li')).toBe(added);
+      expect(added).not.toHaveClass('animate-fade-up');
+
+      fireEvent.click(screen.getByRole('button', { name: 'SQL 이름 변경' }));
+      const editor = screen.getByLabelText('과목 이름 수정').closest('li')!;
+      expect(editor).toHaveClass('animate-fade-in');
+      await animations.finish();
+      expect(editor).not.toHaveClass('animate-fade-in');
+      db.subjects = [db.subjects[1], db.subjects[0]];
+      view.rerender(<SubjectManager userId="user-a" />);
+      expect(screen.getByLabelText('과목 이름 수정').closest('li')).not.toHaveClass('animate-fade-in');
+    } finally {
+      animations.restore();
+    }
   });
 });

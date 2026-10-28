@@ -4,6 +4,7 @@ import { useId } from 'react';
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { stopAllKeys, stopSelectTriggerKeys } from './keyBoundary';
 
 export type AppSelectOption = {
   value: string;
@@ -49,7 +50,7 @@ export default function AppSelect({
   return (
     <div className={cn('min-w-0', label && 'space-y-1.5', className)}>
       {label ? (
-        <label htmlFor={triggerId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+        <label htmlFor={triggerId} className="block text-[13px] font-semibold text-ink-muted">
           {label}
         </label>
       ) : null}
@@ -62,15 +63,15 @@ export default function AppSelect({
           id={triggerId}
           type="button"
           aria-label={ariaLabel ?? (label ? undefined : placeholder)}
-          onKeyDown={event => event.stopPropagation()}
+          onKeyDown={stopSelectTriggerKeys}
           className={cn(
-            'group flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm text-slate-700 shadow-sm outline-none transition-[border-color,box-shadow,background-color] hover:border-slate-300 focus-visible:border-rose-400 focus-visible:ring-3 focus-visible:ring-rose-100 data-[state=open]:border-rose-300 data-[placeholder]:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus-visible:border-rose-400 dark:focus-visible:ring-rose-500/20 dark:data-[state=open]:border-rose-500/60',
-            compact && 'h-8 px-2.5 text-xs',
+            'group flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-control border-0 bg-surface px-3.5 text-left text-[15px] text-ink transition-[filter] hover:brightness-97 data-[placeholder]:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50',
+            compact && 'h-9 rounded-chip px-3 text-[13px]',
           )}
         >
           <span className="min-w-0 truncate"><Select.Value placeholder={placeholder}>{displayValue}</Select.Value></span>
           <Select.Icon asChild>
-            <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
+            <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 text-ink-muted transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
           </Select.Icon>
         </Select.Trigger>
         <Select.Portal>
@@ -79,10 +80,10 @@ export default function AppSelect({
             align="start"
             sideOffset={6}
             collisionPadding={12}
-            onKeyDown={event => event.stopPropagation()}
+            onKeyDown={stopAllKeys}
             onClick={event => event.stopPropagation()}
             onMouseDown={event => event.stopPropagation()}
-            className="ui-popover z-[80] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-sm text-slate-700 shadow-lg shadow-slate-900/10 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:shadow-black/25"
+            className="ui-popover ui-popover-surface z-[80] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden p-1.5 text-[15px] outline-none"
             style={{
               // Cap the first measurement too, and keep scroll buttons inside that cap
               // so mounting them cannot resize the popup or flip its placement.
@@ -90,7 +91,7 @@ export default function AppSelect({
               transformOrigin: 'var(--radix-select-content-transform-origin)',
             }}
           >
-            <Select.ScrollUpButton className="flex h-6 items-center justify-center text-slate-400">
+            <Select.ScrollUpButton className="flex h-6 items-center justify-center text-ink-faint">
               <ChevronUp aria-hidden="true" className="h-4 w-4" />
             </Select.ScrollUpButton>
             <Select.Viewport className="min-h-0 p-0.5">
@@ -101,18 +102,18 @@ export default function AppSelect({
                   disabled={option.disabled}
                   textValue={option.label}
                   className={cn(
-                    'relative flex min-h-9 cursor-default select-none items-center rounded-lg py-2 pr-8 pl-2.5 outline-none data-[highlighted]:bg-rose-50 data-[highlighted]:text-rose-700 data-[state=checked]:font-medium data-[disabled]:pointer-events-none data-[disabled]:opacity-40 dark:data-[highlighted]:bg-rose-500/15 dark:data-[highlighted]:text-rose-200',
-                    compact && 'text-xs',
+                    'relative flex min-h-10 cursor-pointer select-none items-center rounded-control py-2 pr-9 pl-3 text-ink outline-none data-[highlighted]:bg-hover data-[state=checked]:font-semibold data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
+                    compact && 'min-h-9 text-sm',
                   )}
                 >
                   <span className="min-w-0 break-words [overflow-wrap:anywhere]"><Select.ItemText>{option.label}</Select.ItemText></span>
-                  <Select.ItemIndicator className="absolute right-2.5 flex items-center text-rose-500 dark:text-rose-400">
+                  <Select.ItemIndicator className="absolute right-3 flex items-center text-pomo">
                     <Check aria-hidden="true" className="h-3.5 w-3.5" />
                   </Select.ItemIndicator>
                 </Select.Item>
               ))}
             </Select.Viewport>
-            <Select.ScrollDownButton className="flex h-6 items-center justify-center text-slate-400">
+            <Select.ScrollDownButton className="flex h-6 items-center justify-center text-ink-faint">
               <ChevronDown aria-hidden="true" className="h-4 w-4" />
             </Select.ScrollDownButton>
           </Select.Content>

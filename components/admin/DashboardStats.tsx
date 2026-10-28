@@ -27,50 +27,48 @@ export default function DashboardStats({
       label: '전체 사용자',
       value: totalUsers.toLocaleString(),
       icon: Users,
-      color: 'text-blue-600',
-      bg: 'bg-blue-50 dark:bg-blue-900/20',
+      color: 'text-watch',
+      bg: 'bg-watch-tint',
     },
     {
       label: '오늘 활동 사용자',
       value: activeUsersToday.toLocaleString(),
       icon: Activity,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50 dark:bg-emerald-900/20',
+      color: 'text-rest',
+      bg: 'bg-rest-tint',
     },
     {
       label: '총 공부 시간',
       value: formatTime(totalStudyTime),
       icon: Clock,
-      color: 'text-rose-600',
-      bg: 'bg-rose-50 dark:bg-rose-900/20',
+      color: 'text-pomo',
+      bg: 'bg-pomo-tint',
     },
     {
       label: '오늘 신규 가입',
       value: newUsersToday.toLocaleString(),
       icon: Calendar,
-      color: 'text-purple-600',
-      bg: 'bg-purple-50 dark:bg-purple-900/20',
+      color: 'text-ink-muted',
+      bg: 'bg-surface',
     },
   ];
 
+  // 카드 없이 흰 바탕 위 숫자로만 나눈다.
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2 lg:grid-cols-4">
       {stats.map((stat) => (
-        <div
-          key={stat.label}
-          className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-        >
-          <div className="flex items-center justify-between">
+        <div key={stat.label}>
+          <div className="flex items-center gap-3">
+            <div className={`flex size-10 shrink-0 items-center justify-center rounded-full ${stat.bg} ${stat.color}`}>
+              <stat.icon aria-hidden="true" className="size-[18px]" strokeWidth={1.8} />
+            </div>
             <div>
-              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-ink-muted">
                 {stat.label}
               </p>
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+              <p className="text-2xl font-extrabold tracking-[-0.02em]">
                 {stat.value}
               </p>
-            </div>
-            <div className={`rounded-xl p-3 ${stat.bg} ${stat.color}`}>
-              <stat.icon className="h-6 w-6" />
             </div>
           </div>
         </div>

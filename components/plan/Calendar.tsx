@@ -1,143 +1,154 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-  format,
-  startOfMonth,
-  endOfMonth,
-  startOfWeek,
-  endOfWeek,
-  eachDayOfInterval,
-  isSameMonth,
-  isSameDay,
-  addMonths,
-  subMonths,
-  isToday,
-} from 'date-fns';
-import { ko } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { eachDayOfInterval, endOfMonth, format, isSameDay, isToday, startOfMonth } from 'date-fns';
+import { Bead, type BeadState } from '@/components/ui/Beads';
+import { playMotion } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
 import { getKoreanHolidays } from '@/actions/holidays';
+import { formatDayLabel, WEEKDAY_LABELS } from './planUi';
+import type { DayPomodoros } from './useMonthPomodoros';
 
 interface CalendarProps {
+  /** 보여 줄 달(아무 날짜나 그 달로 본다) */
+  month: Date;
   selectedDate: Date;
   onSelectDate: (date: Date) => void;
+  /** 날짜 키('yyyy-MM-dd')별 끝낸·남은 뽀모도로. 없으면 구슬을 그리지 않는다. */
+  days?: ReadonlyMap<string, DayPomodoros> | null;
 }
 
-export default function Calendar({ selectedDate, onSelectDate }: CalendarProps) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [holidayDates, setHolidayDates] = useState<number[]>([]);
+// 날짜 칸의 구슬은 끝낸 것 먼저, 남은 계획을 이어서 최대 6알(모바일은 앞의 4알만 보인다).
+const MAX_MARKS = 6;
+// 달을 넘길 때 새 달의 칸이 넘긴 쪽에서 밀려 오는 거리(px)
+const MONTH_SHIFT = 6;
+
+function buildMarks(day: DayPomodoros | undefined): BeadState[] {
+  if (!day) return [];
+  const done = Math.min(MAX_MARKS, day.done);
+  const planned = Math.min(MAX_MARKS - done, day.planned);
+  return [...Array<BeadState>(done).fill('done'), ...Array<BeadState>(planned).fill('planned')];
+}
+
+export default function Calendar({ month, selectedDate, onSelectDate, days }: CalendarProps) {
+  const year = month.getFullYear();
+  const monthKey = format(month, 'yyyy-MM');
+  const [holidays, setHolidays] = useState<{ year: number; dates: number[] } | null>(null);
+  const daysRef = useRef<HTMLDivElement>(null);
+  const shownMonthRef = useRef(monthKey);
+
+  // 달을 넘기면 새 달의 날짜 칸이 넘긴 방향에서 나타난다(다음 달은 오른쪽에서, 이전 달은 왼쪽에서).
+  // 처음 그릴 때와 같은 달을 다시 그릴 때는 움직이지 않는다.
+  useLayoutEffect(() => {
+    const previous = shownMonthRef.current;
+    shownMonthRef.current = monthKey;
+    if (previous === monthKey) return;
+    const shift = monthKey > previous ? MONTH_SHIFT : -MONTH_SHIFT;
+    playMotion(daysRef.current, [{ opacity: 0, transform: `translateX(${shift}px)`, offset: 0 }]);
+  }, [monthKey]);
 
   useEffect(() => {
-    const fetchHolidays = async () => {
-      const year = currentMonth.getFullYear();
-      const dates = await getKoreanHolidays(year.toString());
-      setHolidayDates(dates);
-    };
-    fetchHolidays();
-  }, [currentMonth]);
+    let active = true;
+    void getKoreanHolidays(String(year)).then((dates) => {
+      if (active) setHolidays({ year, dates });
+    });
+    return () => { active = false; };
+  }, [year]);
 
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-
-  const monthStart = startOfMonth(currentMonth);
-  const monthEnd = endOfMonth(monthStart);
-  const startDate = startOfWeek(monthStart);
-  const endDate = endOfWeek(monthEnd);
-
-  const days = eachDayOfInterval({
-    start: startDate,
-    end: endDate,
-  });
-
-  const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
+  const holidayDates = holidays?.year === year ? holidays.dates : [];
+  const monthStart = startOfMonth(month);
+  const monthDays = eachDayOfInterval({ start: monthStart, end: endOfMonth(monthStart) });
+  const leadingBlanks = monthStart.getDay();
+  const trailingBlanks = (7 - ((leadingBlanks + monthDays.length) % 7)) % 7;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 aria-live="polite" className="text-lg font-bold text-gray-900 dark:text-white">
-          {format(currentMonth, 'yyyy년 M월', { locale: ko })}
-        </h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              const today = new Date();
-              setCurrentMonth(today);
-              onSelectDate(today);
-            }}
-            className="ui-press min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
-          >
-            오늘
-          </button>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              aria-label="이전 달"
-              onClick={prevMonth}
-              className="ui-press rounded-lg p-2 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:hover:bg-slate-700"
+    <div className="flex flex-col gap-3.5">
+      {/* 요일 줄과 날짜 칸을 나눠 달을 넘길 때 날짜 칸만 움직인다(간격은 한 격자일 때와 같다). */}
+      <div className="flex flex-col gap-1 md:gap-1.5">
+        <div className="grid grid-cols-7 gap-1 md:gap-1.5">
+          {WEEKDAY_LABELS.map((label, index) => (
+            <span
+              key={label}
+              aria-hidden="true"
+              className={cn(
+                'pb-0.5 text-center text-xs font-semibold md:pb-0 md:text-[13px]',
+                index === 0 ? 'text-pomo' : 'text-ink-muted'
+              )}
             >
-              <ChevronLeft className="w-5 h-5 text-gray-500" />
-            </button>
-            <button
-              type="button"
-              aria-label="다음 달"
-              onClick={nextMonth}
-              className="ui-press rounded-lg p-2 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:hover:bg-slate-700"
-            >
-              <ChevronRight className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
+              {label}
+            </span>
+          ))}
+        </div>
+
+        <div ref={daysRef} className="grid grid-cols-7 gap-1 md:gap-1.5">
+          {Array.from({ length: leadingBlanks }, (_, index) => (
+            <span key={`lead-${index}`} aria-hidden="true" />
+          ))}
+
+          {monthDays.map((day) => {
+            const key = format(day, 'yyyy-MM-dd');
+            const isSelected = isSameDay(day, selectedDate);
+            const isDayToday = isToday(day);
+            const isHoliday = holidayDates.includes(Number(format(day, 'yyyyMMdd')));
+            const summary = days?.get(key);
+            const marks = buildMarks(summary);
+            const label = [
+              formatDayLabel(day),
+              summary?.done ? `끝낸 뽀모도로 ${summary.done}개` : '',
+              summary?.planned ? `남은 계획 ${summary.planned}개` : '',
+              isHoliday ? '공휴일' : '',
+              isDayToday ? '오늘' : '',
+            ].filter(Boolean).join(', ');
+
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-label={label}
+                aria-pressed={isSelected}
+                aria-current={isDayToday ? 'date' : undefined}
+                onClick={() => onSelectDate(day)}
+                className={cn(
+                  'flex h-[50px] min-w-0 flex-col items-center justify-start gap-[3px] rounded-control pt-1 text-ink transition-colors hover:bg-hover',
+                  'md:h-[84px] md:gap-2 md:rounded-2xl md:px-1.5 md:pt-3 md:pb-2',
+                  isSelected && 'bg-surface hover:bg-surface'
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex size-7 items-center justify-center rounded-full text-sm leading-none md:size-8 md:text-[15px]',
+                    isDayToday
+                      ? 'bg-pomo font-bold text-white'
+                      : cn(
+                          day.getDay() === 0 || isHoliday ? 'text-pomo' : 'text-ink',
+                          isSelected ? 'font-bold' : 'font-medium'
+                        )
+                  )}
+                >
+                  {day.getDate()}
+                </span>
+                <span
+                  aria-hidden="true"
+                  data-bead-tone="pomo"
+                  className="flex h-1 gap-0.5 [--bead-size:4px] max-md:[&>:nth-child(n+5)]:hidden md:h-1.5 md:gap-[3px] md:[--bead-size:6px]"
+                >
+                  {marks.map((state, index) => (
+                    <span key={index} data-state={state} className="ui-bead" />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+
+          {Array.from({ length: trailingBlanks }, (_, index) => (
+            <span key={`trail-${index}`} aria-hidden="true" />
+          ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-7 mb-2">
-        {weekDays.map((day, i) => (
-          <div
-            key={`${day}-${i}`}
-            className="text-center text-xs font-medium text-gray-400 py-2"
-          >
-            {day}
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-7 gap-1">
-        {days.map((day) => {
-          const isSelected = isSameDay(day, selectedDate);
-          const isCurrentMonth = isSameMonth(day, monthStart);
-          const isDayToday = isToday(day);
-
-          return (
-            <button
-              key={day.toString()}
-              type="button"
-              aria-label={format(day, 'yyyy년 M월 d일 EEEE', { locale: ko })}
-              aria-pressed={isSelected}
-              aria-current={isDayToday ? 'date' : undefined}
-              onClick={() => onSelectDate(day)}
-              className={cn(
-                'ui-press aspect-square rounded-xl flex flex-col items-center justify-center relative transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800',
-                !isCurrentMonth && 'text-gray-300 dark:text-gray-600',
-                isCurrentMonth && 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50',
-                // Weekend colors
-                ((day.getDay() === 0 || holidayDates.includes(parseInt(format(day, 'yyyyMMdd')))) && isCurrentMonth && !isSelected) && 'bg-red-50 dark:bg-red-500/20 text-red-700 dark:text-red-200',
-                (day.getDay() === 6 && isCurrentMonth && !isSelected) && 'bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200',
-                isSelected && 'bg-rose-500 text-white hover:bg-rose-600 dark:bg-rose-500 dark:text-white dark:hover:bg-rose-400',
-                isDayToday && !isSelected && 'ring-1 ring-inset ring-rose-300 font-semibold dark:ring-rose-500/60'
-              )}
-            >
-              <span className="text-sm">{format(day, 'd')}</span>
-              {/* Dot indicator for tasks (placeholder logic) */}
-              {isDayToday && (
-                <span className={cn(
-                  "absolute bottom-2 w-1 h-1 rounded-full",
-                  isSelected ? "bg-white" : "bg-rose-500"
-                )} />
-              )}
-            </button>
-          );
-        })}
+      <div className="hidden gap-5 px-2 pt-1 text-[13px] text-ink-muted md:flex">
+        <span className="flex items-center gap-1.5"><Bead state="done" size={8} />끝낸 뽀모도로</span>
+        <span className="flex items-center gap-1.5"><Bead state="planned" size={8} />계획한 뽀모도로</span>
       </div>
     </div>
   );

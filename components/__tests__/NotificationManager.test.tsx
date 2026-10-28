@@ -37,6 +37,9 @@ vi.mock('@/lib/supabase', () => ({
   supabase: supabaseMock,
 }));
 
+const navigation = vi.hoisted(() => ({ pathname: '/' }));
+vi.mock('next/navigation', () => ({ usePathname: () => navigation.pathname }));
+
 vi.mock('react-hot-toast', () => ({
   default: {
     success: toastMock.success,
@@ -80,6 +83,7 @@ describe('NotificationManager', () => {
     supabaseMock.__mocks.singleMock.mockResolvedValue({ data: { role: 'user' }, error: null });
     lifecycleMock.sync.mockReset();
     lifecycleMock.sync.mockResolvedValue({ status: 'subscribed_new' });
+    navigation.pathname = '/';
   });
 
   afterEach(() => {
@@ -225,4 +229,22 @@ describe('NotificationManager', () => {
     expect(screen.queryByRole('button', { name: /디버그 로그/ })).not.toBeInTheDocument();
   });
 
+
+  it('leaves the floating banner off the settings page, which has the inline section', async () => {
+    navigation.pathname = '/settings';
+    render(<NotificationManager />);
+    await waitFor(() => expect(lifecycleMock.start).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText('타이머 종료 알림 안내')).not.toBeInTheDocument();
+  });
+
+  it('shows the permission state and reports a sent test notification', async () => {
+    mockBrowserPermission('granted');
+    render(<NotificationManager mode="inline" />);
+    expect(await screen.findByText('허용됨')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '알림 권한 요청하기' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '테스트 알림 보내기' }));
+    expect(await screen.findByText('테스트 알림을 보냈어요.')).toBeInTheDocument();
+    const registration = await navigator.serviceWorker.ready;
+    expect(registration.showNotification).toHaveBeenCalledWith('테스트 알림', expect.objectContaining({ body: '알림이 정상적으로 동작합니다.' }));
+  });
 });

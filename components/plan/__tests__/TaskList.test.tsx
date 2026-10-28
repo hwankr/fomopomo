@@ -2,6 +2,13 @@ import { StrictMode } from 'react';
 import toast from 'react-hot-toast';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
+
+const motion = vi.hoisted(() => ({ playPop: vi.fn() }));
+vi.mock('@/components/ui/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/ui/motion')>()),
+  playPop: motion.playPop,
+}));
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
@@ -61,8 +68,8 @@ const emit = async (channel = channels.findLast(item => item.topic === 'task-lis
   await act(async () => { channel.callbacks.forEach(callback => callback()); });
 };
 const addTask = (title: string) => {
-  fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-  fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: title } });
+  fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: title } });
   fireEvent.click(screen.getByRole('button', { name: '추가' }));
 };
 const taskRow = (title: string) => screen.getByText(title).closest('.group') as HTMLElement;
@@ -185,8 +192,8 @@ describe('TaskList request ownership', () => {
     mount();
     await screen.findByText('9월 6일 작업');
     for (const title of ['블록체인 9/13 복습', '블록체인 9/15 복습']) {
-      fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-      fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: title } });
+      fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+      fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: title } });
       expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
       fireEvent.click(screen.getByRole('button', { name: '추가' }));
       await screen.findByText(title);
@@ -197,39 +204,39 @@ describe('TaskList request ownership', () => {
   it('preserves an explicit initially unclassified selection while typing and resets it after save or cancel', async () => {
     mount();
     await screen.findByText('9월 6일 작업');
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
     await chooseSubject('미분류');
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/15 복습' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/15 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 9/15 복습');
     expect(rows.tasks.find(row => row.title === '블록체인 9/15 복습')).toMatchObject({ subject_id: null });
 
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/17 복습' } });
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/17 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     await chooseSubject('데이터베이스');
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-    expect(screen.getByPlaceholderText('작업 제목을 입력하세요')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    expect(screen.getByRole('textbox', { name: '할 일' })).toHaveValue('');
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('미분류');
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/19 복습' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/19 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
   });
 
   it('lets users confirm the suggested subject and later re-enable automatic selection', async () => {
     mount();
     await screen.findByText('9월 6일 작업');
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/13 복습' } });
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/13 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     await chooseSubject('블록체인');
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '데이터베이스 9/15 복습' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '데이터베이스 9/15 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     await chooseSubject('제목에 맞춰 선택');
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('데이터베이스');
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/17 복습' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/17 복습' } });
     expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 9/17 복습');
@@ -255,8 +262,8 @@ describe('TaskList request ownership', () => {
     const dispatch = vi.spyOn(window, 'dispatchEvent');
     mount();
     await screen.findByText('9월 6일 작업');
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '블록체인 9/12 복습' } });
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '블록체인 9/12 복습' } });
     await chooseSubject('블록체인');
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('블록체인 9/12 복습');
@@ -296,7 +303,7 @@ describe('TaskList request ownership', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '작업 제목' }), { target: { value: '데이터베이스 복습' } });
     fireEvent.click(screen.getByRole('button', { name: '작업 저장' }));
     await waitFor(() => expect(rows.tasks[0].title).toBe('데이터베이스 복습'));
-    fireEvent.click(within(taskRow('데이터베이스 복습')).getAllByRole('button')[1]);
+    fireEvent.click(within(taskRow('데이터베이스 복습')).getByRole('button', { name: '데이터베이스 복습 완료' }));
     await waitFor(() => expect(rows.tasks[0].status).toBe('done'));
     expect(dispatch.mock.calls.filter(([event]) => event.type === 'study-subjects-changed')).toHaveLength(0);
   });
@@ -364,7 +371,7 @@ describe('TaskList request ownership', () => {
     render(<StrictMode>{view()}</StrictMode>);
     expect(await screen.findByText('9월 6일 작업')).toBeInTheDocument();
     expect(screen.getByText('장기 과제 A')).toBeInTheDocument();
-    expect(screen.getByText('2m')).toBeInTheDocument();
+    expect(screen.getByText('2분')).toBeInTheDocument();
     expect(screen.queryByText('9월 7일 작업')).not.toBeInTheDocument();
   });
 
@@ -381,7 +388,7 @@ describe('TaskList request ownership', () => {
     const row = within(taskRow('9월 6일 작업'));
     expect(row.getByText('코딩테스트')).toBeInTheDocument();
     expect(row.getByText('데이터베이스')).toBeInTheDocument();
-    expect(row.getByText('10m')).toBeInTheDocument();
+    expect(row.getByText('10분')).toBeInTheDocument();
     expect(queries.find(query => query.table === 'long_term_tasks')?.filters).toContainEqual(['user_id', ['user-1']]);
   });
 
@@ -570,8 +577,8 @@ describe('TaskList request ownership', () => {
     await waitFor(() => expect(queries.some(query => query.action === 'insert')).toBe(true));
     rerender(view(DAY_B));
     await screen.findByText('9월 7일 작업');
-    fireEvent.click(screen.getByRole('button', { name: '작업 추가' }));
-    fireEvent.change(screen.getByPlaceholderText('작업 제목을 입력하세요'), { target: { value: '새 날짜 초안' } });
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '새 날짜 초안' } });
     await act(async () => pending.resolve(success(task('old-insert', '이전 날짜 추가'))));
     expect(screen.queryByText('이전 날짜 추가')).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('새 날짜 초안')).toBeInTheDocument();
@@ -582,7 +589,7 @@ describe('TaskList request ownership', () => {
     await screen.findByText('9월 6일 작업');
     const pending = deferred();
     intercept = query => query.table === 'tasks' && query.action === 'update' ? pending.promise : undefined;
-    fireEvent.click(within(taskRow('9월 6일 작업')).getAllByRole('button')[1]);
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' }));
     await waitFor(() => expect(queries.some(query => query.action === 'update')).toBe(true));
     rerender(view(DAY_B));
     await screen.findByText('9월 7일 작업');
@@ -605,7 +612,7 @@ describe('TaskList request ownership', () => {
       }
     };
     await emit();
-    fireEvent.click(within(taskRow('9월 6일 작업')).getAllByRole('button')[1]);
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' }));
     await waitFor(() => expect(screen.getByText('9월 6일 작업')).toHaveClass('line-through'));
     await act(async () => pending.resolve(success(captured!)));
     expect(screen.getByText('9월 6일 작업')).toHaveClass('line-through');
@@ -703,7 +710,7 @@ describe('TaskList request ownership', () => {
     mount();
     await screen.findByText('9월 6일 작업');
     rows.tasks.push(task('external-task', '다른 탭에서 추가한 작업'));
-    const toggle = within(taskRow('9월 6일 작업')).getAllByRole('button')[1];
+    const toggle = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' });
     await act(async () => {
       channels[0].callbacks.forEach(callback => callback());
       fireEvent.click(toggle);
@@ -801,7 +808,7 @@ describe('pinned template identity and materialization', () => {
   it('does not repopulate a viewed past date from current pinned templates', async () => {
     rows.pinned_tasks = [{ id: 'pin-db', user_id: 'user-1', title: 'Review', position: 0 }];
     mount(new Date(2026, 8, 5));
-    await screen.findByText('오늘은 작업이 없어요.');
+    await screen.findByText('이날의 계획이 없어요. 계획 추가로 시작해 보세요.');
     expect(mocks.rpc.mock.calls.some(([name]) => name === 'materialize_pinned_tasks')).toBe(false);
   });
 
@@ -831,5 +838,314 @@ describe('pinned template identity and materialization', () => {
     await emit(channels.find(channel => channel.topic === 'task-list-pinned-updates')!);
     expect(await screen.findByTitle('작업 고정')).toBeInTheDocument();
     expect(screen.getByText('9월 6일 작업')).toBeInTheDocument();
+  });
+});
+
+const setDesktop = (desktop: boolean) => {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: desktop, media: query, onchange: null,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+  }) as MediaQueryList);
+};
+
+describe('TaskList plan board', () => {
+  it('counts finished pomodoro batches against the goal and summarizes the day', async () => {
+    setDesktop(true);
+    rows.tasks[0].estimated_pomodoros = 4;
+    const at = (minute: number) => new Date(2026, 8, 6, 9, minute).toISOString();
+    rows.study_sessions = [
+      // 한 배치가 두 행으로 저장돼도 뽀모도로 1개다. 스톱워치는 세지 않지만 공부 시간에는 들어간다.
+      { id: 1, user_id: 'user-1', task_id: 'a-task', mode: 'pomo', session_batch_id: 'b1', duration: 1500, created_at: at(25) },
+      { id: 2, user_id: 'user-1', task_id: 'a-task', mode: 'pomo', session_batch_id: 'b1', duration: 60, created_at: at(26) },
+      { id: 3, user_id: 'user-1', task_id: 'a-task', mode: 'focus', session_batch_id: null, duration: 1500, created_at: at(55) },
+      { id: 4, user_id: 'user-1', task_id: 'a-task', mode: 'stopwatch', session_batch_id: 'b3', duration: 600, created_at: at(59) },
+    ];
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const row = within(taskRow('9월 6일 작업'));
+    expect(row.getByRole('img', { name: '뽀모도로 2 / 4' })).toBeInTheDocument();
+    expect(row.getByText('1시간 1분')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '9월 6일 일요일' })).toBeInTheDocument();
+    expect(screen.getByText('뽀모도로 2 / 4개 (오늘)')).toBeInTheDocument();
+  });
+
+  it('adds a plan with a bounded pomodoro goal and resets the stepper', async () => {
+    setDesktop(true);
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    // 데스크톱은 대화상자 없이 제자리에서 연다.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '할 일' })).toHaveFocus();
+    const goal = within(screen.getByRole('group', { name: '뽀모도로' }));
+    const decrease = goal.getByRole('button', { name: '뽀모도로 줄이기' });
+    const increase = goal.getByRole('button', { name: '뽀모도로 늘리기' });
+    expect(goal.getByRole('status')).toHaveTextContent('2');
+    fireEvent.click(decrease);
+    expect(goal.getByRole('status')).toHaveTextContent('1');
+    expect(decrease).toBeDisabled();
+    for (let i = 0; i < 9; i += 1) fireEvent.click(increase);
+    expect(goal.getByRole('status')).toHaveTextContent('8');
+    expect(increase).toBeDisabled();
+    for (let i = 0; i < 5; i += 1) fireEvent.click(decrease);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '모의고사 풀이' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('모의고사 풀이');
+    expect(rows.tasks.find(row => row.title === '모의고사 풀이')).toMatchObject({ estimated_pomodoros: 3, due_date: '2026-09-06' });
+    expect(within(taskRow('모의고사 풀이')).getByRole('img', { name: '뽀모도로 0 / 3' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    expect(within(screen.getByRole('group', { name: '뽀모도로' })).getByRole('status')).toHaveTextContent('2');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '할 일' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: '할 일' })).not.toBeInTheDocument();
+  });
+
+  it('summarizes a day without plans from the day pomodoro count', async () => {
+    setDesktop(true);
+    rows.tasks = [];
+    const { rerender } = render(<TaskList selectedDate={DAY_A} userId="user-1" dayPomodoros={3} />);
+    expect(await screen.findByText('계획 없이 뽀모도로 3개를 했어요')).toBeInTheDocument();
+    expect(screen.getByText('계획 없이 한 뽀모도로예요. 다음엔 계획을 세워 볼까요?')).toBeInTheDocument();
+    rerender(<TaskList selectedDate={DAY_A} userId="user-1" />);
+    expect(screen.getByText('아직 계획이 없어요')).toBeInTheDocument();
+    expect(screen.getByText('이날의 계획이 없어요. 계획 추가로 시작해 보세요.')).toBeInTheDocument();
+  });
+
+  it('adds from a bottom sheet and keeps row actions behind a disclosure on mobile', async () => {
+    setDesktop(false);
+    rows.tasks[1] = { ...task('pinned-task', '고정한 작업'), source_pinned_task_id: 'pin-x' };
+    rows.pinned_tasks = [{ id: 'pin-x', user_id: 'user-1', title: '고정한 작업', position: 0 }];
+    mount();
+    await screen.findByText('9월 6일 작업');
+    // 고정 상태는 더보기를 열지 않아도 보이고, 고정하지 않은 행에는 표시가 없다.
+    expect(within(taskRow('고정한 작업')).getByRole('img', { name: '고정된 작업' })).toBeInTheDocument();
+    expect(within(taskRow('9월 6일 작업')).queryByRole('img', { name: '고정된 작업' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '고정한 작업 고정 해제' })).not.toBeInTheDocument();
+    fireEvent.click(within(taskRow('고정한 작업')).getByRole('button', { name: '고정한 작업 더보기' }));
+    expect(within(taskRow('고정한 작업')).getByRole('button', { name: '고정한 작업 고정 해제' })).toHaveAttribute('title', '작업 고정 해제');
+    expect(screen.getByRole('heading', { name: '9월 6일 일' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    const sheet = screen.getByRole('dialog', { name: '9월 6일 일 계획 추가' });
+    expect(within(sheet).getByRole('textbox', { name: '할 일' })).toHaveFocus();
+    fireEvent.change(within(sheet).getByRole('textbox', { name: '할 일' }), { target: { value: '오답 정리' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: '뽀모도로 늘리기' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: '추가' }));
+    await screen.findByText('오답 정리');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(rows.tasks.find(row => row.title === '오답 정리')).toMatchObject({ estimated_pomodoros: 3 });
+
+    const more = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 더보기' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: '9월 6일 작업 수정' })).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
+    expect(screen.getByRole('textbox', { name: '작업 제목' })).toHaveValue('9월 6일 작업');
+  });
+});
+
+describe('TaskList motion', () => {
+  // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다.
+  let animations: ReturnType<typeof simulateRunningAnimations>;
+  beforeEach(() => { animations = simulateRunningAnimations(); });
+  afterEach(() => animations.restore());
+
+  // setDesktop은 모든 미디어 질의를 맞춘다(동작 줄이기 포함). 여기서는 폭 질의만 맞춰 움직임이 돌게 한다.
+  const setViewport = (desktop: boolean) => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: desktop && query.includes('min-width'), media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as MediaQueryList);
+  };
+  const checkOf = (title: string) =>
+    within(taskRow(title)).getByRole('button', { name: `${title} 완료` }).querySelector('svg')!;
+  const animated = () => [...document.querySelectorAll('[class*="animate-"]')];
+  const titles = () => screen.getAllByRole('listitem').map((item) => item.querySelector('span[title]')?.getAttribute('title'));
+  // 다른 곳에서 순서를 바꾼다(서버 순서가 바뀌고 실시간 갱신이 온다).
+  const reorderRemotely = async (order: string[]) => {
+    rows.tasks = [
+      ...order.map((id, position): Row => ({ ...rows.tasks.find((row) => row.id === id)!, position })),
+      ...rows.tasks.filter((row) => !order.includes(row.id as string)),
+    ];
+    await emit();
+  };
+
+  it('plays the new row’s entrance once: a later remote reorder or refresh does not re-arm it', async () => {
+    setViewport(true);
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const existing = taskRow('9월 6일 작업');
+    // 처음 불러온 목록은 움직이지 않는다.
+    expect(animated()).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    const form = screen.getByRole('textbox', { name: '할 일' }).closest('form')!;
+    expect(form).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(form).not.toHaveClass('animate-fade-up');
+
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '첫 추가' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('첫 추가');
+    const added = taskRow('첫 추가');
+    expect(animated()).toEqual([added]);
+    expect(added).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(animated()).toEqual([]);
+
+    // 방금 추가한 행을 다른 곳에서 맨 앞으로, 다시 맨 뒤로 옮겨도(같은 노드가 옮겨진다) 다시 돌지 않는다.
+    await reorderRemotely(['inserted-1', 'a-task']);
+    await waitFor(() => expect(titles()).toEqual(['첫 추가', '9월 6일 작업']));
+    expect(taskRow('첫 추가')).toBe(added);
+    expect(animated()).toEqual([]);
+    await reorderRemotely(['a-task', 'inserted-1']);
+    await waitFor(() => expect(titles()).toEqual(['9월 6일 작업', '첫 추가']));
+    expect(taskRow('9월 6일 작업')).toBe(existing);
+    expect(animated()).toEqual([]);
+  });
+
+  it('plays an open editor’s entrance only when it opens, not when its row is moved', async () => {
+    setViewport(true);
+    rows.tasks.push(task('c-task', '두 번째 작업'));
+    mount();
+    await screen.findByText('두 번째 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 수정' }));
+    const input = screen.getByRole('textbox', { name: '작업 제목' });
+    const editor = input.parentElement!;
+    expect(editor).toHaveClass('animate-fade-up');
+    fireEvent.change(input, { target: { value: '고치는 중' } });
+    await animations.finish();
+    expect(editor).not.toHaveClass('animate-fade-up');
+
+    await reorderRemotely(['c-task', 'a-task']);
+    await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('두 번째 작업'));
+    expect(screen.getByRole('textbox', { name: '작업 제목' })).toBe(input);
+    expect(input).toHaveValue('고치는 중');
+    expect(animated()).toEqual([]);
+  });
+
+  it('pops the check once when the user completes a task, never for a refreshed completion', async () => {
+    setViewport(true);
+    rows.tasks.push(task('c-task', '두 번째 작업'));
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const toggle = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' });
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(checkOf('9월 6일 작업')).toHaveClass('animate-pop-in');
+    expect(screen.getByText('9월 6일 작업', { selector: 'span[title]' })).toHaveClass('transition-colors', 'line-through');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
+    await animations.finish();
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+
+    // 다른 곳에서 순서를 바꿔도 다시 튀지 않는다.
+    await reorderRemotely(['c-task', 'a-task']);
+    await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('두 번째 작업'));
+    expect(animated()).toEqual([]);
+
+    // 사용자가 완료를 풀면 팝 없이 색만 바뀌고, 다시 완료하면 다시 튄다.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('todo'));
+    fireEvent.click(toggle);
+    expect(checkOf('9월 6일 작업')).toHaveClass('animate-pop-in');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
+
+    // 도는 중에 다른 곳에서 완료를 풀었다가 다시 완료해도 다시 튀지 않는다.
+    rows.tasks = rows.tasks.map((row) => row.id === 'a-task' ? { ...row, status: 'todo' } : row);
+    await emit();
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'false'));
+    rows.tasks = rows.tasks.map((row) => row.id === 'a-task' ? { ...row, status: 'done' } : row);
+    await emit();
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'true'));
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+  });
+
+  it('pops the goal number only after the user changes it, without replacing it', async () => {
+    setViewport(true);
+    motion.playPop.mockClear();
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    const goal = within(screen.getByRole('group', { name: '뽀모도로' }));
+    const number = goal.getByRole('status').firstElementChild!;
+    expect(number).toHaveTextContent('2');
+    expect(motion.playPop).not.toHaveBeenCalled();
+
+    fireEvent.click(goal.getByRole('button', { name: '뽀모도로 늘리기' }));
+    expect(goal.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    // 같은 숫자 칸이 바뀌고(새로 붙이지 않는다) 공용 팝이 한 번 돈다.
+    expect(goal.getByRole('status').firstElementChild).toBe(number);
+    expect(number).toHaveTextContent('3');
+    expect(motion.playPop).toHaveBeenCalledTimes(1);
+    expect(motion.playPop).toHaveBeenLastCalledWith(number);
+    fireEvent.click(goal.getByRole('button', { name: '뽀모도로 줄이기' }));
+    expect(number).toHaveTextContent('2');
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
+  });
+
+  it('pops the pin once when the user pins a task, and opens the mobile actions with an entrance each time', async () => {
+    setViewport(true);
+    const { unmount } = mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 고정' }));
+    const unpin = await within(taskRow('9월 6일 작업')).findByRole('button', { name: '9월 6일 작업 고정 해제' });
+    expect(unpin.querySelector('svg')).toHaveClass('animate-pop');
+    await animations.finish();
+    expect(unpin.querySelector('svg')).not.toHaveClass('animate-pop');
+    fireEvent.click(unpin);
+    const pin = await within(taskRow('9월 6일 작업')).findByRole('button', { name: '9월 6일 작업 고정' });
+    expect(pin.querySelector('svg')).not.toHaveClass('animate-pop');
+    await waitFor(() => expect(rows.pinned_tasks).toHaveLength(0));
+    unmount();
+
+    setViewport(false);
+    rows.tasks[1] = { ...task('pinned-task', '고정한 작업'), source_pinned_task_id: 'pin-x' };
+    rows.pinned_tasks = [{ id: 'pin-x', user_id: 'user-1', title: '고정한 작업', position: 0 }];
+    mount();
+    await screen.findByText('9월 6일 작업');
+    // 처음부터 고정된 작업의 표시는 그대로 있다.
+    expect(animated()).toEqual([]);
+    const more = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 더보기' });
+    const actions = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(actions).toHaveAttribute('hidden');
+    fireEvent.click(more);
+    expect(actions).not.toHaveAttribute('hidden');
+    expect(actions).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(actions).not.toHaveClass('animate-fade-up');
+
+    fireEvent.click(within(actions).getByRole('button', { name: '9월 6일 작업 고정' }));
+    const mark = await within(taskRow('9월 6일 작업')).findByRole('img', { name: '고정된 작업' });
+    expect(mark).toHaveClass('animate-pop-in');
+    expect(within(taskRow('고정한 작업')).getByRole('img', { name: '고정된 작업' })).not.toHaveClass('animate-pop-in');
+    await animations.finish();
+    expect(animated()).toEqual([]);
+
+    // 닫았다 다시 열면 다시 나타난다.
+    fireEvent.click(more);
+    expect(actions).toHaveAttribute('hidden');
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(actions).toHaveClass('animate-fade-up');
+  });
+
+  it('drops the marks at once with reduced motion', async () => {
+    setDesktop(true); // 모든 질의가 맞는다: 데스크톱 + 동작 줄이기
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' }));
+    expect(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' })).toHaveAttribute('aria-pressed', 'true');
+    expect(animated()).toEqual([]);
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
   });
 });

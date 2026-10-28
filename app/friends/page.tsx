@@ -1,24 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import FriendsDashboard from '@/components/friends/FriendsDashboard';
 import LoginModal from '@/components/LoginModal';
 import { supabase } from '@/lib/supabase';
+
+function FriendsLoading() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center bg-white" suppressHydrationWarning>
+      <span
+        role="status"
+        aria-label="불러오는 중"
+        className="size-8 animate-spin rounded-full border-2 border-bead border-t-pomo"
+      />
+    </div>
+  );
+}
 
 export default function FriendsPage() {
   const { session, loading } = useAuthSession();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   if (loading) {
-    return (
-      <div 
-        className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900"
-        suppressHydrationWarning
-      >
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white"></div>
-      </div>
-    );
+    return <FriendsLoading />;
   }
 
   return (
@@ -34,10 +39,13 @@ export default function FriendsPage() {
           });
         }}
       />
-      <FriendsDashboard 
-        session={session} 
-        onOpenLogin={() => setIsLoginModalOpen(true)} 
-      />
+      {/* 탭을 주소(?tab=)에서 읽으므로 useSearchParams를 Suspense 안에 둔다. */}
+      <Suspense fallback={<FriendsLoading />}>
+        <FriendsDashboard
+          session={session}
+          onOpenLogin={() => setIsLoginModalOpen(true)}
+        />
+      </Suspense>
     </>
   );
 }

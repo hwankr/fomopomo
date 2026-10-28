@@ -54,12 +54,14 @@ describe('기존 기록 과목 일괄 분류', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(35);
     fireEvent.change(screen.getByLabelText('할 일 검색'), { target: { value: '배치' } });
     expect(screen.getByText('검색 결과 1개 · 표시 1개 · 선택 0개')).toBeInTheDocument();
-    expect(screen.getByText('0h 20m')).toBeInTheDocument();
+    expect(screen.getByText('20분')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
     fireEvent.change(screen.getByLabelText('변경할 과목'), { target: { value: 'blockchain' } });
-    fireEvent.click(screen.getByRole('button', { name: '선택 1개 과목 적용' }));
+    expect(screen.getByRole('status')).toHaveTextContent('선택한 기록 1개를 블록체인으로 바꿔요.');
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
     await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [1], p_subject_id: 'blockchain' }));
-    expect(await screen.findByText('1개 기록의 과목을 변경했습니다.')).toBeInTheDocument();
+    expect(await screen.findByText('1개 기록의 과목을 정리했어요.')).toBeInTheDocument();
     expect(mock.range).toHaveBeenCalledWith(30, 529);
     expect(mock.eq).toHaveBeenCalledWith('user_id', 'user-a');
   });
@@ -69,19 +71,28 @@ describe('기존 기록 과목 일괄 분류', () => {
     render(<SubjectHistoryManager userId="user-a" />);
     await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
     fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
-    fireEvent.click(screen.getByRole('button', { name: '선택 2개 미분류로 변경' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('과목을 변경하지 못했습니다');
+    expect(screen.getByRole('status')).toHaveTextContent('선택한 기록 2개를 미분류로 바꿔요.');
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('과목을 바꾸지 못했어요');
     expect(screen.getAllByRole('checkbox').every(input => (input as HTMLInputElement).checked)).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '선택 2개 미분류로 변경' }));
-    await screen.findByText('2개 기록의 과목을 해제했습니다.');
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await screen.findByText('2개 기록을 미분류로 바꿨어요.');
     expect(mock.rpc).toHaveBeenLastCalledWith('classify_study_sessions', { p_session_ids: [1, 2], p_subject_id: null });
   });
 
-  it('필터 변경은 숨겨진 선택을 비우며 날짜/미분류 필터를 적용한다', async () => {
+  it('미분류 기록부터 보여 주고, 필터 변경은 숨겨진 선택을 비우며 날짜/미분류 필터를 적용한다', async () => {
     mock.rows.push(row(3, { subject_id: 'blockchain' }), row(4, { created_at: new Date(2026, 8, 19, 4).toISOString() }));
     render(<SubjectHistoryManager userId="user-a" />);
-    await screen.findByText('검색 결과 4개 · 표시 4개 · 선택 0개');
+    await screen.findByText('검색 결과 3개 · 표시 3개 · 선택 0개');
+    expect(screen.getByLabelText('현재 과목')).toHaveValue('unclassified');
+    expect(screen.getByText('과목 없이 저장된 기록이에요. 과목을 골라 두면 통계에 함께 잡혀요.')).toBeInTheDocument();
+    expect(screen.queryByText('블록체인 3 복습')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('현재 과목'), { target: { value: 'all' } });
+    expect(screen.getByText('검색 결과 4개 · 표시 4개 · 선택 0개')).toBeInTheDocument();
+    expect(screen.getByText('블록체인 3 복습')).toBeInTheDocument();
+    expect(screen.queryByText('과목 없이 저장된 기록이에요. 과목을 골라 두면 통계에 함께 잡혀요.')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+    expect(screen.getByText('검색 결과 4개 · 표시 4개 · 선택 4개')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('현재 과목'), { target: { value: 'unclassified' } });
     expect(screen.getByText('검색 결과 3개 · 표시 3개 · 선택 0개')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('종료 공부일'), { target: { value: '2026-09-18' } });
@@ -126,7 +137,7 @@ describe('기존 기록 과목 일괄 분류', () => {
       expect(screen.getByText(title).textContent).toBe(title);
       expect(screen.getByRole('checkbox', { name: `${title} 선택` })).toBeChecked();
     }
-    fireEvent.click(screen.getByRole('button', { name: '선택 2개 미분류로 변경' }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
     await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [1, 2], p_subject_id: null }));
   });
 
@@ -150,12 +161,12 @@ describe('기존 기록 과목 일괄 분류', () => {
     const { rerender } = render(<SubjectHistoryManager userId="user-a" />);
     await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
     fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
-    fireEvent.click(screen.getByRole('button', { name: '선택 2개 미분류로 변경' }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
     rerender(<SubjectHistoryManager userId="user-b" />);
     expect(screen.queryByText('블록체인 1 복습')).not.toBeInTheDocument();
     await act(async () => resolve({ data: 2, error: null }));
     await screen.findByText('다른 계정의 기록');
-    expect(screen.queryByText('2개 기록의 과목을 해제했습니다.')).not.toBeInTheDocument();
+    expect(screen.queryByText('2개 기록을 미분류로 바꿨어요.')).not.toBeInTheDocument();
     expect(screen.getByText('검색 결과 1개 · 표시 1개 · 선택 0개')).toBeInTheDocument();
   });
 
@@ -174,5 +185,13 @@ describe('기존 기록 과목 일괄 분류', () => {
     expect(screen.getByLabelText('종료 공부일')).toHaveValue('');
     expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
     expect(screen.getByText('공통 과목 관리')).toBeInTheDocument();
+  });
+  it('저장 결과만 살짝 나타나고 고르는 동안의 개수 안내는 그대로 바뀐다', async () => {
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
+    fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+    expect(screen.getByRole('status').querySelector('.animate-fade-in')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(await screen.findByText('2개 기록을 미분류로 바꿨어요.')).toHaveClass('animate-fade-in');
   });
 });
