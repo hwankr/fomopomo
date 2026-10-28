@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Coffee } from 'lucide-react';
 
 interface DonationSectionProps {
@@ -8,25 +9,25 @@ interface DonationSectionProps {
 }
 
 const BMC_LINK = 'https://buymeacoffee.com/hwankr';
+// Buy Me a Coffee 브랜드 버튼(외부 서비스 색이라 토큰 대신 브랜드 값을 쓴다)
+const BMC_BUTTON = 'bg-[#FFDD00] text-black hover:bg-[#FFCC00] active:bg-[#EEBB00]';
 
 export default function DonationSection({
   variant = 'card',
   showDescription = true,
 }: DonationSectionProps) {
-  // 카드형 (별도 페이지용)
+  // 후원 페이지용
   if (variant === 'card') {
     return (
-      <div className="w-full max-w-sm mx-auto rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 p-8 text-center">
-        <div className="mx-auto flex w-14 h-14 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-500/10">
-          <Coffee className="w-7 h-7 text-amber-500" />
+      <div className="mx-auto flex w-full max-w-sm flex-col items-center p-8 text-center">
+        <div className="flex size-14 items-center justify-center rounded-full bg-surface">
+          <Coffee aria-hidden="true" className="size-7 text-ink" />
         </div>
 
-        <h3 className="mt-5 text-lg font-semibold text-gray-900 dark:text-white">
-          커피 한 잔 사주기
-        </h3>
+        <h3 className="m-0 mt-5 text-lg font-bold">커피 한 잔 사주기</h3>
 
         {showDescription && (
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+          <p className="m-0 mt-2 text-sm text-ink-muted">
             후원금은 서버 운영과 기능 개선에 쓰입니다.
           </p>
         )}
@@ -35,48 +36,45 @@ export default function DonationSection({
           href={BMC_LINK}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-6 flex items-center justify-center gap-2 px-6 py-3.5 min-h-[48px] bg-[#FFDD00] hover:bg-[#FFCC00] active:bg-[#EEBB00] text-black font-semibold rounded-xl transition-all duration-200 active:scale-[0.98]"
+          className={`ui-press mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-tile px-6 font-semibold transition-colors ${BMC_BUTTON}`}
         >
-          <Coffee className="w-5 h-5" />
+          <Coffee aria-hidden="true" className="size-5" />
           Buy Me a Coffee
         </a>
       </div>
     );
   }
 
-  // 인라인형 (Footer용)
+  // 인라인형
   if (variant === 'inline') {
     return (
       <a
         href={BMC_LINK}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 px-4 py-2 bg-[#FFDD00] hover:bg-[#FFCC00] active:bg-[#EEBB00] text-black text-sm font-semibold rounded-lg transition-colors"
+        className={`inline-flex min-h-10 items-center gap-2 rounded-control px-4 text-sm font-semibold transition-colors ${BMC_BUTTON}`}
       >
-        <Coffee className="w-4 h-4" />
+        <Coffee aria-hidden="true" className="size-4" />
         Buy Me a Coffee
       </a>
     );
   }
 
-  // 미니멀형 (설정 모달용)
+  // 설정 화면용: 후원 페이지로 가는 보조 버튼
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col items-start gap-2">
       {showDescription && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          커피 한 잔으로 응원해주세요.
+        <p className="m-0 text-[13px] text-ink-muted md:text-sm">
+          서비스가 마음에 드셨다면, 커피 한 잔으로 응원해주세요.
         </p>
       )}
 
-      <a
-        href={BMC_LINK}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full px-4 py-2.5 min-h-[44px] bg-[#FFDD00] hover:bg-[#FFCC00] active:bg-[#EEBB00] text-black text-sm font-semibold rounded-lg transition-colors active:scale-[0.98]"
+      <Link
+        href="/support"
+        className="ui-button-secondary ui-press min-h-[46px] rounded-tile px-[18px] md:min-h-12"
       >
-        <Coffee className="w-4 h-4" />
-        Buy Me a Coffee
-      </a>
+        후원하기
+      </Link>
     </div>
   );
 }

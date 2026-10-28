@@ -1,34 +1,40 @@
 'use client';
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import { BookOpen, Check, ChevronDown, Pencil, Plus, X } from 'lucide-react';
+import { ChevronDown, Pencil } from 'lucide-react';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { validateSubjectName } from '@/lib/studySubjects';
+import { cn } from '@/lib/utils';
 
 type SubjectManagerProps = {
   userId: string | null;
   legacyTasks?: string[];
   onLegacyImported?: (names: string[]) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** 작은 패널(공부 기록의 과목 관리)용. 화면 너비와 관계없이 모바일 크기로 그린다. */
   compact?: boolean;
+  /** 설정 화면처럼 바깥에서 섹션 제목을 그리면 false */
+  showHeading?: boolean;
+  /** 로그아웃 상태 안내에 로그인 버튼을 붙인다. */
+  onLogin?: () => void;
 };
 
 const nameKey = (name: string) => name.trim().toLocaleLowerCase();
-const inputClass = 'ui-input min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100';
 
 export default function SubjectManager(props: SubjectManagerProps) {
   if (!props.userId) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <p>로그인하면 과목을 만들고 모든 공부 화면에서 함께 사용할 수 있어요.</p>
-        {Boolean(props.legacyTasks?.length) && <p className="mt-2 text-xs">이 기기에 저장된 이전 작업 목록은 그대로 보관됩니다.</p>}
+      <div className="flex flex-col items-start gap-2">
+        <p className="m-0 text-sm text-ink-muted">로그인하면 과목을 만들고 모든 공부 화면에서 함께 사용할 수 있어요.</p>
+        {Boolean(props.legacyTasks?.length) && <p className="m-0 text-[13px] text-ink-subtle">이 기기에 저장된 이전 작업 목록은 그대로 보관돼요.</p>}
+        {props.onLogin && <button type="button" onClick={props.onLogin} className="ui-button-secondary mt-1 min-h-11 rounded-control px-4">로그인</button>}
       </div>
     );
   }
   return <OwnedSubjectManager key={props.userId} {...props} userId={props.userId} />;
 }
 
-function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBusyChange, compact = false }: SubjectManagerProps & { userId: string }) {
+function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBusyChange, compact = false, showHeading = true }: SubjectManagerProps & { userId: string }) {
   const { subjects, loading, error, refresh, createSubject, renameSubject } = useStudySubjects(userId);
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,24 +74,25 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
     busyCallback.current?.(false);
   };
   const saveName = async () => {
-    const name = editingId ? editName : draft;
+    const renaming = editingId;
+    const name = renaming ? editName : draft;
     const validation = validateSubjectName(name);
     if (validation) { setLocalError(validation); return; }
-    if (subjects.some((subject) => subject.id !== editingId && nameKey(subject.name) === nameKey(name))) {
-      setLocalError('같은 이름의 과목이 이미 있습니다.');
+    if (subjects.some((subject) => subject.id !== renaming && nameKey(subject.name) === nameKey(name))) {
+      setLocalError('이미 있는 과목이에요.');
       return;
     }
     const scope = begin();
     if (!scope) return;
     try {
-      const saved = editingId ? await renameSubject(editingId, name.trim()) : await createSubject(name.trim());
+      const saved = renaming ? await renameSubject(renaming, name.trim()) : await createSubject(name.trim());
       if (!scope.active) return;
-      if (!saved) { setLocalError('과목을 저장하지 못했습니다. 다시 시도해주세요.'); return; }
+      if (!saved) { setLocalError('과목을 저장하지 못했어요. 다시 시도해주세요.'); return; }
       setDraft('');
       setEditingId(null);
-      setMessage('과목을 저장했습니다.');
+      setMessage(renaming ? '과목 이름을 바꿨어요. 기록은 그대로예요.' : `${name.trim()} 과목을 추가했어요.`);
     } catch {
-      if (scope.active) setLocalError('과목을 저장하지 못했습니다. 다시 시도해주세요.');
+      if (scope.active) setLocalError('과목을 저장하지 못했어요. 다시 시도해주세요.');
     } finally { finish(scope); }
   };
 
@@ -117,61 +124,70 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
       if (imported.length) {
         onLegacyImported?.(imported);
         setSelectedLegacy((current) => new Set([...current].filter((name) => !imported.includes(name))));
-        setMessage(`${imported.length}개 항목을 과목으로 가져왔습니다.`);
+        setMessage(`${imported.length}개 항목을 과목으로 가져왔어요.`);
       }
-      if (imported.length < names.length) setLocalError('일부 항목을 가져오지 못했습니다. 남은 항목은 보관되며 다시 시도할 수 있어요.');
+      if (imported.length < names.length) setLocalError('일부 항목을 가져오지 못했어요. 남은 항목은 보관되며 다시 시도할 수 있어요.');
     } catch {
       if (scope.active) {
         if (imported.length) onLegacyImported?.(imported);
-        setLocalError('일부 항목을 가져오지 못했습니다. 남은 항목은 보관되며 다시 시도할 수 있어요.');
+        setLocalError('일부 항목을 가져오지 못했어요. 남은 항목은 보관되며 다시 시도할 수 있어요.');
       }
     } finally { finish(scope); }
   };
 
+  // 설정 화면(md 이상)은 보드의 데스크톱 크기, compact는 늘 모바일 크기.
+  const wide = !compact;
+  const rowControl = cn('min-h-[42px]', wide && 'md:min-h-11');
+
   return (
-    <div className={compact ? 'space-y-3' : 'space-y-4'}>
-      <div>
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100"><BookOpen className="h-4 w-4 text-rose-500" />과목 관리</h3>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">할 일, 타이머, 공부 기록에서 같은 과목을 사용해요. 이름을 바꿔도 기록은 유지됩니다.</p>
-      </div>
-      {loading && subjects.length === 0 ? <p role="status" className="text-sm text-slate-500">과목을 불러오는 중…</p> : (
-        <ul className="space-y-2">
-          {subjects.map((subject) => <li key={subject.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/60">
+    <div className={cn('flex flex-col gap-2.5', wide && 'md:gap-3')}>
+      {showHeading && <div className="flex flex-col gap-1">
+        <h3 className="m-0 text-[15px] font-bold">과목 관리</h3>
+        <p className="m-0 text-[13px] text-ink-muted">할 일, 타이머, 공부 기록에서 같은 과목을 사용해요. 이름을 바꿔도 기록은 유지돼요.</p>
+      </div>}
+      {loading && subjects.length === 0 ? <p role="status" className="m-0 text-sm text-ink-muted">과목을 불러오는 중…</p> : (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {subjects.map((subject) => <li key={subject.id} className={cn('-mx-2.5 flex min-h-[52px] min-w-0 items-center gap-2 rounded-control px-2.5 py-0.5', wide && 'md:-mx-3 md:min-h-[60px] md:gap-3 md:rounded-tile md:px-3 md:py-1')}>
             {editingId === subject.id ? <>
-              <input aria-label="과목 이름 수정" value={editName} maxLength={80} disabled={busy} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); } }} className={`${inputClass} flex-1`} autoFocus />
-              <button type="button" aria-label="과목 이름 저장" disabled={busy} onClick={() => { void saveName(); }} className="ui-press rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-slate-700"><Check className="h-4 w-4" /></button>
-              <button type="button" aria-label="과목 이름 수정 취소" disabled={busy} onClick={() => setEditingId(null)} className="ui-press rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"><X className="h-4 w-4" /></button>
+              <input aria-label="과목 이름 수정" value={editName} maxLength={80} disabled={busy} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); } }} className={cn('ui-input flex-1 px-3 font-semibold', rowControl, wide && 'md:px-3.5')} autoFocus />
+              <button type="button" aria-label="과목 이름 저장" disabled={busy} onClick={() => { void saveName(); }} className={cn('ui-button-primary ui-press shrink-0 px-3.5', rowControl, wide && 'md:px-4')}>저장</button>
+              <button type="button" aria-label="과목 이름 수정 취소" disabled={busy} onClick={() => setEditingId(null)} className={cn('ui-button-ghost shrink-0 px-2.5', rowControl, wide && 'md:px-3')}>취소</button>
             </> : <>
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200">{subject.name}</span>
-              <button type="button" aria-label={`${subject.name} 이름 변경`} disabled={busy} onClick={() => { setEditingId(subject.id); setEditName(subject.name); setLocalError(null); }} className="ui-press rounded-lg p-2 text-slate-400 hover:bg-white hover:text-rose-500 dark:hover:bg-slate-700"><Pencil className="h-4 w-4" /></button>
+              <span className="min-w-0 flex-1 truncate font-semibold">{subject.name}</span>
+              <button type="button" aria-label={`${subject.name} 이름 변경`} disabled={busy} onClick={() => { setEditingId(subject.id); setEditName(subject.name); setLocalError(null); setMessage(null); }} className="ui-icon-button text-ink-muted before:absolute before:-inset-0.5 before:content-['']"><Pencil aria-hidden="true" size={17} strokeWidth={2} /></button>
             </>}
           </li>)}
-          {!subjects.length && <li className="rounded-xl bg-slate-50 px-3 py-4 text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">아직 과목이 없어요. 자주 공부하는 과목을 추가해보세요.</li>}
+          {!subjects.length && <li className="py-1 text-sm text-ink-muted">아직 과목이 없어요. 자주 공부하는 과목을 추가해보세요.</li>}
         </ul>
       )}
-      <div className="flex min-w-0 gap-2">
-        <input aria-label="새 과목 이름" placeholder="예: 데이터베이스" value={draft} maxLength={80} disabled={busy || Boolean(editingId)} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } }} className={`${inputClass} flex-1`} />
-        <button type="button" disabled={busy || loading || Boolean(editingId) || !draft.trim()} onClick={() => { void saveName(); }} className="ui-button-primary ui-press flex shrink-0 items-center gap-1 rounded-xl bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"><Plus className="h-4 w-4" />추가</button>
+      {/* 결과 줄: 모바일은 추가 줄 아래에 늘 자리를 잡아 두고(보드의 18px), 데스크톱은 추가 버튼 오른쪽에 붙는다. */}
+      <div className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-2.5', wide && 'md:flex-nowrap md:gap-2')}>
+        <input aria-label="새 과목 이름" placeholder="예: 데이터베이스" value={draft} maxLength={80} disabled={busy || Boolean(editingId)} onChange={(event) => { setDraft(event.target.value); setMessage(null); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } }} className={cn('ui-input flex-1', wide && 'md:min-h-12 md:max-w-[360px] md:rounded-tile md:px-4')} />
+        <button type="button" disabled={busy || loading || Boolean(editingId) || !draft.trim()} onClick={() => { void saveName(); }} className={cn('ui-button-primary ui-press shrink-0 px-3.5', wide && 'md:min-h-12 md:rounded-tile md:px-[18px]')}>추가</button>
+        {(wide || message || localError) && (
+          <div className={cn('min-h-[18px] min-w-0 basis-full text-xs', wide && 'md:min-h-0 md:basis-auto md:text-[13px]')}>
+            <p role="status" className="m-0 text-ink-muted">{message}</p>
+            {localError && <p role="alert" className="m-0 text-pomo-deep">{localError}</p>}
+          </div>
+        )}
       </div>
-      {error && <div className="flex items-center gap-2 text-xs text-rose-600 dark:text-rose-300"><p role="alert">{error}</p><button type="button" disabled={busy} onClick={() => { void refresh(); }} className="underline">다시 불러오기</button></div>}
-      {legacyTasks.length > 0 && <details className="group rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-        <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">이전 작업 목록 가져오기 ({legacyTasks.length})<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" /></summary>
-        <div className="ui-panel-enter mt-3 space-y-3">
-          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">과목으로 사용할 항목만 선택해주세요. 기존 공부 기록은 바뀌지 않아요.</p>
+      {error && <div className="flex items-center gap-2 text-[13px] text-pomo-deep"><p role="alert" className="m-0">{error}</p><button type="button" disabled={busy} onClick={() => { void refresh(); }} className="font-semibold underline underline-offset-2">다시 불러오기</button></div>}
+      {legacyTasks.length > 0 && <details className="group">
+        <summary className="-mx-2.5 flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 rounded-control px-2.5 text-sm font-semibold hover:bg-hover [&::-webkit-details-marker]:hidden">이전 작업 목록 가져오기 ({legacyTasks.length})<ChevronDown aria-hidden="true" className="size-4 text-ink-muted transition-transform group-open:rotate-180" /></summary>
+        <div className="ui-panel-enter mt-2 flex flex-col gap-3">
+          <p className="m-0 text-[13px] text-ink-muted">과목으로 사용할 항목만 선택해주세요. 기존 공부 기록은 바뀌지 않아요.</p>
           {importableNames.map((original, index) => {
             const value = legacyDrafts.get(original) ?? original;
             const exists = subjects.some((subject) => nameKey(subject.name) === nameKey(value));
-            return <div key={original} className="flex items-start gap-2">
-              <input type="checkbox" aria-label={`이전 항목 ${index + 1} 선택`} checked={selectedLegacy.has(original)} disabled={busy} onChange={(event) => setSelectedLegacy((current) => { const next = new Set(current); if (event.target.checked) next.add(original); else next.delete(original); return next; })} className="mt-3 h-4 w-4 shrink-0 accent-rose-500" />
-              <div className="min-w-0 flex-1"><input aria-label={`이전 항목 ${index + 1} 과목 이름`} value={value} disabled={busy} onChange={(event) => setLegacyDrafts((current) => new Map(current).set(original, event.target.value))} placeholder="과목 이름을 입력해주세요" className={`${inputClass} w-full`} />{exists && <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">이미 있는 과목으로 연결됩니다.</p>}</div>
+            return <div key={original} className="flex items-start gap-3">
+              <input type="checkbox" aria-label={`이전 항목 ${index + 1} 선택`} checked={selectedLegacy.has(original)} disabled={busy} onChange={(event) => setSelectedLegacy((current) => { const next = new Set(current); if (event.target.checked) next.add(original); else next.delete(original); return next; })} className="mt-3.5 size-4 shrink-0 accent-pomo" />
+              <div className="min-w-0 flex-1"><input aria-label={`이전 항목 ${index + 1} 과목 이름`} value={value} disabled={busy} onChange={(event) => setLegacyDrafts((current) => new Map(current).set(original, event.target.value))} placeholder="과목 이름을 입력해주세요" className="ui-input w-full" />{exists && <p className="m-0 mt-1 text-xs text-ink-subtle">이미 있는 과목으로 연결돼요.</p>}</div>
             </div>;
           })}
-          {malformedCount > 0 && <p className="text-xs text-amber-700 dark:text-amber-300">이름을 읽을 수 없는 항목 {malformedCount}개는 원래 설정에 보관됩니다.</p>}
-          <button type="button" disabled={busy || loading || selectedLegacy.size === 0} onClick={() => { void importSelected(); }} className="ui-button-secondary ui-press rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950">{busy ? '가져오는 중…' : '선택 항목 가져오기'}</button>
+          {malformedCount > 0 && <p className="m-0 text-[13px] text-ink-muted">이름을 읽을 수 없는 항목 {malformedCount}개는 원래 설정에 보관돼요.</p>}
+          <button type="button" disabled={busy || loading || selectedLegacy.size === 0} onClick={() => { void importSelected(); }} className="ui-button-secondary ui-press self-start rounded-control px-4 text-sm">{busy ? '가져오는 중…' : '선택 항목 가져오기'}</button>
         </div>
       </details>}
-      {localError && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{localError}</p>}
-      {message && <p role="status" className="text-xs text-emerald-700 dark:text-emerald-300">{message}</p>}
     </div>
   );
 }

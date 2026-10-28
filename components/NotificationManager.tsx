@@ -6,12 +6,14 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { usePathname } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
   startPushSubscriptionLifecycle,
   syncCurrentPushSubscription,
 } from '@/lib/pushSubscriptionLifecycle';
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 
 const subscribeToHydration = () => () => {};
 
@@ -29,6 +31,7 @@ export default function NotificationManager({
   mode?: 'floating' | 'inline';
 }) {
   const isHydrated = useHydrated();
+  const pathname = usePathname();
   const [permission, setPermission] =
     useState<NotificationPermission>('default');
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -41,6 +44,7 @@ export default function NotificationManager({
     return localStorage.getItem('fomopomo_notification_dismissed') !== 'true';
   });
   const [isAdmin, setIsAdmin] = useState(false);
+  const [testStatus, setTestStatus] = useState('');
 
   const addLog = useCallback((message: string) => {
     setDebugLog((previous) => [message, ...previous].slice(0, 10));
@@ -232,8 +236,10 @@ export default function NotificationManager({
         icon: '/icon-192x192.png',
       });
       addLog('Test notification sent');
+      setTestStatus('테스트 알림을 보냈어요.');
     } catch {
       addLog('Test notification failed');
+      setTestStatus('테스트 알림을 보내지 못했어요.');
     }
   };
 
@@ -243,31 +249,34 @@ export default function NotificationManager({
   };
 
   if (mode === 'floating') {
-    if (!isHydrated || permission === 'granted' || !isVisible) return null;
+    // 설정 화면에는 같은 내용의 '알림 설정' 섹션이 있다.
+    if (!isHydrated || permission === 'granted' || !isVisible || pathname === '/settings') return null;
 
     return (
       <aside
-        className="mx-auto my-6 w-[calc(100%_-_1.5rem)] max-w-2xl rounded-xl border border-gray-200 bg-white px-4 py-4 text-gray-900 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-100"
+        className="mx-auto my-6 w-[calc(100%_-_2rem)] max-w-2xl rounded-cta bg-surface px-5 py-4 text-ink"
         aria-label="타이머 종료 알림 안내"
       >
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h2 className="text-sm font-semibold">타이머 종료 알림</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+          <div className="flex flex-col gap-0.5">
+            <h2 className="m-0 text-[15px] font-bold">타이머 종료 알림</h2>
+            <p className="m-0 text-sm text-ink-muted">
               화면을 보고 있지 않아도 종료 시간을 알려드려요.
             </p>
           </div>
           <button
+            type="button"
             onClick={handleDismiss}
-            className="shrink-0 text-sm font-medium text-gray-500 underline-offset-2 transition-colors hover:text-gray-900 hover:underline dark:text-gray-400 dark:hover:text-white"
+            className="ui-button-ghost -mt-1 -mr-2 min-h-9 shrink-0 px-2.5 text-sm text-ink-muted"
             aria-label="타이머 종료 알림 안내 닫기"
           >
             닫기
           </button>
         </div>
         <button
+          type="button"
           onClick={requestPermission}
-          className="mt-3 inline-flex rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-600"
+          className="ui-button-primary ui-press mt-3 min-h-10 px-4 text-sm"
         >
           알림 켜기
         </button>
@@ -275,61 +284,78 @@ export default function NotificationManager({
     );
   }
 
+  // 설정 화면의 '알림 설정' 내용. 섹션 제목은 바깥에서 그린다.
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-gray-600">알림 권한 상태</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex min-h-14 items-center justify-between gap-3 py-0.5 md:min-h-16 md:gap-4 md:py-1">
+        <div className="flex min-w-0 flex-col gap-px md:gap-0.5">
+          <span className="font-semibold">타이머 종료 알림</span>
+          <span className="text-xs text-ink-muted md:text-[13px]">
+            <span className="md:hidden">화면을</span>
+            <span className="hidden md:inline">탭을</span> 보고 있지 않아도 끝나면 알려줘요.
+          </span>
+        </div>
         <span
-          className={`rounded px-2 py-1 text-xs font-bold ${
+          className={cn(
+            'inline-flex h-[30px] shrink-0 items-center rounded-[9px] px-2.5 text-xs font-bold md:h-8 md:rounded-chip md:px-3 md:text-[13px]',
             permission === 'granted'
-              ? 'bg-green-100 text-green-600'
+              ? 'bg-rest-tint text-rest-deep'
               : permission === 'denied'
-                ? 'bg-red-100 text-red-600'
-                : 'bg-gray-100 text-gray-600'
-          }`}
+                ? 'bg-pomo-tint text-pomo-deep'
+                : 'bg-surface text-ink-muted'
+          )}
         >
-          {permission === 'granted'
-            ? '허용됨'
-            : permission === 'denied'
-              ? '거부됨'
-              : '미설정'}
+          <span className="sr-only">알림 권한 </span>
+          <span>
+            {permission === 'granted'
+              ? '허용됨'
+              : permission === 'denied'
+                ? '거부됨'
+                : '미설정'}
+          </span>
         </span>
       </div>
 
-      {permission !== 'granted' && (
-        <button
-          onClick={requestPermission}
-          className="w-full rounded-lg bg-rose-500 py-2 text-sm font-bold text-white transition-colors hover:bg-rose-600"
-        >
-          알림 권한 요청하기
-        </button>
-      )}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+        {permission !== 'granted' && (
+          <button
+            type="button"
+            onClick={requestPermission}
+            className="ui-button-primary ui-press min-h-12 rounded-tile px-5"
+          >
+            알림 권한 요청하기
+          </button>
+        )}
 
-      {permission === 'granted' && (
-        <button
-          onClick={sendTestNotification}
-          className="w-full rounded-lg bg-blue-50 py-2 text-sm font-bold text-blue-600 transition-colors hover:bg-blue-100"
-        >
-          테스트 알림 보내기
-        </button>
-      )}
+        {permission === 'granted' && (
+          <button
+            type="button"
+            onClick={sendTestNotification}
+            className="ui-button-secondary ui-press min-h-12 rounded-tile px-5"
+          >
+            테스트 알림 보내기
+          </button>
+        )}
+
+        <span role="status" className="min-h-[18px] text-xs text-ink-muted md:min-h-0 md:text-[13px]">
+          {testStatus}
+        </span>
+      </div>
 
       {isAdmin && (
-        <div className="pt-2">
+        <div>
           <button
+            type="button"
             onClick={() => setIsOpen((current) => !current)}
-            className="text-[10px] text-gray-400 underline hover:text-gray-600"
+            className="text-xs text-ink-subtle underline underline-offset-2 hover:text-ink"
           >
             {isOpen ? '디버그 로그 숨기기' : '디버그 로그 보기'}
           </button>
 
           {isOpen && (
-            <div className="mt-2 h-32 overflow-y-auto rounded bg-gray-900 p-2 font-mono text-[10px] text-green-400">
+            <div className="mt-2 h-32 overflow-y-auto rounded-control bg-surface p-3 font-mono text-[11px] text-ink-muted">
               {debugLog.map((log, index) => (
-                <div
-                  key={index}
-                  className="border-b border-gray-800 py-0.5 last:border-0"
-                >
+                <div key={index} className="py-0.5">
                   &gt; {log}
                 </div>
               ))}
