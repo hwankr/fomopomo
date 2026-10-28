@@ -133,8 +133,9 @@ vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({
   StopwatchDisplay: () => null,
 }));
 
-vi.mock('@/components/timer/ui/ThemeBackground', () => ({
-  ThemeBackground: () => null,
+// 과목 이름은 작업 선택기 표시에만 쓰인다. 실제 조회(Supabase)는 하지 않는다.
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
 }));
 
 vi.mock('react-hot-toast', () => {

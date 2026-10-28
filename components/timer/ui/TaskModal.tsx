@@ -1,6 +1,9 @@
+import { useId, useRef } from 'react';
 import { TaskItem } from '../hooks/useTasks';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
+import ModalDialog from '@/components/ui/ModalDialog';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
+import { cn } from '@/lib/utils';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -17,6 +20,9 @@ interface TaskModalProps {
   onSkip: () => void;
   onDisablePopup: () => void;
 }
+
+// 기록은 이미 보관돼 있으므로 Escape로 닫지 않는다. 저장하거나 건너뛰어야 끝난다.
+const keepOpen = () => {};
 
 // The input mirrors the parent's selectedTask directly: the saved value and
 // the displayed value must be the same state, or a reopened modal can show a
@@ -36,103 +42,117 @@ export const TaskModal = ({
   onSkip,
   onDisablePopup,
 }: TaskModalProps) => {
+  const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const { subjects, loading, error, createSubject } = useStudySubjects(isOpen ? userId : null);
-  if (!isOpen) return null;
+  const locked = labelsLocked || isSaving;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain scale-100 transition-transform duration-200">
-        <div className="p-5 sm:p-6">
-          <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
-            무엇에 집중하셨나요?
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            목록에서 작업을 선택하거나 직접 입력하세요.
-          </p>
-
-          <div className="space-y-4">
-            {dbTasks.length > 0 && (
-              <div className="space-y-2 mb-4">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">오늘의 할 일</p>
-                <div className="grid gap-2 max-h-40 overflow-y-auto">
-                  {dbTasks.map((task) => (
-                    <button
-                      key={task.id}
-                      onClick={() => onSelectTask(task.title, task.id)}
-                      disabled={labelsLocked || isSaving}
-                      className={`min-w-0 w-full text-left [overflow-wrap:anywhere] px-4 py-3 rounded-xl text-sm font-medium transition-all ${selectedTaskId === task.id
-                        ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                        : 'bg-gray-50 dark:bg-slate-700/50 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700'
-                        }`}
-                    >
-                      {task.title}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                직접 입력
-              </label>
-              <input
-                type="text"
-                value={selectedTask}
-                disabled={labelsLocked || isSaving}
-                onChange={(e) => onSelectTask(e.target.value, null)}
-                placeholder="예: 독서, 코딩..."
-                className="w-full bg-gray-50 dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-700 rounded-xl px-4 py-3 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:border-rose-500 dark:focus:border-rose-500 transition-colors"
-                autoFocus
-              />
-            </div>
-            {onSelectSubject && (
-              <div>
-                <SubjectSelect
-                  subjects={subjects}
-                  value={selectedSubjectId}
-                  onChange={onSelectSubject}
-                  onCreate={createSubject}
-                  disabled={loading || labelsLocked || isSaving}
-                  label="공부 과목"
-                />
-                {error && <p role="alert" className="mt-2 text-xs text-red-500">{error}</p>}
-              </div>
-            )}
-          </div>
-
-          {labelsLocked && !isSaving && (
-            <p role="status" className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-              기록은 임시 보관 중입니다. 같은 내용으로 다시 저장해주세요.
-            </p>
-          )}
-
-          <div className="flex gap-3 mt-8">
-            <button
-              onClick={onSkip}
-              disabled={labelsLocked || isSaving}
-              className="flex-1 px-4 py-3 rounded-xl font-bold text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 transition-colors"
-            >
-              건너뛰기
-            </button>
-            <button
-              onClick={onSave}
-              disabled={isSaving || (!labelsLocked && !selectedTask.trim())}
-              className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-500/30 transition-all"
-            >
-              {isSaving ? '저장 중...' : labelsLocked ? '다시 저장' : '저장'}
-            </button>
-          </div>
-
-          <button
-            onClick={onDisablePopup}
-            disabled={isSaving}
-            className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline decoration-gray-300 underline-offset-2 transition-colors"
-          >
-            다시 보지 않기
-          </button>
-        </div>
+    <ModalDialog
+      open={isOpen}
+      onClose={keepOpen}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-description`}
+      initialFocusRef={inputRef}
+      className="md:max-w-[420px]"
+    >
+      <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+      <div className="flex flex-col gap-1">
+        <h2 id={`${id}-title`} className="ui-dialog-title">무엇에 집중하셨나요?</h2>
+        <p id={`${id}-description`} className="m-0 text-sm text-ink-muted">
+          목록에서 작업을 고르거나 직접 적어 주세요.
+        </p>
       </div>
-    </div>
+
+      {dbTasks.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="m-0 text-[13px] font-semibold text-ink-muted">오늘 할 일</p>
+          <div className="-mx-2 flex max-h-44 flex-col gap-0.5 overflow-y-auto px-2 py-1">
+            {dbTasks.map((task) => {
+              const selected = selectedTaskId === task.id;
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => onSelectTask(task.title, task.id)}
+                  disabled={locked}
+                  aria-pressed={selected}
+                  className={cn(
+                    'flex min-h-11 w-full min-w-0 items-center gap-2 rounded-control px-3 text-left text-[15px] [overflow-wrap:anywhere] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+                    selected ? 'bg-pomo-tint font-semibold text-pomo-deep' : 'hover:bg-hover',
+                  )}
+                >
+                  {task.title}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${id}-task`} className="text-[13px] font-semibold text-ink-muted">
+          직접 입력
+        </label>
+        <input
+          ref={inputRef}
+          id={`${id}-task`}
+          type="text"
+          value={selectedTask}
+          disabled={locked}
+          onChange={(e) => onSelectTask(e.target.value, null)}
+          placeholder="예: 독서, 코딩..."
+          className="ui-input w-full"
+        />
+      </div>
+
+      {onSelectSubject && (
+        <div>
+          <SubjectSelect
+            subjects={subjects}
+            value={selectedSubjectId}
+            onChange={onSelectSubject}
+            onCreate={createSubject}
+            disabled={loading || locked}
+            label="공부 과목"
+          />
+          {error && <p role="alert" className="mt-2 text-[13px] text-pomo-deep">{error}</p>}
+        </div>
+      )}
+
+      {labelsLocked && !isSaving && (
+        <p role="status" className="m-0 text-[13px] text-ink-muted">
+          기록은 임시 보관 중이에요. 같은 내용으로 다시 저장해 주세요.
+        </p>
+      )}
+
+      <div className="flex gap-2 md:justify-end">
+        <button
+          type="button"
+          onClick={onSkip}
+          disabled={locked}
+          className="ui-button-secondary ui-press min-h-[50px] flex-1 rounded-tile px-5 md:min-h-12 md:flex-none"
+        >
+          건너뛰기
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={isSaving || (!labelsLocked && !selectedTask.trim())}
+          className="ui-button-primary ui-press min-h-[50px] flex-1 rounded-tile px-6 md:min-h-12 md:flex-none"
+        >
+          {isSaving ? '저장 중...' : labelsLocked ? '다시 저장' : '저장'}
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={onDisablePopup}
+        disabled={isSaving}
+        className="ui-button-ghost min-h-10 self-center px-3 text-[13px] font-medium text-ink-muted"
+      >
+        다시 보지 않기
+      </button>
+    </ModalDialog>
   );
 };

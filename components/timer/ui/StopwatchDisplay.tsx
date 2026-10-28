@@ -1,12 +1,20 @@
-// Helper to format time
-const formatTime = (seconds: number) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0)
-    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-};
+import type { Ref } from 'react';
+import { RotateCcw } from 'lucide-react';
+import type { BeadState } from '@/components/ui/Beads';
+import { TaskPickerTrigger } from './TaskPickerTrigger';
+import { TimerDigits } from './TimerDigits';
+import {
+  StageActions,
+  StageBeads,
+  StageChipButton,
+  StageIconButton,
+  StageSettingsButton,
+  StageStatus,
+} from './stageParts';
+import { formatSpokenTime } from './timerDisplayUtils';
+
+// 스톱워치 구슬: 지난 분 + 지금 1알, 최대 60알.
+const MAX_STOPWATCH_BEADS = 60;
 
 interface StopwatchDisplayProps {
   stopwatchTime: number;
@@ -15,12 +23,15 @@ interface StopwatchDisplayProps {
   onToggleStopwatch: () => void;
   onSaveStopwatch: () => void;
   onResetStopwatch: () => void;
+  onOpenSettings?: () => void;
 
   // Task UI Props
   selectedTaskId: string | null;
   selectedTaskTitle: string;
-  onOpenTaskSidebar: () => void;
-  onClearTask: (e: React.MouseEvent) => void;
+  selectedTaskSubject?: string | null;
+  isTaskPickerOpen?: boolean;
+  onToggleTaskPicker: () => void;
+  taskTriggerRef?: Ref<HTMLButtonElement>;
 }
 
 export const StopwatchDisplay = ({
@@ -30,74 +41,68 @@ export const StopwatchDisplay = ({
   onToggleStopwatch,
   onSaveStopwatch,
   onResetStopwatch,
+  onOpenSettings,
   selectedTaskId,
   selectedTaskTitle,
-  onOpenTaskSidebar,
-  onClearTask,
+  selectedTaskSubject = null,
+  isTaskPickerOpen = false,
+  onToggleTaskPicker,
+  taskTriggerRef,
 }: StopwatchDisplayProps) => {
+  const hasProgress = stopwatchTime > 0;
+  const status = isStopwatchRunning ? '재는 중' : hasProgress ? '일시정지' : '스톱워치';
+
+  const minutes = Math.floor(stopwatchTime / 60);
+  const beadStates: BeadState[] = Array.from({ length: Math.min(minutes, MAX_STOPWATCH_BEADS) }, () => 'done');
+  if (minutes < MAX_STOPWATCH_BEADS) beadStates.push(isStopwatchRunning ? 'current' : 'empty');
 
   return (
-    <div className="text-center animate-fade-in w-full">
-      <div className="mb-6 text-sm font-bold text-indigo-400 uppercase tracking-widest">
-        스톱워치
+    <div className="flex w-full flex-col items-center md:gap-6">
+      <StageStatus status={status} detail="시간을 재요" />
+
+      <TimerDigits
+        seconds={stopwatchTime}
+        label={`경과 ${formatSpokenTime(stopwatchTime)}`}
+        runningTone={isStopwatchRunning ? 'watch' : null}
+      />
+
+      <StageBeads label={`${minutes}분 경과`} states={beadStates} tone="watch" />
+
+      <div className="mt-3.5 flex max-w-full justify-center md:mt-0">
+        <TaskPickerTrigger
+          ref={taskTriggerRef}
+          title={selectedTaskId ? selectedTaskTitle : null}
+          subject={selectedTaskSubject}
+          open={isTaskPickerOpen}
+          onClick={onToggleTaskPicker}
+        />
       </div>
 
-      {/* Selected Task Display */}
-      <div className="w-full max-w-xs mx-auto relative z-20 flex justify-center transition-all duration-300 mb-6 min-h-[24px]">
-        <div
-          onClick={onOpenTaskSidebar}
-          className="flex min-w-0 max-w-full items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-fade-in cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors"
-        >
-          <span className="text-sm font-medium max-w-[200px] truncate">
-            {selectedTaskId ? selectedTaskTitle : '작업 지정 없음'}
-          </span>
-          {selectedTaskId && (
-            <button
-              onClick={onClearTask}
-              aria-label="작업 지정 해제"
-              className="shrink-0 p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded-full transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className={`${stopwatchTime >= 3600 ? 'text-5xl min-[400px]:text-6xl sm:text-7xl' : 'text-7xl sm:text-8xl'} font-bold mb-8 font-mono tabular-nums tracking-tighter text-indigo-500 dark:text-indigo-400`}>
-        {formatTime(stopwatchTime)}
-      </div>
-
-      <div className="flex flex-wrap gap-2 sm:gap-4 justify-center items-center">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 md:mt-1">
         <button
+          type="button"
           onClick={onToggleStopwatch}
-          className="h-14 sm:h-auto px-4 sm:px-10 py-4 rounded-2xl font-bold text-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 min-w-24 sm:min-w-[140px]"
+          className="ui-button-primary ui-press min-h-[54px] min-w-[168px] rounded-cta bg-watch px-9 text-base md:min-h-14 md:min-w-[200px] md:text-[17px]"
         >
-          {isStopwatchRunning ? '일시정지' : stopwatchTime > 0 ? '재개' : '시작'}
+          {isStopwatchRunning ? '일시정지' : hasProgress ? '재개' : '시작'}
         </button>
 
-        {!isStopwatchRunning && stopwatchTime > 0 && (
-          <>
-            <button
-              onClick={onSaveStopwatch}
-              disabled={isSaving}
-              className="h-14 sm:h-auto px-3 sm:px-5 py-4 rounded-2xl font-bold text-white bg-gray-800 hover:bg-black transition-all shadow-sm whitespace-nowrap"
-            >
-              저장
-            </button>
-            <button
-              onClick={onResetStopwatch}
-              aria-label="스톱워치 초기화"
-              className="flex h-14 w-14 shrink-0 items-center justify-center sm:h-auto sm:w-auto p-3 sm:p-4 rounded-2xl bg-white dark:bg-slate-700 text-gray-400 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-all shadow-sm"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
-              </svg>
-            </button>
-          </>
+        {!isStopwatchRunning && hasProgress && (
+          <StageIconButton onClick={onResetStopwatch} aria-label="스톱워치 초기화">
+            <RotateCcw aria-hidden="true" size={20} strokeWidth={2} />
+          </StageIconButton>
         )}
+
+        {onOpenSettings && <StageSettingsButton onClick={onOpenSettings} />}
       </div>
+
+      {!isStopwatchRunning && hasProgress && (
+        <StageActions>
+          <StageChipButton onClick={onSaveStopwatch} disabled={isSaving}>
+            기록 저장
+          </StageChipButton>
+        </StageActions>
+      )}
     </div>
   );
 };

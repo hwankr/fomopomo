@@ -62,7 +62,10 @@ vi.mock('@/components/timer/ui/TimerDisplay', () => ({
 }));
 vi.mock('@/components/timer/ui/TaskModal', () => ({ TaskModal: () => null }));
 vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({ StopwatchDisplay: () => null }));
-vi.mock('@/components/timer/ui/ThemeBackground', () => ({ ThemeBackground: () => null }));
+// 과목 이름은 작업 선택기 표시에만 쓰인다. 실제 조회(Supabase)는 하지 않는다.
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
+}));
 vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), {
   loading: vi.fn(() => 'save'), success: vi.fn(), error: mocks.errorToast, dismiss: vi.fn(),
 }) }));
@@ -134,7 +137,7 @@ describe('complete a task and continue the same pomodoro', () => {
     await mount();
     await act(async () => click('onToggleTimer'));
     await jump(60);
-    await act(async () => click('onOpenTaskSidebar'));
+    await act(async () => click('onToggleTaskPicker'));
 
     expect(mocks.sidebar.userId).toBe('user-1');
     await act(async () => {

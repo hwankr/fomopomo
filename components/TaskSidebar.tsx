@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import toast from 'react-hot-toast';
-import { CheckCircle2, ChevronDown, Circle, CircleDashed, Play } from 'lucide-react';
+import { Check, ChevronDown, CircleDashed, Play } from 'lucide-react';
 import type {
   CreateTaskInput,
   LongTermSubtaskItem,
@@ -16,7 +17,12 @@ import {
   getLongTermTaskProgress,
   getLongTermTaskRoots,
 } from '@/lib/longTermTasks';
+import type { StudySubject } from '@/lib/studySubjects';
+import { cn } from '@/lib/utils';
+import Beads from '@/components/ui/Beads';
+import ModalDialog from '@/components/ui/ModalDialog';
 import TaskCreateForm from '@/components/timer/TaskCreateForm';
+import { useIsDesktop } from '@/components/timer/ui/useIsDesktop';
 
 interface TaskSidebarProps {
   isOpen: boolean;
@@ -39,126 +45,142 @@ interface TaskSidebarProps {
   excludedTaskId?: string | null;
   userId?: string | null;
   onCreateTask?: (input: CreateTaskInput) => Promise<TaskItem | null>;
+  /** 작업 행에 과목 이름을 작게 보여 주기 위한 목록 */
+  subjects?: StudySubject[];
+  /** 데스크톱 팝오버를 붙일 "지금 하는 일" 버튼 */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** 로그아웃 상태에서 로그인 창을 연다 */
+  onOpenLogin?: () => void;
 }
 
-type SectionColor = 'rose' | 'indigo' | 'purple' | 'emerald';
-
-const SECTION_STYLES: Record<
-  SectionColor,
-  { selected: string; check: string; badge: string }
-> = {
-  rose: {
-    selected:
-      'border-rose-100 bg-rose-50 text-rose-600 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-400',
-    check: 'text-rose-500',
-    badge:
-      'bg-rose-50 text-rose-500 dark:bg-rose-900/30',
-  },
-  indigo: {
-    selected:
-      'border-indigo-100 bg-indigo-50 text-indigo-600 dark:border-indigo-900/50 dark:bg-indigo-900/20 dark:text-indigo-400',
-    check: 'text-indigo-500',
-    badge:
-      'bg-indigo-50 text-indigo-500 dark:bg-indigo-900/30',
-  },
-  purple: {
-    selected:
-      'border-purple-100 bg-purple-50 text-purple-600 dark:border-purple-900/50 dark:bg-purple-900/20 dark:text-purple-400',
-    check: 'text-purple-500',
-    badge:
-      'bg-purple-50 text-purple-500 dark:bg-purple-900/30',
-  },
-  emerald: {
-    selected:
-      'border-emerald-100 bg-emerald-50 text-emerald-600 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-400',
-    check: 'text-emerald-500',
-    badge:
-      'bg-emerald-50 text-emerald-500 dark:bg-emerald-900/30',
-  },
-};
-
 const EMPTY_SUBTASK_IDS: ReadonlySet<string> = new Set();
+const EMPTY_SUBJECTS: StudySubject[] = [];
 
 // 미완료를 위로, 완료를 아래로. sort는 stable이라 나머지 순서는 보존된다.
 const partitionDoneLast = <T,>(items: T[], isDone: (item: T) => boolean) =>
   [...items].sort((a, b) => Number(isDone(a)) - Number(isDone(b)));
 
+// 둥근 체크 원. 실제 체크박스라 상태(완료 여부)가 보조기기에 그대로 전달된다.
+// 보이는 원은 24px(데스크톱 22px)이고, 감싼 label이 44px 누름 영역이 된다.
+// 음수 여백으로 자리는 원 크기 그대로 두어 옆의 작업 선택 버튼과 겹치지 않는다.
+function RoundCheck({
+  checked,
+  label,
+  onChange,
+  disabled = false,
+  busy = false,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <label className="relative -m-2.5 inline-flex size-11 shrink-0 cursor-pointer items-center justify-center has-disabled:cursor-wait md:-m-[11px]">
+      <span className="relative inline-flex size-6 items-center justify-center md:size-[22px]">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onChange}
+          disabled={disabled}
+          aria-busy={busy || undefined}
+          aria-label={label}
+          className="size-full cursor-pointer appearance-none rounded-full border-[1.5px] border-control bg-white text-ink transition-colors checked:border-pomo checked:bg-pomo disabled:cursor-wait disabled:opacity-60"
+        />
+        {checked ? (
+          <Check aria-hidden="true" strokeWidth={3} className="pointer-events-none absolute size-3.5 text-white md:size-[13px]" />
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+function NowBadge() {
+  return (
+    <span className="shrink-0 rounded-[6px] bg-pomo-tint px-[7px] py-0.5 text-[11px] leading-[1.4] font-semibold text-pomo-deep">
+      지금
+    </span>
+  );
+}
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h3 className="m-0 px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-muted">{children}</h3>;
+}
+
 function TaskSection({
   title,
   items,
-  color,
   selectedTaskId,
+  getSubjectName,
   onSelectTask,
   onToggleTask,
 }: {
   title: string;
   items: TaskItem[];
-  color: SectionColor;
   selectedTaskId: string | null;
+  getSubjectName: (id?: string | null) => string | null;
   onSelectTask: (task: TaskItem) => void;
   onToggleTask: (task: TaskItem) => void;
 }) {
   if (items.length === 0) return null;
 
-  const styles = SECTION_STYLES[color];
-
   return (
-    <div className="space-y-2">
-      <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-gray-400">
-        {title}
-      </h3>
-      {partitionDoneLast(items, (task) => task.status === 'done').map((task) => {
-        const isDone = task.status === 'done';
-        const durationLabel = formatDuration(task.durationSeconds);
-        return (
-          <div
-            key={task.id}
-            className={`flex w-full items-center rounded-xl border pr-2 transition-all ${
-              selectedTaskId === task.id
-                ? styles.selected
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-slate-800/50'
-            }`}
-          >
-            <button
-              onClick={() => onToggleTask(task)}
-              aria-label={isDone ? '완료 해제' : '완료로 표시'}
-              className={`flex-shrink-0 p-2 pl-3 transition-colors ${
-                isDone ? styles.check : 'text-gray-300 hover:text-gray-400'
-              }`}
+    <div className="flex flex-col">
+      <SectionHeading>{title}</SectionHeading>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {partitionDoneLast(items, (task) => task.status === 'done').map((task) => {
+          const isDone = task.status === 'done';
+          const isSelected = selectedTaskId === task.id;
+          const durationLabel = formatDuration(task.durationSeconds);
+          const subjectName = getSubjectName(task.subjectId);
+          const goal = task.pomodoroGoal ?? 0;
+          const count = task.pomodoroCount ?? 0;
+          return (
+            <li
+              key={task.id}
+              className="flex min-h-14 items-center gap-3 rounded-control px-2.5 py-[3px] transition-colors hover:bg-hover md:py-1"
             >
-              {isDone ? (
-                <CheckCircle2 className="h-5 w-5" />
-              ) : (
-                <Circle className="h-5 w-5" />
-              )}
-            </button>
-            <button
-              onClick={() => onSelectTask(task)}
-              className={`min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium ${
-                isDone
-                  ? 'text-gray-400 line-through dark:text-gray-500'
-                  : selectedTaskId === task.id
-                    ? ''
-                    : 'text-gray-700 dark:text-gray-300'
-              }`}
-            >
-              <span className="block truncate">{task.title}</span>
-              {task.parentTitle && (
-                <span className="block truncate text-xs font-normal text-gray-400 dark:text-gray-500">
-                  {task.parentTitle}
-                </span>
-              )}
-            </button>
-            {durationLabel && (
-              <span
-                className={`flex-shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs font-bold ${styles.badge}`}
+              <RoundCheck checked={isDone} label={`${task.title} 완료`} onChange={() => onToggleTask(task)} />
+              <button
+                type="button"
+                onClick={() => onSelectTask(task)}
+                aria-pressed={isSelected}
+                data-picker-row=""
+                data-picker-autofocus={isSelected ? '' : undefined}
+                className={cn(
+                  'flex min-h-11 min-w-0 flex-1 flex-col justify-center text-left text-[15px] md:min-h-10',
+                  isDone ? 'text-ink-muted line-through' : 'text-ink',
+                  isSelected ? 'font-semibold' : 'font-medium',
+                )}
               >
-                {durationLabel}
-              </span>
-            )}
-          </div>
-        );
-      })}
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate">{task.title}</span>
+                  {subjectName ? <span className="shrink-0 text-xs font-medium text-ink-subtle">{subjectName}</span> : null}
+                  {isSelected ? <NowBadge /> : null}
+                </span>
+                {task.parentTitle || durationLabel ? (
+                  <span className="flex min-w-0 gap-2 text-xs font-normal text-ink-subtle">
+                    {task.parentTitle ? <span className="min-w-0 truncate">{task.parentTitle}</span> : null}
+                    {durationLabel ? <span className="shrink-0">누적 {durationLabel}</span> : null}
+                  </span>
+                ) : null}
+              </button>
+              {goal > 0 ? (
+                <Beads
+                  label={`뽀모도로 ${count} / ${goal}`}
+                  done={Math.min(count, goal)}
+                  total={goal}
+                  size={8}
+                  gap={4}
+                  wrap
+                  className="max-w-[92px] justify-end"
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -170,6 +192,7 @@ function LongTermTaskSection({
   pendingLongTermTaskId,
   unavailableParentIds,
   pendingToggleSubtaskIds,
+  getSubjectName,
   onSelectLongTermTask,
   onSelectSubtask,
   onToggleSubtask,
@@ -180,6 +203,7 @@ function LongTermTaskSection({
   pendingLongTermTaskId: string | null;
   unavailableParentIds: ReadonlySet<string>;
   pendingToggleSubtaskIds: ReadonlySet<string>;
+  getSubjectName: (id?: string | null) => string | null;
   onSelectLongTermTask: (task: LongTermTaskItem) => void;
   onSelectSubtask: (subtask: LongTermSubtaskItem) => void;
   onToggleSubtask: (subtask: LongTermSubtaskItem) => void;
@@ -188,8 +212,6 @@ function LongTermTaskSection({
 
   const roots = getLongTermTaskRoots(items);
   if (roots.length === 0) return null;
-
-  const styles = SECTION_STYLES.emerald;
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((current) => {
@@ -209,95 +231,96 @@ function LongTermTaskSection({
     const breadcrumb = getLongTermTaskBreadcrumb(task, items);
     const isPending = task.id === pendingLongTermTaskId;
     const selectionPending = pendingSubtaskId !== null || pendingLongTermTaskId !== null;
+    const subjectName = getSubjectName(task.subject_id);
     const durationLabel = task.durationSeconds === undefined
       ? '누적 시간 확인 불가'
       : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
     return (
-      <div key={task.id} className="space-y-2">
-        <div className="rounded-xl border border-gray-100 px-3 py-2 transition-colors hover:border-emerald-100 hover:bg-emerald-50/50 focus-within:border-emerald-200 focus-within:bg-emerald-50/50 dark:border-slate-800 dark:hover:border-emerald-900/60 dark:hover:bg-emerald-950/30 dark:focus-within:border-emerald-800 dark:focus-within:bg-emerald-950/30">
-          <div className="flex items-center gap-2">
+      <div key={task.id} className="flex flex-col gap-0.5">
+        <div className="rounded-control px-2.5 py-1.5 transition-colors hover:bg-hover">
+          <div className="flex min-h-10 items-center gap-2">
             {hasDetails ? (
-              <button onClick={() => toggleExpanded(task.id)} aria-expanded={isExpanded}
+              <button
+                type="button"
+                onClick={() => toggleExpanded(task.id)}
+                aria-expanded={isExpanded}
                 aria-label={task.parent_task_id ? breadcrumb : undefined}
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md py-1 text-left text-sm font-medium text-gray-700 outline-none transition-colors hover:text-emerald-700 focus-visible:text-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-300 dark:text-gray-300 dark:hover:text-emerald-300 dark:focus-visible:text-emerald-300 dark:focus-visible:ring-emerald-700">
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-1.5 text-left text-[15px] font-medium"
+              >
                 <span className="truncate">{task.title}</span>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn('size-4 shrink-0 text-ink-muted transition-transform', isExpanded && 'rotate-180')}
+                />
               </button>
             ) : (
-              <span className="min-w-0 flex-1 truncate py-1 text-sm font-medium text-gray-700 dark:text-gray-300">{task.title}</span>
+              <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{task.title}</span>
             )}
             {!unavailableParentIds.has(task.id) && (
-              <button onClick={() => onSelectLongTermTask(task)} disabled={selectionPending}
-                aria-label={`${breadcrumb} 공부하기`} aria-busy={isPending}
-                className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 outline-none transition-colors hover:border-emerald-200 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/50 dark:focus-visible:ring-emerald-600 dark:focus-visible:ring-offset-gray-900">
-                <Play aria-hidden="true" className="h-3 w-3" />
+              <button
+                type="button"
+                onClick={() => onSelectLongTermTask(task)}
+                disabled={selectionPending}
+                aria-label={`${breadcrumb} 공부하기`}
+                aria-busy={isPending}
+                className="ui-button-secondary ui-press min-h-8 shrink-0 gap-1 rounded-chip px-2.5 text-[13px] disabled:cursor-wait"
+              >
+                <Play aria-hidden="true" className="size-3" />
                 {isPending ? '준비 중…' : '공부하기'}
               </button>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
+            {subjectName ? <span>{subjectName}</span> : null}
             <span>{durationLabel}</span>
             {progress.totalCount > 0 && <span>{`완료 ${progress.completedCount}/${progress.totalCount}`}</span>}
           </div>
         </div>
         {hasDetails && isExpanded && (
-          <div className="ml-2 space-y-2 border-l border-gray-100 pl-2 dark:border-slate-800">
+          <div className="flex flex-col gap-0.5 pl-5">
             {partitionDoneLast(
               task.subtasks,
               (subtask) => subtask.completed_at !== null
             ).map((subtask) => {
               const isDone = subtask.completed_at !== null;
-              const isPending = subtask.id === pendingSubtaskId;
-              const isTogglePending = pendingToggleSubtaskIds.has(
-                subtask.id
-              );
+              const isSubtaskPending = subtask.id === pendingSubtaskId;
+              const isTogglePending = pendingToggleSubtaskIds.has(subtask.id);
               return (
                 <div
                   key={subtask.id}
-                  className="flex w-full items-center rounded-xl border border-transparent pr-2 transition-all hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                  className="flex min-h-14 items-center gap-3 rounded-control px-2.5 py-1 transition-colors hover:bg-hover"
                 >
-                  <button
-                    onClick={() => onToggleSubtask(subtask)}
+                  <RoundCheck
+                    checked={isDone}
+                    label={`${subtask.title} 완료`}
+                    onChange={() => onToggleSubtask(subtask)}
                     disabled={isTogglePending}
-                    aria-busy={isTogglePending}
-                    aria-label={isDone ? '완료 해제' : '완료로 표시'}
-                    className={`flex-shrink-0 p-2 pl-3 transition-colors disabled:cursor-wait disabled:opacity-60 ${
-                      isDone
-                        ? styles.check
-                        : 'text-gray-300 hover:text-gray-400'
-                    }`}
-                  >
-                    {isDone ? (
-                      <CheckCircle2 className="h-5 w-5" />
-                    ) : (
-                      <Circle className="h-5 w-5" />
-                    )}
-                  </button>
+                    busy={isTogglePending}
+                  />
                   {isDone ? (
-                    <span className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-400 line-through dark:text-gray-500">
-                      <span className="block truncate">{subtask.title}</span>
+                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink-muted line-through">
+                      {subtask.title}
                     </span>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => onSelectSubtask(subtask)}
                       disabled={selectionPending}
-                      aria-busy={isPending}
-                      className="min-w-0 flex-1 py-3 pl-1 pr-2 text-left text-sm font-medium text-gray-700 disabled:opacity-60 dark:text-gray-300"
+                      aria-busy={isSubtaskPending}
+                      className="flex min-h-10 min-w-0 flex-1 items-center text-left text-[15px] font-medium disabled:opacity-60"
                     >
-                      <span className="block truncate">{subtask.title}</span>
+                      <span className="truncate">{subtask.title}</span>
                     </button>
                   )}
                   {materializedSubtaskIds.has(subtask.id) && (
-                    <span
-                      className={`flex-shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs font-bold ${SECTION_STYLES.rose.badge}`}
-                    >
+                    <span className="shrink-0 rounded-[6px] bg-pomo-tint px-[7px] py-0.5 text-[11px] leading-[1.4] font-semibold text-pomo-deep">
                       오늘
                     </span>
                   )}
-                  {isPending && (
+                  {isSubtaskPending && (
                     <span
                       aria-hidden
-                      className="ml-1 h-4 w-4 flex-shrink-0 animate-spin rounded-full border-b-2 border-emerald-500"
+                      className="size-4 shrink-0 animate-spin rounded-full border-2 border-bead border-t-pomo"
                     />
                   )}
                 </div>
@@ -311,15 +334,14 @@ function LongTermTaskSection({
   };
 
   return (
-    <div className="space-y-2">
-      <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-gray-400">
-        장기 과제
-      </h3>
-      {roots.map(renderTask)}
+    <div className="flex flex-col">
+      <SectionHeading>장기 과제</SectionHeading>
+      <div className="flex flex-col gap-0.5">{roots.map(renderTask)}</div>
     </div>
   );
 }
 
+// 타이머의 "지금 하는 일" 선택기. 데스크톱은 버튼 아래 팝오버, 모바일은 아래 시트.
 export default function TaskSidebar({
   isOpen,
   onClose,
@@ -339,11 +361,18 @@ export default function TaskSidebar({
   excludedTaskId = null,
   userId,
   onCreateTask,
+  subjects = EMPTY_SUBJECTS,
+  anchorRef,
+  onOpenLogin,
 }: TaskSidebarProps) {
+  const titleId = useId();
+  const isDesktop = useIsDesktop();
   const [pendingSubtaskId, setPendingSubtaskId] = useState<string | null>(null);
   const [pendingLongTermTaskId, setPendingLongTermTaskId] = useState<string | null>(null);
   const pendingSelectionRef = useRef(false);
   const selectionRequestRef = useRef(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const interactedOutsideRef = useRef(false);
 
   if (!isOpen) return null;
 
@@ -361,8 +390,8 @@ export default function TaskSidebar({
     closeSidebar();
   };
 
-  // 구체화가 끝나 tasks 행이 실제로 선택된 뒤에만 드로어를 닫는다.
-  // 실패하면 드로어를 열어둔 채 에러 토스트를 띄운다.
+  // 구체화가 끝나 tasks 행이 실제로 선택된 뒤에만 선택기를 닫는다.
+  // 실패하면 선택기를 열어둔 채 에러 토스트를 띄운다.
   const selectSubtaskAndClose = async (subtask: LongTermSubtaskItem) => {
     if (selectionDisabled || pendingSelectionRef.current) return;
     pendingSelectionRef.current = true;
@@ -409,6 +438,9 @@ export default function TaskSidebar({
     }
   };
 
+  const getSubjectName = (id?: string | null) =>
+    id ? subjects.find((subject) => subject.id === id)?.name ?? null : null;
+
   // 오늘 이미 구체화된 챕터에 '오늘' 칩을 달기 위한 lookup.
   const materializedSubtaskIds = new Set(
     tasks.flatMap((task) => (task.sourceSubtaskId ? [task.sourceSubtaskId] : []))
@@ -428,112 +460,183 @@ export default function TaskSidebar({
   const availableLongTermTasks = filteredLongTermTasks.filter((task) =>
     isTaskAvailable(task) || (!task.parent_task_id &&
       getLongTermTaskChildren(filteredLongTermTasks, task.id).some(isTaskAvailable)));
-  const hasNextTask = availableTasks(tasks).length + availableTasks(weeklyPlans).length +
-    availableTasks(monthlyPlans).length + getLongTermTaskRoots(availableLongTermTasks).length > 0;
+  const nextTaskCount = availableTasks(tasks).length + availableTasks(weeklyPlans).length +
+    availableTasks(monthlyPlans).length + getLongTermTaskRoots(availableLongTermTasks).length;
+  const hasNextTask = nextTaskCount > 0;
+
+  const title = choosingNextTask ? '다음 작업 선택' : '작업 목록';
+  const canCreate = Boolean(userId && onCreateTask);
+
+  // 고를 작업도, 해제할 선택도 없으면(로그아웃 등) 굳이 보이지 않는다.
+  const clearButton = choosingNextTask || (selectedTaskId === null && nextTaskCount === 0) ? null : (
+    <button
+      type="button"
+      onClick={() => selectAndClose(null)}
+      aria-pressed={selectedTaskId === null}
+      className={cn(
+        'ui-button-ghost ui-press -mr-1 min-h-10 gap-1.5 rounded-chip px-2.5 text-sm',
+        selectedTaskId === null ? 'text-ink' : 'font-medium text-ink-muted',
+      )}
+    >
+      <CircleDashed aria-hidden="true" className="size-4 shrink-0 opacity-70" />
+      작업 없이 시작
+    </button>
+  );
+
+  const body = (
+    <>
+      {choosingNextTask && (
+        <p role="status" className="m-0 px-2.5 pt-1 text-[13px] leading-relaxed text-ink-muted">
+          {selectionDisabled
+            ? '현재 작업을 마무리하고 있어요. 남은 시간은 멈춰 있어요.'
+            : '타이머가 잠시 멈췄어요. 다음 작업을 고르면 남은 시간부터 자동으로 시작해요.'}
+        </p>
+      )}
+      <fieldset disabled={selectionDisabled} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0 disabled:opacity-60">
+        {choosingNextTask && !hasNextTask && (
+          <p className="m-0 px-2.5 py-2 text-sm leading-relaxed text-ink-muted">
+            이어서 할 작업이 없어요. 일정을 추가한 뒤 다음 작업으로 선택해주세요. 남은 시간은 유지돼요.
+          </p>
+        )}
+        {!choosingNextTask && nextTaskCount === 0 && (
+          canCreate ? (
+            <p className="m-0 px-2.5 py-2 text-sm text-ink-muted">오늘 할 일이 아직 없어요. 작업을 추가해 보세요.</p>
+          ) : (
+            <div className="flex flex-col items-start gap-1 px-2.5 py-2">
+              <p className="m-0 text-sm text-ink-muted">로그인하면 할 일을 추가하고 기록에 연결할 수 있어요.</p>
+              {onOpenLogin ? (
+                <button
+                  type="button"
+                  onClick={() => { closeSidebar(); onOpenLogin(); }}
+                  className="ui-button-ghost -ml-3 min-h-10 text-sm text-pomo"
+                >
+                  로그인
+                </button>
+              ) : null}
+            </div>
+          )
+        )}
+
+        <TaskSection
+          title="오늘"
+          items={availableTasks(tasks)}
+          selectedTaskId={selectedTaskId}
+          getSubjectName={getSubjectName}
+          onSelectTask={selectAndClose}
+          onToggleTask={onToggleTask}
+        />
+        <TaskSection
+          title="이번 주"
+          items={availableTasks(weeklyPlans)}
+          selectedTaskId={selectedTaskId}
+          getSubjectName={getSubjectName}
+          onSelectTask={selectAndClose}
+          onToggleTask={onToggleTask}
+        />
+        <TaskSection
+          title="이번 달"
+          items={availableTasks(monthlyPlans)}
+          selectedTaskId={selectedTaskId}
+          getSubjectName={getSubjectName}
+          onSelectTask={selectAndClose}
+          onToggleTask={onToggleTask}
+        />
+        <LongTermTaskSection
+          items={availableLongTermTasks}
+          materializedSubtaskIds={materializedSubtaskIds}
+          pendingSubtaskId={pendingSubtaskId}
+          pendingLongTermTaskId={pendingLongTermTaskId}
+          unavailableParentIds={unavailableParentIds}
+          pendingToggleSubtaskIds={pendingToggleSubtaskIds}
+          getSubjectName={getSubjectName}
+          onSelectLongTermTask={(task) => { void selectLongTermTaskAndClose(task); }}
+          onSelectSubtask={(subtask) => {
+            void selectSubtaskAndClose(subtask);
+          }}
+          onToggleSubtask={onToggleSubtask}
+        />
+
+        <div className="pt-1">
+          {canCreate && userId && onCreateTask ? (
+            <TaskCreateForm key={userId} userId={userId} onCreateTask={onCreateTask} trailing={clearButton} />
+          ) : clearButton ? (
+            <div className="flex justify-end">{clearButton}</div>
+          ) : null}
+        </div>
+      </fieldset>
+    </>
+  );
+
+  if (!isDesktop) {
+    return (
+      <ModalDialog
+        open
+        onClose={closeSidebar}
+        aria-labelledby={titleId}
+        className="max-h-[80dvh] gap-2 pt-3 pb-[calc(36px+env(safe-area-inset-bottom))]"
+      >
+        <span aria-hidden="true" className="ui-sheet-grabber" />
+        <div className="flex min-h-9 items-center justify-between gap-3">
+          <h2 id={titleId} className="m-0 text-lg font-bold">{title}</h2>
+          <button
+            type="button"
+            onClick={closeSidebar}
+            className="ui-button-ghost -mr-2.5 min-h-9 rounded-chip px-2.5 text-sm text-ink-muted"
+          >
+            닫기
+          </button>
+        </div>
+        <div className="flex flex-col">{body}</div>
+      </ModalDialog>
+    );
+  }
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-        onClick={closeSidebar}
-      />
-
-      {/* Radix Select locks body scrolling; keep this fixed edge aligned with its scrollbar compensation. */}
-      <div role="dialog" aria-modal="true" aria-labelledby="task-sidebar-title" className="right-scroll-bar-position fixed right-0 top-0 z-50 h-dvh w-80 max-w-[calc(100%_-_var(--removed-body-scroll-bar-size,0px))] bg-white shadow-2xl transition-transform duration-300 ease-in-out dark:bg-gray-900">
-        <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
-          <div className="mb-6 flex shrink-0 items-center justify-between sm:mb-8">
-            <h2 id="task-sidebar-title" className="text-xl font-bold text-gray-800 dark:text-white">
-              {choosingNextTask ? '다음 작업 선택' : '작업 목록'}
-            </h2>
-            <button
-              onClick={closeSidebar}
-              aria-label="작업 목록 닫기"
-              className="rounded-full p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-                className="h-6 w-6 text-gray-500"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {choosingNextTask && (
-            <p role="status" className="mb-4 text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-              {selectionDisabled
-                ? '현재 작업을 마무리하고 있어요. 남은 시간은 멈춰 있어요.'
-                : '타이머가 잠시 멈췄어요. 다음 작업을 고르면 남은 시간부터 자동으로 시작해요.'}
-            </p>
-          )}
-          <fieldset disabled={selectionDisabled} className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain disabled:opacity-60">
-            {userId && onCreateTask && <TaskCreateForm key={userId} userId={userId} onCreateTask={onCreateTask} />}
-            {!choosingNextTask && <button
-              onClick={() => selectAndClose(null)}
-              aria-pressed={selectedTaskId === null}
-              className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-rose-300 dark:focus-visible:ring-rose-700 ${
-                selectedTaskId === null
-                  ? SECTION_STYLES.rose.selected
-                  : 'border-transparent text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-slate-800/50'
-              }`}
-            >
-              <CircleDashed aria-hidden="true" className="h-5 w-5 shrink-0 opacity-70" />
-              작업 없이 시작
-            </button>}
-            {choosingNextTask && !hasNextTask && (
-              <p className="rounded-xl bg-gray-50 p-4 text-sm leading-relaxed text-gray-500 dark:bg-slate-800 dark:text-gray-400">
-                이어서 할 작업이 없어요. 일정을 추가한 뒤 다음 작업으로 선택해주세요. 남은 시간은 유지돼요.
-              </p>
-            )}
-
-            <TaskSection
-              title="오늘"
-              items={availableTasks(tasks)}
-              color="rose"
-              selectedTaskId={selectedTaskId}
-              onSelectTask={selectAndClose}
-              onToggleTask={onToggleTask}
-            />
-            <TaskSection
-              title="이번 주"
-              items={availableTasks(weeklyPlans)}
-              color="indigo"
-              selectedTaskId={selectedTaskId}
-              onSelectTask={selectAndClose}
-              onToggleTask={onToggleTask}
-            />
-            <TaskSection
-              title="이번 달"
-              items={availableTasks(monthlyPlans)}
-              color="purple"
-              selectedTaskId={selectedTaskId}
-              onSelectTask={selectAndClose}
-              onToggleTask={onToggleTask}
-            />
-            <LongTermTaskSection
-              items={availableLongTermTasks}
-              materializedSubtaskIds={materializedSubtaskIds}
-              pendingSubtaskId={pendingSubtaskId}
-              pendingLongTermTaskId={pendingLongTermTaskId}
-              unavailableParentIds={unavailableParentIds}
-              pendingToggleSubtaskIds={pendingToggleSubtaskIds}
-              onSelectLongTermTask={(task) => { void selectLongTermTaskAndClose(task); }}
-              onSelectSubtask={(subtask) => {
-                void selectSubtaskAndClose(subtask);
-              }}
-              onToggleSubtask={onToggleSubtask}
-            />
-          </fieldset>
-        </div>
-      </div>
-    </>
+    <Popover.Root open onOpenChange={(open) => { if (!open) closeSidebar(); }}>
+      {anchorRef ? <Popover.Anchor virtualRef={anchorRef} /> : null}
+      <Popover.Portal>
+        <Popover.Content
+          ref={contentRef}
+          aria-label={title}
+          side="bottom"
+          align="center"
+          sideOffset={6}
+          collisionPadding={16}
+          // 보드처럼 늘 버튼 아래(시트 위)로 열고, 남은 높이 안에서 스크롤한다.
+          avoidCollisions={false}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            interactedOutsideRef.current = false;
+            const content = contentRef.current;
+            (content?.querySelector<HTMLElement>('[data-picker-autofocus]')
+              ?? content?.querySelector<HTMLElement>('[data-picker-row]')
+              ?? content)?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            // 선택·Escape로 닫으면 버튼으로 돌아가고, 바깥을 눌러 닫으면 누른 곳에 둔다.
+            event.preventDefault();
+            if (!interactedOutsideRef.current) anchorRef?.current?.focus();
+          }}
+          onInteractOutside={(event) => {
+            // 버튼을 다시 누르면 닫혔다가 바로 열리지 않도록 버튼 쪽 토글에 맡긴다.
+            if (anchorRef?.current?.contains(event.target as Node)) {
+              event.preventDefault();
+              return;
+            }
+            interactedOutsideRef.current = true;
+          }}
+          onEscapeKeyDown={(event) => {
+            // 작업 추가 칸에서 누른 Escape는 입력만 닫는다.
+            if (document.activeElement?.closest('[data-task-create-form]')) event.preventDefault();
+          }}
+          // 안쪽 키 입력이 window의 타이머 단축키(Space)로 새지 않게 막는다.
+          onKeyDown={(event) => event.stopPropagation()}
+          className="ui-popover ui-popover-surface z-40 flex w-[464px] max-w-[calc(100vw-32px)] flex-col gap-1 overflow-y-auto overscroll-contain rounded-panel px-3 pt-2.5 pb-3 outline-none"
+          style={{ maxHeight: 'min(560px, calc(var(--radix-popover-content-available-height, 560px) - 8px))' }}
+        >
+          {body}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

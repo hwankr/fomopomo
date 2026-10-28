@@ -62,7 +62,10 @@ vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({
     return null;
   },
 }));
-vi.mock('@/components/timer/ui/ThemeBackground', () => ({ ThemeBackground: () => null }));
+// 과목 이름은 작업 선택기 표시에만 쓰인다. 실제 조회(Supabase)는 하지 않는다.
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
+}));
 vi.mock('@/components/timer/ui/TimerDisplay', () => ({
   TimerDisplay: (props: Record<string, unknown>) => {
     mocks.displayProps.push(props);
@@ -145,7 +148,7 @@ const jumpStopwatch = async (milliseconds: number) => {
 const startFreshStopwatch = async () => {
   profile = null;
   const view = await mount();
-  await act(async () => view.getByRole('button', { name: /^스톱워치$/ }).click());
+  await act(async () => view.getByRole('tab', { name: '스톱워치' }).click());
   await act(async () => clickStopwatch('onToggleStopwatch'));
   return view;
 };
@@ -409,7 +412,7 @@ describe('TimerApp stopwatch continuous-run auto-pause', () => {
     const startedAt = Date.now();
     profile = pausedProfile({ timer_type: 'stopwatch', timer_duration: 0, total_stopwatch_time: 0 });
     const sourceView = await mount();
-    await act(async () => sourceView.getByRole('button', { name: /^스톱워치$/ }).click());
+    await act(async () => sourceView.getByRole('tab', { name: '스톱워치' }).click());
     await act(async () => clickStopwatch('onToggleStopwatch'));
     await jumpStopwatch(overdueMilliseconds);
     expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
@@ -711,7 +714,7 @@ describe('shared clock identity across devices', () => {
     });
     profile = pausedProfile({ status: 'online', timer_type: kind, total_stopwatch_time: 0, study_session_id: null });
     const a = await mount();
-    if (kind === 'stopwatch') await act(async () => a.getByRole('button', { name: /^스톱워치$/ }).click());
+    if (kind === 'stopwatch') await act(async () => a.getByRole('tab', { name: '스톱워치' }).click());
     const toggle = () => kind === 'timer' ? clickTimer('onToggleTimer') : clickStopwatch('onToggleStopwatch');
     const save = () => kind === 'timer' ? clickTimer('onSaveTimer') : clickStopwatch('onSaveStopwatch');
     await act(async () => toggle());
@@ -770,11 +773,12 @@ it.each([true, false])('keeps stopwatch ownership when timer mode is clicked wit
   await jumpStopwatch(60_000);
   if (!running) await act(async () => clickStopwatch('onToggleStopwatch'));
   const before = persisted();
-  await act(async () => view.getByRole('button', { name: /^타이머$/ }).click());
-  await act(async () => (lastProps().onChangeMode as (mode: string) => void)('shortBreak'));
+  // 스톱워치 보기에서 타이머 모드 탭을 누르면 타이머 보기로 돌아가지만, 기록이 있는
+  // 스톱워치를 두고 모드를 바꾸지는 않는다.
+  await act(async () => view.getByRole('tab', { name: '짧은 휴식' }).click());
   expect(persisted()).toEqual(before);
   expect(lastProps().timerMode).toBe('focus');
-  await act(async () => view.getByRole('button', { name: /^스톱워치$/ }).click());
+  await act(async () => view.getByRole('tab', { name: '스톱워치' }).click());
   expect(lastStopwatchProps().stopwatchTime).toBe(60);
   expect(lastStopwatchProps().isStopwatchRunning).toBe(running);
   await act(async () => clickStopwatch('onSaveStopwatch'));

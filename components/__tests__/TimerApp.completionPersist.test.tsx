@@ -1,4 +1,4 @@
-import { render, act, fireEvent } from '@testing-library/react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import toast from 'react-hot-toast';
@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
     isMuted: true,
     taskPopupEnabled: false,
     tasks: [] as string[],
-    presets: [],
+    presets: [] as { id: string; label: string; minutes: number }[],
   },
   useSettingsResult: null as Record<string, unknown> | null,
   useSoundResult: null as Record<string, unknown> | null,
@@ -151,8 +151,9 @@ vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({
   StopwatchDisplay: () => null,
 }));
 
-vi.mock('@/components/timer/ui/ThemeBackground', () => ({
-  ThemeBackground: () => null,
+// 과목 이름은 작업 선택기 표시에만 쓰인다. 실제 조회(Supabase)는 하지 않는다.
+vi.mock('@/hooks/useStudySubjects', () => ({
+  useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
 }));
 
 vi.mock('react-hot-toast', () => {
@@ -225,6 +226,19 @@ const fakeRecord = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// 모드 탭과 빠른 설정 창(프리셋)은 실제 UI로 누른다. TimerDisplay만 모의라 설정 창은
+// 그 onOpenSettings 콜백으로 연다.
+const MODE_TAB_LABEL = { focus: '뽀모도로', shortBreak: '짧은 휴식', longBreak: '긴 휴식' } as const;
+const clickModeTab = (mode: keyof typeof MODE_TAB_LABEL) =>
+  fireEvent.click(screen.getByRole('tab', { name: MODE_TAB_LABEL[mode] }));
+const clickPreset = async (minutes: number) => {
+  mocks.settings.presets = [{ id: `preset-${minutes}`, label: '집중', minutes }];
+  await act(async () => {
+    (mocks.timerDisplayProps.at(-1)!.onOpenSettings as () => void)();
+  });
+  fireEvent.click(screen.getByRole('button', { name: `집중 ${minutes}분` }));
+};
+
 describe('TimerApp completion persistence', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -241,6 +255,7 @@ describe('TimerApp completion persistence', () => {
     mocks.settings.shortBreak = 5;
     mocks.settings.longBreak = 15;
     mocks.settings.autoStartBreaks = false;
+    mocks.settings.presets = [];
     Object.assign(mocks.useTasksResult!, {
       dbTasks: [], selectedTask: '', selectedTaskId: null, selectedSubjectId: null,
     });
@@ -435,10 +450,8 @@ describe('TimerApp completion persistence', () => {
       mocks.savePendingRecord.mockReturnValueOnce(response.promise);
       await mountPausedFocus();
       await act(async () => clickTimer('onSaveTimer'));
-      await act(async () => {
-        if (change === 'mode') (lastTimerProps().onChangeMode as (mode: string) => void)('shortBreak');
-        else (lastTimerProps().onPresetClick as (minutes: number) => void)(50);
-      });
+      if (change === 'mode') clickModeTab('shortBreak');
+      else await clickPreset(50);
       const snapshot = readSavedState();
 
       await act(async () => response.resolve('saved'));
@@ -588,9 +601,7 @@ describe('TimerApp completion persistence', () => {
         );
         await act(async () => {});
 
-        await act(async () => {
-          (lastTimerDisplayProps().onChangeMode as (mode: string) => void)(to);
-        });
+        clickModeTab(to);
 
         expect(lastTimerDisplayProps().timerMode).toBe(to);
         expect(lastTimerDisplayProps().timeLeft).toBe(seconds[to]);
@@ -626,9 +637,7 @@ describe('TimerApp completion persistence', () => {
         vi.advanceTimersByTime(60_000);
       });
 
-      await act(async () => {
-        (lastTimerDisplayProps().onChangeMode as (mode: string) => void)('shortBreak');
-      });
+      clickModeTab('shortBreak');
 
       expect(mocks.createPendingRecord).toHaveBeenCalledTimes(1);
       expect(mocks.createPendingRecord).toHaveBeenCalledWith('pomo', 60, Date.now());
@@ -869,9 +878,7 @@ describe('TimerApp completion persistence', () => {
       );
       await act(async () => {});
 
-      await act(async () => {
-        (lastTimerDisplayProps().onPresetClick as (minutes: number) => void)(50);
-      });
+      await clickPreset(50);
 
       const saved = savedFullState();
       expect(saved.timer.timeLeft).toBe(50 * 60);

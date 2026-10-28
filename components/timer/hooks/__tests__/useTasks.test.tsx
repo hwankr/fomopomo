@@ -53,8 +53,17 @@ type Row = {
   source_subtask_id?: string | null;
   source_long_term_task_id?: string | null;
   subject_id?: string | null;
+  estimated_pomodoros?: number | null;
 };
-type SessionRow = { task_id: string | null; duration: number | null };
+type SessionRow = {
+  task_id: string | null;
+  duration: number | null;
+  id?: number | string;
+  created_at?: string;
+  mode?: string | null;
+  session_batch_id?: string | null;
+  group_id?: string | null;
+};
 type LongTermRow = {
   id: string;
   title: string;
@@ -295,7 +304,7 @@ describe('useTasks', () => {
       parentTitle: '자격증 공부',
     });
     expect(taskSelectCalls[0]).toBe(
-      'id, title, status, source_subtask_id, source_long_term_task_id, subject_id'
+      'id, title, status, source_subtask_id, source_long_term_task_id, subject_id, estimated_pomodoros'
     );
     expect(doneTask).toMatchObject({ id: 't2', status: 'done' });
 
@@ -348,6 +357,31 @@ describe('useTasks', () => {
         options: { ascending: true },
       },
     ]);
+  });
+
+  it('gives today tasks a pomodoro goal and counts each saved focus batch once', async () => {
+    taskRows = [
+      { id: 't1', title: '목표 있음', status: 'todo', estimated_pomodoros: 4 },
+      { id: 't2', title: '목표 없음', status: 'todo', estimated_pomodoros: null },
+    ];
+    sessionRows = [
+      // 공부일 경계에서 나뉜 한 기록(같은 배치)은 한 번만 센다.
+      { id: 1, task_id: 't1', duration: 900, mode: 'pomo', session_batch_id: 'batch-a', created_at: '2026-10-28T03:00:00.000Z' },
+      { id: 2, task_id: 't1', duration: 600, mode: 'pomo', session_batch_id: 'batch-a', created_at: '2026-10-28T03:15:00.000Z' },
+      { id: 3, task_id: 't1', duration: 1500, mode: 'focus', session_batch_id: null, created_at: '2026-10-28T04:00:00.000Z' },
+      // 스톱워치는 시간에는 들어가지만 뽀모도로로 세지 않는다.
+      { id: 4, task_id: 't1', duration: 1200, mode: 'stopwatch', session_batch_id: 'batch-c', created_at: '2026-10-28T05:00:00.000Z' },
+      { id: 5, task_id: 'w1', duration: 1500, mode: 'pomo', session_batch_id: 'batch-w', created_at: '2026-10-28T06:00:00.000Z' },
+    ];
+
+    const { result } = renderHook(() => useTasks(true));
+    await waitFor(() => expect(result.current.dbTasks).toHaveLength(2));
+
+    expect(result.current.dbTasks[0]).toMatchObject({ id: 't1', pomodoroGoal: 4, pomodoroCount: 2, durationSeconds: 4200 });
+    expect(result.current.dbTasks[1]).toMatchObject({ id: 't2', pomodoroGoal: 1, pomodoroCount: 0 });
+    // 주·월 계획에는 목표 열이 없어 구슬을 그리지 않는다.
+    expect(result.current.weeklyPlans[0].pomodoroGoal).toBeUndefined();
+    expect(result.current.weeklyPlans[0].durationSeconds).toBe(1500);
   });
 
   it('normalizes nullable parent and subtask positions before exposing items', async () => {
