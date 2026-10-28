@@ -186,4 +186,12 @@ describe('기존 기록 과목 일괄 분류', () => {
     expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
     expect(screen.getByText('공통 과목 관리')).toBeInTheDocument();
   });
+  it('저장 결과만 살짝 나타나고 고르는 동안의 개수 안내는 그대로 바뀐다', async () => {
+    render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
+    fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+    expect(screen.getByRole('status').querySelector('.animate-fade-in')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(await screen.findByText('2개 기록을 미분류로 바꿨어요.')).toHaveClass('animate-fade-in');
+  });
 });

@@ -11,11 +11,12 @@ import MobileTopBar from '@/components/layout/MobileTopBar';
 import NotificationManager from '@/components/NotificationManager';
 import DonationSection from '@/components/DonationSection';
 import SubjectManager from '@/components/subjects/SubjectManager';
+import { getRunningAnimations, prefersReducedMotion, whenAnimationsFinish } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
 import AccountSection from './AccountSection';
 import { deleteAccount, resetAccount } from './accountActions';
 import { SectionHeading, SettingRow, SettingsSection, SettingSwitch, Stepper } from './SettingsControls';
-import { MAX_PRESETS, useSettingsForm } from './useSettingsForm';
+import { MAX_PRESETS, useSettingsForm, type PresetFormEntry } from './useSettingsForm';
 
 // normalizeSettings가 저장할 때 맞추는 범위와 같다.
 const MAX_MINUTES = 999;
@@ -48,6 +49,10 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
   // 계정 초기화·탈퇴·로그아웃이 화면을 떠나기 시작하면 떠날 때 저장과 이탈 경고를 끈다.
   const leavingRef = useRef(false);
   const pendingEditsRef = useRef({ persist: form.persistPendingEdits, stash: form.stashPendingEdits });
+  // 방금 추가한 프리셋 줄만 나타나고, 지운 줄은 그 자리에서 사라진 뒤 내린다(값은 바로 지운다).
+  const [addedPresetId, setAddedPresetId] = useState<string | null>(null);
+  const [removedPreset, setRemovedPreset] = useState<{ preset: PresetFormEntry; index: number } | null>(null);
+  const leavingPresetRef = useRef<HTMLLIElement>(null);
 
   useLayoutEffect(() => {
     pendingEditsRef.current = { persist: form.persistPendingEdits, stash: form.stashPendingEdits };
@@ -83,6 +88,12 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
       window.removeEventListener('pagehide', stashOnPageHide);
     };
   }, [form.isDirty]);
+
+  useLayoutEffect(() => {
+    if (!removedPreset) return;
+    const animations = prefersReducedMotion() ? [] : getRunningAnimations([leavingPresetRef.current]);
+    return whenAnimationsFinish(animations, () => setRemovedPreset((current) => (current === removedPreset ? null : current)));
+  }, [removedPreset]);
 
   const handleSave = async () => {
     const result = await form.save();
@@ -132,8 +143,24 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
   };
 
   const addPreset = () => {
-    if (!form.addPreset()) toast.error('최대 3개까지만 가능합니다.');
+    const id = form.addPreset();
+    if (!id) {
+      toast.error('최대 3개까지만 가능합니다.');
+      return;
+    }
+    setAddedPresetId(id);
   };
+
+  const removePreset = (preset: PresetFormEntry, index: number) => {
+    form.removePreset(preset.id);
+    setAddedPresetId(null);
+    setRemovedPreset({ preset, index });
+  };
+
+  const presetRows = presets.map((preset, index) => ({ preset, index, leaving: false }));
+  if (removedPreset && !presets.some((preset) => preset.id === removedPreset.preset.id)) {
+    presetRows.splice(Math.min(removedPreset.index, presetRows.length), 0, { ...removedPreset, leaving: true });
+  }
 
   const saveDisabled = !form.ready || form.subjectsBusy;
   const status = form.subjectsBusy
@@ -141,6 +168,9 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
     : form.isDirty
       ? (form.recoveredDraft ? RECOVERED_STATUS : DIRTY_STATUS)
       : saveStatus;
+  // 불러오면서 보이는 상태(되살린 변경 사항)는 그대로 두고, 그 뒤 동작으로 바뀐 문구만 살짝 나타난다.
+  const [quietStatus, setQuietStatus] = useState({ ready: form.ready, status });
+  if (quietStatus.ready !== form.ready) setQuietStatus({ ready: form.ready, status });
 
   return (
     <>
@@ -213,10 +243,18 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
               description="타이머에서 바로 고를 수 있는 집중 시간이에요. 최대 3개까지 둘 수 있어요."
             />
             <ul className="m-0 flex list-none flex-col gap-1.5 p-0 md:col-span-2">
-              {presets.map((preset, index) => {
+              {presetRows.map(({ preset, index, leaving }) => {
                 const name = `프리셋 ${index + 1}`;
                 return (
-                  <li key={preset.id} className="flex items-center gap-1.5 md:gap-2.5">
+                  <li
+                    key={preset.id}
+                    ref={leaving ? leavingPresetRef : undefined}
+                    inert={leaving || undefined}
+                    className={cn(
+                      'flex items-center gap-1.5 md:gap-2.5',
+                      leaving ? 'pointer-events-none animate-fade-out' : preset.id === addedPresetId && 'animate-fade-up',
+                    )}
+                  >
                     <input
                       type="text"
                       aria-label={`${name} 이름`}
@@ -240,7 +278,7 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
                     />
                     <button
                       type="button"
-                      onClick={() => form.removePreset(preset.id)}
+                      onClick={() => removePreset(preset, index)}
                       aria-label={`${name} 삭제`}
                       // 보이는 원은 36px(모바일)·40px, 누르는 영역은 44px(왼쪽 +버튼과 겹치지 않게 오른쪽으로 더 늘린다)
                       className="ui-icon-button size-9 text-ink-muted before:absolute before:-inset-y-1 before:-right-[5px] before:-left-[3px] before:content-[''] md:size-10 md:before:-inset-0.5"
@@ -350,7 +388,7 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
             <SettingRow label="음소거">
               <SettingSwitch label="음소거" checked={isMuted} onChange={() => form.setIsMuted(!isMuted)} />
             </SettingRow>
-            <div className={cn('flex flex-col gap-2 py-1.5 transition-opacity duration-200 md:gap-2.5 md:py-1', isMuted && 'opacity-40')}>
+            <div className={cn('flex flex-col gap-2 py-1.5 transition-opacity md:gap-2.5 md:py-1', isMuted && 'opacity-40')}>
               <div className="flex items-center justify-between">
                 <label htmlFor="settings-volume" className="font-semibold">볼륨</label>
                 <span className="font-bold">{volume}%</span>
@@ -398,7 +436,9 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
           >
             저장하기
           </button>
-          <span role="status" className="text-[13px] text-ink-muted md:text-sm">{status}</span>
+          <span role="status" className="text-[13px] text-ink-muted md:text-sm">
+            {status ? <span key={status} className={status !== quietStatus.status ? 'animate-fade-in' : undefined}>{status}</span> : null}
+          </span>
         </div>
       </div>
     </>

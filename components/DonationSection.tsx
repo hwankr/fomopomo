@@ -36,7 +36,7 @@ export default function DonationSection({
           href={BMC_LINK}
           target="_blank"
           rel="noopener noreferrer"
-          className={`ui-press mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-tile px-6 font-semibold transition-colors ${BMC_BUTTON}`}
+          className={`ui-press mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-tile px-6 font-semibold transition-[background-color,scale] ${BMC_BUTTON}`}
         >
           <Coffee aria-hidden="true" className="size-5" />
           Buy Me a Coffee
@@ -52,7 +52,7 @@ export default function DonationSection({
         href={BMC_LINK}
         target="_blank"
         rel="noopener noreferrer"
-        className={`inline-flex min-h-10 items-center gap-2 rounded-control px-4 text-sm font-semibold transition-colors ${BMC_BUTTON}`}
+        className={`ui-press inline-flex min-h-10 items-center gap-2 rounded-control px-4 text-sm font-semibold transition-[background-color,scale] ${BMC_BUTTON}`}
       >
         <Coffee aria-hidden="true" className="size-4" />
         Buy Me a Coffee

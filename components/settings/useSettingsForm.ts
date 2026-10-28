@@ -275,11 +275,12 @@ export function useSettingsForm() {
     return 'reset';
   };
 
-  /** Returns false when the preset limit is reached. */
+  /** Returns the new preset's id, or null when the preset limit is reached. */
   const addPreset = () => {
-    if (presets.length >= MAX_PRESETS) return false;
-    setPresets([...presets, { id: Date.now().toString(), label: '집중', minutes: 25 }]);
-    return true;
+    if (presets.length >= MAX_PRESETS) return null;
+    const id = Date.now().toString();
+    setPresets([...presets, { id, label: '집중', minutes: 25 }]);
+    return id;
   };
 
   const removePreset = (id: string) => {

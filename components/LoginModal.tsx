@@ -186,7 +186,7 @@ export default function LoginModal({
         <button
           type="button"
           onClick={() => setIsSignUp((current) => !current)}
-          className="font-bold text-ink hover:text-pomo"
+          className="font-bold text-ink transition-colors hover:text-pomo"
         >
           {isSignUp ? '로그인' : '회원가입'}
         </button>

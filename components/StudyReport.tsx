@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import {
   startOfWeek,
   startOfMonth,
@@ -19,6 +19,8 @@ import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { getDayStart } from '@/lib/dateUtils';
 import { StudySubject } from '@/lib/studySubjects';
 import { cn } from '@/lib/utils';
+import { playMotion } from '@/components/ui/motion';
+import { usePresence } from '@/components/ui/usePresence';
 import SubjectHistoryManager from '@/components/subjects/SubjectHistoryManager';
 import { formatRoundedHours, formatShortDuration, formatStudyDuration } from '@/components/profile/studyDuration';
 
@@ -55,6 +57,9 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
   const statsTitleId = useId();
   const totalsTitleId = useId();
   const historyId = useId();
+  const chartRef = useRef<HTMLDivElement>(null);
+  const breakdownRef = useRef<HTMLDivElement>(null);
+  const totalsRef = useRef<HTMLDivElement>(null);
 
   const {
     loading,
@@ -87,6 +92,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
 
   const canGoNextMonth = !isSameMonth(activeMonth, today);
   const canGoNextWeek = !isSameWeek(activeWeekStart, today, { weekStartsOn: 1 });
+  const periodStart = (viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? startOfMonth(activeMonth) : new Date(activeYear, 0, 1)).getTime();
 
   // Fetch data when view mode or active date changes (로그인한 사용자에 한함)
   useEffect(() => {
@@ -181,11 +187,43 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
           nextLabel: '다음 년도', onNext: () => setActiveYear(prev => prev + 1), canNext: activeYear < currentYear,
         };
 
+  // 사용자가 기간을 넘기고 새 기간의 집계가 도착하면 막대와 작업별 시간(선택 기간 합계도)이 넘긴 쪽에서 6px 들어오며
+  // 나타나고 막대는 바닥에서 자란다. 단위를 바꾸면 방향 없이 나타난다. 처음 불러올 때, 같은 기간을 다시 조회할 때
+  // (과목 정리 뒤 등)는 움직이지 않는다.
+  const shownPeriodRef = useRef<{ chartData: ChartData[]; viewMode: ViewMode; periodStart: number } | null>(null);
+  useLayoutEffect(() => {
+    const shown = shownPeriodRef.current;
+    if (loading || shown?.chartData === chartData) return;
+    shownPeriodRef.current = { chartData, viewMode, periodStart };
+    if (!shown || (shown.viewMode === viewMode && shown.periodStart === periodStart)) return;
+    const shift = shown.viewMode === viewMode ? Math.sign(periodStart - shown.periodStart) * 6 : 0;
+    const contents = [chartRef.current, breakdownRef.current, overviewScope === 'period' ? totalsRef.current : null];
+    for (const element of contents) playMotion(element, [{ opacity: 0, transform: `translateX(${shift}px)`, offset: 0 }]);
+    chartRef.current?.querySelectorAll('[data-bar]').forEach(bar => {
+      playMotion(bar, [{ transform: 'scaleY(0)', offset: 0 }], { duration: 'emphasized' });
+    });
+  }, [chartData, loading, viewMode, periodStart, overviewScope]);
+
+  // 합계 범위·묶는 기준을 바꾸면 새 목록이 살짝 나타난다.
+  const totalsViewRef = useRef(`${overviewScope}:${grouping}`);
+  useLayoutEffect(() => {
+    const view = `${overviewScope}:${grouping}`;
+    if (totalsViewRef.current === view) return;
+    totalsViewRef.current = view;
+    playMotion(totalsRef.current, [{ opacity: 0, offset: 0 }]);
+  }, [overviewScope, grouping]);
+
+  const selectBucket = (bucketKey: string) => {
+    // 다른 막대를 고르면 그날의 작업별 시간이 살짝 나타난다.
+    if (bucketKey !== selectedBucket?.bucketKey) playMotion(breakdownRef.current, [{ opacity: 0, offset: 0 }]);
+    setSelectedBucketKey(bucketKey);
+  };
+
   const retryStats = () => void fetchStats(viewMode, viewMode === 'week' ? activeWeekStart : viewMode === 'month' ? activeMonth : new Date(activeYear, 0, 1), userId ?? undefined);
   const selectedTasks = selectedBucket ? Object.entries(selectedBucket.taskTotals).sort((a, b) => b[1] - a[1]) : [];
 
   return (
-    <div className="ui-panel-enter flex w-full flex-col gap-9 md:gap-10">
+    <div className="flex w-full flex-col gap-9 md:gap-10">
       <section aria-labelledby={statsTitleId} className="flex flex-col gap-3.5 md:gap-5">
         <div className="flex flex-col gap-3.5 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-4">
           <h2 id={statsTitleId} className="ui-h2">집중 통계</h2>
@@ -205,7 +243,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
                 type="button"
                 onClick={range.onReset}
                 title={range.resetTitle}
-                className="-ml-2 min-h-8 rounded-[9px] px-2 text-[15px] font-bold hover:bg-hover md:ml-0 md:min-h-9 md:min-w-[120px] md:rounded-chip md:px-2.5 md:font-semibold"
+                className="ui-press -ml-2 min-h-8 rounded-[9px] px-2 text-[15px] font-bold transition-[background-color,scale] hover:bg-hover md:ml-0 md:min-h-9 md:min-w-[120px] md:rounded-chip md:px-2.5 md:font-semibold"
               >
                 {range.label}
               </button>
@@ -221,6 +259,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
             <p role="status" className="absolute top-0 left-0 m-0 text-[13px] text-ink-muted">통계를 불러오는 중이에요…</p>
           ) : null}
           <div
+            ref={chartRef}
             className={cn(
               // 보드의 막대 상자는 content-box(높이 + 아래 여백): 모바일 180 + 22, 데스크톱 220 + 24
               'flex h-[202px] items-end pb-[22px] [--bar-max:120px] md:h-[244px] md:pb-6 md:[--bar-max:150px]',
@@ -241,11 +280,11 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
                   type="button"
                   aria-pressed={isSelected}
                   aria-label={bucketAriaLabel(bucket)}
-                  onClick={() => setSelectedBucketKey(bucket.bucketKey)}
-                  className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-[5px] rounded-[6px] p-0 hover:brightness-92 md:gap-1.5"
+                  onClick={() => selectBucket(bucket.bucketKey)}
+                  className="ui-press relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-[5px] rounded-[6px] p-0 transition-[filter,scale] hover:brightness-92 md:gap-1.5"
                 >
                   {viewMode !== 'month' ? (
-                    <span aria-hidden="true" className={cn('text-[10px] font-semibold whitespace-nowrap md:text-[11px]', isSelected ? 'text-ink' : 'text-ink-muted')}>
+                    <span aria-hidden="true" className={cn('text-[10px] font-semibold whitespace-nowrap transition-colors md:text-[11px]', isSelected ? 'text-ink' : 'text-ink-muted')}>
                       {viewMode === 'year' ? (
                         <>
                           {/* 모바일 연간은 12칸이 좁아 반올림한 시간만 쓴다. 정확한 값은 버튼 이름과 아래 작업별 시간에 있다. */}
@@ -256,10 +295,11 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
                     </span>
                   ) : null}
                   <span
+                    data-bar
                     aria-hidden="true"
                     style={barStyle}
                     className={cn(
-                      'block w-full max-w-9 rounded-t-[5px] rounded-b-[3px] transition-[height] duration-300 motion-reduce:transition-none md:max-w-11 md:rounded-t-[6px]',
+                      'block w-full max-w-9 origin-bottom rounded-t-[5px] rounded-b-[3px] transition-colors md:max-w-11 md:rounded-t-[6px]',
                       isSelected ? 'bg-pomo' : bucket.seconds > 0 ? 'bg-pomo-soft' : 'bg-line-soft',
                     )}
                   />
@@ -278,7 +318,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 pt-1 md:gap-2.5 md:pt-2">
+        <div ref={breakdownRef} className="flex flex-col gap-2 pt-1 md:gap-2.5 md:pt-2">
           <h3 className="m-0 text-sm font-semibold">
             {selectedBucket ? `${bucketTitle(selectedBucket)} 작업별 집중 시간` : '작업별 집중 시간'}
           </h3>
@@ -313,7 +353,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
         </div>
         {(subjectsError || statsError) && <p role="alert" className="m-0 text-sm text-pomo-deep">{subjectsError || statsError}</p>}
         {statsError && <button type="button" onClick={retryStats} className="ui-button-ghost -ml-3 self-start text-pomo">통계 다시 조회</button>}
-        {loading ? <p role="status" className="m-0 text-[13px] text-ink-muted">통계를 불러오는 중…</p> : <StudyTotalsOverview key={`${userId}:${overviewScope}:${grouping}`} totals={overviewScope === 'period' ? periodTotals : lifetimeTotals} hasAnyRecord={lifetimeTotals.seconds > 0} subjects={subjects} grouping={grouping} />}
+        {loading ? <p role="status" className="m-0 text-[13px] text-ink-muted">통계를 불러오는 중…</p> : <StudyTotalsOverview ref={totalsRef} key={`${userId}:${overviewScope}:${grouping}`} totals={overviewScope === 'period' ? periodTotals : lifetimeTotals} hasAnyRecord={lifetimeTotals.seconds > 0} subjects={subjects} grouping={grouping} />}
 
         {userId && <div className="flex flex-col gap-3 pt-1">
           <button type="button" aria-expanded={showHistoryManager} aria-controls={showHistoryManager ? historyId : undefined} onClick={() => setShowHistoryManager(value => !value)} className="ui-button-secondary ui-press self-start rounded-tile px-4">
@@ -328,7 +368,8 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
 
 type TotalsRow = { id: string; name: string; seconds: number; taskTotals: Record<string, number>; unclassified: boolean };
 
-function StudyTotalsOverview({ totals, hasAnyRecord, subjects, grouping }: {
+function StudyTotalsOverview({ ref, totals, hasAnyRecord, subjects, grouping }: {
+  ref?: Ref<HTMLDivElement>;
   totals: StudyTotals;
   hasAnyRecord: boolean;
   subjects: StudySubject[];
@@ -350,7 +391,7 @@ function StudyTotalsOverview({ totals, hasAnyRecord, subjects, grouping }: {
   });
 
   return (
-    <div className="ui-panel-enter flex flex-col gap-2">
+    <div ref={ref} className="flex flex-col gap-2">
       <p className="m-0 text-sm font-semibold text-ink-muted">합계 {formatStudyDuration(totals.seconds)}</p>
       {!rows.length ? (
         <p className="m-0 py-4 text-sm text-ink-muted">
@@ -366,10 +407,10 @@ function StudyTotalsOverview({ totals, hasAnyRecord, subjects, grouping }: {
             const content = <>
               <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 font-semibold md:gap-2">
                 <span className="truncate">{row.name}</span>
-                {expandable ? <ChevronDown aria-hidden="true" size={14} strokeWidth={2.2} className={cn('shrink-0 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', open && 'rotate-180')} /> : null}
+                {expandable ? <ChevronDown aria-hidden="true" size={14} strokeWidth={2.2} className={cn('shrink-0 text-ink-muted transition-transform duration-(--duration-enter) motion-reduce:transition-none', open && 'rotate-180')} /> : null}
               </span>
               <span aria-hidden="true" className="col-span-2 row-start-2 block h-1.5 overflow-hidden rounded-full bg-surface md:col-span-1 md:col-start-2 md:row-start-1 md:h-2">
-                <span className={cn('block h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none', row.unclassified ? 'bg-bar' : 'bg-pomo')} style={{ width: `${Math.max(2, row.seconds / maxSeconds * 100)}%` }} />
+                <span className={cn('block h-full rounded-full', row.unclassified ? 'bg-bar' : 'bg-pomo')} style={{ width: `${Math.max(2, row.seconds / maxSeconds * 100)}%` }} />
               </span>
               <span className="col-start-2 row-start-1 flex items-baseline justify-end gap-2 whitespace-nowrap md:col-start-3">
                 <span className="text-xs font-medium text-ink-subtle">{share.toFixed(1)}%</span>
@@ -386,27 +427,39 @@ function StudyTotalsOverview({ totals, hasAnyRecord, subjects, grouping }: {
                 ) : (
                   <div className={rowClass}>{content}</div>
                 )}
-                {open ? (
-                  <ul id={childrenId} aria-label={`${row.name} 세부 할 일`} className="ui-panel-enter m-0 mb-1.5 flex list-none flex-col p-0 pl-3.5 md:pl-5">
-                    {Object.entries(row.taskTotals).sort((a, b) => b[1] - a[1]).map(([task, seconds], _, tasks) => {
-                      const childMax = Math.max(1, tasks[0]?.[1] ?? 0);
-                      return (
-                        <li key={task} className="grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 text-sm text-ink-muted md:min-h-10 md:grid-cols-[160px_minmax(0,1fr)_150px] md:gap-4">
-                          <span className="min-w-0 truncate" title={task}>{task}</span>
-                          <span aria-hidden="true" className="hidden h-1.5 overflow-hidden rounded-full bg-surface md:block">
-                            <span className="block h-full rounded-full bg-bar" style={{ width: `${Math.max(2, seconds / childMax * 100)}%` }} />
-                          </span>
-                          <span className="text-right whitespace-nowrap">{formatStudyDuration(seconds)}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
+                {expandable ? <SubjectTasks id={childrenId} name={row.name} open={open} taskTotals={row.taskTotals} /> : null}
               </li>
             );
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// 과목 줄의 세부 할 일. 펼치면 아래로 열리고, 접으면 다 접힌 뒤 목록을 내린다(docs/design-system.md §8 ui-collapse).
+// 안에는 포커스를 받는 요소가 없으므로 접을 때 옮길 포커스도 없다.
+function SubjectTasks({ id, name, open, taskTotals }: { id: string; name: string; open: boolean; taskTotals: Record<string, number> }) {
+  const { ref, mounted } = usePresence<HTMLDivElement>(open);
+  const tasks = Object.entries(taskTotals).sort((a, b) => b[1] - a[1]);
+  const childMax = Math.max(1, tasks[0]?.[1] ?? 0);
+  return (
+    <div ref={ref} className="ui-collapse" data-state={open ? 'open' : 'closed'} inert={!open || undefined}>
+      <div>
+        {mounted ? (
+          <ul id={id} aria-label={`${name} 세부 할 일`} className="m-0 mb-1.5 flex list-none flex-col p-0 pl-3.5 md:pl-5">
+            {tasks.map(([task, seconds]) => (
+              <li key={task} className="grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 text-sm text-ink-muted md:min-h-10 md:grid-cols-[160px_minmax(0,1fr)_150px] md:gap-4">
+                <span className="min-w-0 truncate" title={task}>{task}</span>
+                <span aria-hidden="true" className="hidden h-1.5 overflow-hidden rounded-full bg-surface md:block">
+                  <span className="block h-full rounded-full bg-bar" style={{ width: `${Math.max(2, seconds / childMax * 100)}%` }} />
+                </span>
+                <span className="text-right whitespace-nowrap">{formatStudyDuration(seconds)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

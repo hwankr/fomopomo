@@ -76,7 +76,10 @@ export default function AccountSection({
           </>
         )}
       </div>
-      <span role="status" className="min-h-[18px] text-xs text-ink-muted md:min-h-0 md:text-[13px]">{status}</span>
+      <span role="status" className="min-h-[18px] text-xs text-ink-muted md:min-h-0 md:text-[13px]">
+        {/* 동작으로 생긴 결과 문구가 살짝 나타난다. */}
+        {status ? <span key={status} className="animate-fade-in">{status}</span> : null}
+      </span>
 
       <ConfirmModal
         isOpen={confirm === 'settings'}

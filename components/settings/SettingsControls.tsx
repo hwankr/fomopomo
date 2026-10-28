@@ -1,8 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { playMotion } from '@/components/ui/motion';
 import type { NumberField } from './useSettingsForm';
 
 type SettingsSectionProps = {
@@ -79,15 +80,15 @@ export function SettingSwitch({ label, checked, onChange }: SettingSwitchProps) 
       aria-checked={checked}
       onClick={onChange}
       className={cn(
-        // 보이는 길은 48×28, 누르는 영역은 위아래로 늘려 48×44
-        "relative h-7 w-12 shrink-0 rounded-[14px] transition-colors duration-200 before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] disabled:cursor-not-allowed disabled:opacity-50",
+        // 보이는 길은 48×28, 누르는 영역은 위아래로 늘려 48×44. 길 색은 바뀌고 손잡이는 미끄러진다.
+        "ui-press relative h-7 w-12 shrink-0 rounded-[14px] transition-[background-color,scale] before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] disabled:cursor-not-allowed disabled:opacity-50",
         checked ? 'bg-pomo' : 'bg-bar',
       )}
     >
       <span
         aria-hidden="true"
         className={cn(
-          'absolute top-[3px] left-[3px] size-[22px] rounded-full bg-white shadow-knob transition-transform duration-200',
+          'absolute top-[3px] left-[3px] size-[22px] rounded-full bg-white shadow-knob transition-transform',
           checked && 'translate-x-5',
         )}
       />
@@ -129,11 +130,17 @@ export function Stepper({
   max,
   valueClassName,
 }: StepperProps) {
+  const valueRef = useRef<HTMLSpanElement>(null);
   const current = value === '' ? fallback : value;
   // 단계 눈금에 맞춰 움직인다: 31분에서 −는 30, +는 35.
   const remainder = current % step;
   const decreased = Math.max(min, remainder === 0 ? current - step : current - remainder);
   const increased = Math.min(max, current - remainder + step);
+  // −/+로 바꾼 값은 한 번 톡 튄다(animate-pop과 같은 1.08배). 입력칸을 새로 그리지 않도록 Web Animation으로 재생한다.
+  const stepTo = (next: number) => {
+    onChange(next);
+    playMotion(valueRef.current, [{ transform: 'scale(1.08)', offset: 0.45 }], { duration: 'emphasized', easing: 'pop' });
+  };
 
   return (
     <div className="flex shrink-0 items-center gap-0.5 md:gap-1.5">
@@ -141,12 +148,12 @@ export function Stepper({
         type="button"
         aria-label={decreaseLabel}
         disabled={current <= min}
-        onClick={() => onChange(decreased)}
+        onClick={() => stepTo(decreased)}
         className={STEP_BUTTON}
       >
         <Minus aria-hidden="true" size={18} strokeWidth={2} />
       </button>
-      <span className={cn('flex items-baseline justify-center text-[15px] font-bold md:text-base', valueClassName)}>
+      <span ref={valueRef} className={cn('flex items-baseline justify-center text-[15px] font-bold md:text-base', valueClassName)}>
         <input
           type="number"
           inputMode="numeric"
@@ -165,7 +172,7 @@ export function Stepper({
         type="button"
         aria-label={increaseLabel}
         disabled={current >= max}
-        onClick={() => onChange(increased)}
+        onClick={() => stepTo(increased)}
         className={STEP_BUTTON}
       >
         <Plus aria-hidden="true" size={18} strokeWidth={2} />

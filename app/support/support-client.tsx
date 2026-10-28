@@ -47,7 +47,7 @@ export default function SupportClient() {
         onOpenLogin={() => setIsLoginModalOpen(true)}
       />
 
-      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-9 px-4 pt-4 pb-20 animate-fade-in md:gap-12 md:px-10">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-9 px-4 pt-4 pb-20 md:gap-12 md:px-10">
         {/* 헤더: 모바일은 뒤로가기를 제목 위에, 데스크톱은 오른쪽에 둔다. */}
         <div className="flex flex-col-reverse gap-3 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-6">
           <h1 className="ui-h1">Fomopomo 후원하기</h1>

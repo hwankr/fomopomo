@@ -1024,4 +1024,67 @@ describe('SettingsView (/settings)', () => {
     fireEvent.click(within(screen.getByRole('region', { name: '계정' })).getByRole('button', { name: '로그인' }));
     await waitFor(() => expect(onOpenLogin).toHaveBeenCalledTimes(2));
   });
+  it('shows only the preset row just added and keeps a removed row, inert, until its exit ends', async () => {
+    mockUser('user-preset-motion');
+    setStoredSettings({});
+    // happy-dom은 CSS 애니메이션을 돌리지 않으므로 사라지는 줄에서 퇴장이 도는 것처럼 꾸민다.
+    const running: Array<() => void> = [];
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value(this: Element) {
+        if (!this.classList.contains('animate-fade-out')) return [];
+        let finish!: () => void;
+        const finished = new Promise<void>((resolve) => { finish = resolve; });
+        running.push(finish);
+        return [{
+          playState: 'running', currentTime: 0, finished,
+          effect: { getTiming: () => ({ iterations: 1, duration: 140, delay: 0 }), getComputedTiming: () => ({ endTime: 140 }) },
+        }];
+      },
+    });
+    try {
+      renderPage();
+      await screen.findByRole('spinbutton', { name: '프리셋 3 시간 (분)' });
+      const removed = screen.getByRole('textbox', { name: '프리셋 2 이름' }).closest('li')!;
+
+      fireEvent.click(screen.getByRole('button', { name: '프리셋 2 삭제' }));
+      // 값은 바로 지워지고 남은 줄은 번호가 다시 매겨진다. 지운 줄은 사라지는 동안만 클릭·포커스 없이 남는다.
+      expect(removed).toBeInTheDocument();
+      expect(removed).toHaveAttribute('inert');
+      expect(removed).toHaveClass('animate-fade-out', 'pointer-events-none');
+      const livePresetMinutes = () => screen.getAllByRole('spinbutton', { name: /^프리셋 \d 시간/ }).filter((input) => !input.closest('[inert]'));
+      expect(livePresetMinutes().map((input) => [input.getAttribute('aria-label'), (input as HTMLInputElement).value]))
+        .toEqual([['프리셋 1 시간 (분)', '25'], ['프리셋 2 시간 (분)', '90']]);
+      expect(screen.getByRole('button', { name: '프리셋 추가' })).toBeInTheDocument();
+
+      await act(async () => { running.splice(0).forEach((finish) => finish()); });
+      expect(removed).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '프리셋 추가' }));
+      const rows = screen.getAllByRole('textbox', { name: /^프리셋 \d 이름$/ }).map((input) => input.closest('li'));
+      expect(rows.map((row) => row?.classList.contains('animate-fade-up'))).toEqual([false, false, true]);
+    } finally {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+    }
+  });
+
+  it('fades in status lines caused by edits on the page but not recovered edits shown on load', async () => {
+    mockUser('user-status-motion');
+    setStoredSettings({});
+    userSettingsResult = { data: { settings: { ...DEFAULT_SETTINGS } } };
+    upsertMock.mockImplementationOnce(async () => ({ error: { message: 'offline' } }));
+    const first = renderPage();
+    await waitFor(() => expect(pomoInput()).toHaveValue(25));
+    fireEvent.change(pomoInput(), { target: { value: '45' } });
+    expect(screen.getByText('변경 사항은 나갈 때 자동으로 저장돼요.')).toHaveClass('animate-fade-in');
+    first.unmount();
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+
+    renderPage();
+    await waitFor(() => expect(pomoInput()).toHaveValue(45));
+    expect(screen.getByText('저장하지 못한 변경 사항을 다시 불러왔어요.')).not.toHaveClass('animate-fade-in');
+
+    fireEvent.click(saveButton());
+    expect(await screen.findByText('저장했어요.')).toHaveClass('animate-fade-in');
+  });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Calendar, LayoutGrid, Timer, User, Users, type LucideIcon } from 'lucide-react';
@@ -20,7 +21,11 @@ const TABS: { section: AppSection; href: string; label: string; Icon: LucideIcon
 export default function MobileTabBar() {
   const pathname = usePathname();
   const active = getActiveSection(pathname);
-  const { friendRequestCount } = useShell();
+  const { friendRequestCount, friendRequestPulse } = useShell();
+  // 탭 바가 보이는 동안 새 요청이 오면 친구 탭의 점이 한 번 톡 튄다. 처음 불러올 때, 화면을 옮길 때,
+  // 탭 바가 없는 화면(설정 등)에 있는 동안 온 요청은 튀지 않는다. 점이 없는 동안에는 기준을 지금 값으로 맞춘다.
+  const [quietPulse, setQuietPulse] = useState(friendRequestPulse);
+  if ((!active || friendRequestCount === 0) && quietPulse !== friendRequestPulse) setQuietPulse(friendRequestPulse);
 
   if (!active) return null;
 
@@ -47,14 +52,23 @@ export default function MobileTabBar() {
               aria-label={showRequestDot ? `${label}, 받은 친구 요청 ${friendRequestCount}개` : undefined}
               className={cn(
                 // 비활성 탭 글자색(ink-faint)은 링으로 쓰기엔 옅으므로 링은 먹색으로 둔다.
-                'ui-focus-ink flex h-[50px] min-w-0 flex-1 flex-col items-center justify-center gap-1 text-[11px] leading-none',
+                // 고른 탭의 글자·아이콘 색은 살짝 바뀌고, 누르는 동안 줄어든다.
+                'ui-focus-ink ui-press flex h-[50px] min-w-0 flex-1 flex-col items-center justify-center gap-1 text-[11px] leading-none transition-[color,scale]',
                 isActive ? 'font-bold text-ink' : 'font-medium text-ink-faint',
               )}
             >
               <span className="relative">
                 <Icon aria-hidden="true" size={22} strokeWidth={isActive ? 2.2 : 1.8} />
                 {showRequestDot ? (
-                  <span aria-hidden="true" className="absolute -top-0.5 -right-1 size-[7px] rounded-full bg-pomo" />
+                  <span
+                    // 새 요청마다 새로 붙여 팝을 다시 재생한다.
+                    key={friendRequestPulse}
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute -top-0.5 -right-1 size-[7px] rounded-full bg-pomo',
+                      friendRequestPulse !== quietPulse && 'animate-pop-in',
+                    )}
+                  />
                 ) : null}
               </span>
               {label}

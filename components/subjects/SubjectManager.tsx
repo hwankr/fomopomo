@@ -39,6 +39,8 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  // 방금 추가한 과목 줄만 나타난다(다음 동작에서 비운다).
+  const [addedId, setAddedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
     busyCallback.current?.(true);
     setLocalError(null);
     setMessage(null);
+    setAddedId(null);
     return scope;
   };
   const finish = (scope: { active: boolean; pending: boolean }) => {
@@ -88,6 +91,7 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
       const saved = renaming ? await renameSubject(renaming, name.trim()) : await createSubject(name.trim());
       if (!scope.active) return;
       if (!saved) { setLocalError('과목을 저장하지 못했어요. 다시 시도해주세요.'); return; }
+      if (saved !== true) setAddedId(saved.id);
       setDraft('');
       setEditingId(null);
       setMessage(renaming ? '과목 이름을 바꿨어요. 기록은 그대로예요.' : `${name.trim()} 과목을 추가했어요.`);
@@ -147,14 +151,15 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
       </div>}
       {loading && subjects.length === 0 ? <p role="status" className="m-0 text-sm text-ink-muted">과목을 불러오는 중…</p> : (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-          {subjects.map((subject) => <li key={subject.id} className={cn('-mx-2.5 flex min-h-[52px] min-w-0 items-center gap-2 rounded-control px-2.5 py-0.5', wide && 'md:-mx-3 md:min-h-[60px] md:gap-3 md:rounded-tile md:px-3 md:py-1')}>
+          {/* 이름을 고치기 시작하면 줄 내용이 편집기로 살짝 바뀐다. */}
+          {subjects.map((subject) => <li key={subject.id} className={cn('-mx-2.5 flex min-h-[52px] min-w-0 items-center gap-2 rounded-control px-2.5 py-0.5', wide && 'md:-mx-3 md:min-h-[60px] md:gap-3 md:rounded-tile md:px-3 md:py-1', editingId === subject.id ? 'animate-fade-in' : subject.id === addedId && 'animate-fade-up')}>
             {editingId === subject.id ? <>
               <input aria-label="과목 이름 수정" value={editName} maxLength={80} disabled={busy} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); } }} className={cn('ui-input flex-1 px-3 font-semibold', rowControl, wide && 'md:px-3.5')} autoFocus />
               <button type="button" aria-label="과목 이름 저장" disabled={busy} onClick={() => { void saveName(); }} className={cn('ui-button-primary ui-press shrink-0 px-3.5', rowControl, wide && 'md:px-4')}>저장</button>
               <button type="button" aria-label="과목 이름 수정 취소" disabled={busy} onClick={() => setEditingId(null)} className={cn('ui-button-ghost shrink-0 px-2.5', rowControl, wide && 'md:px-3')}>취소</button>
             </> : <>
               <span className="min-w-0 flex-1 truncate font-semibold">{subject.name}</span>
-              <button type="button" aria-label={`${subject.name} 이름 변경`} disabled={busy} onClick={() => { setEditingId(subject.id); setEditName(subject.name); setLocalError(null); setMessage(null); }} className="ui-icon-button text-ink-muted before:absolute before:-inset-0.5 before:content-['']"><Pencil aria-hidden="true" size={17} strokeWidth={2} /></button>
+              <button type="button" aria-label={`${subject.name} 이름 변경`} disabled={busy} onClick={() => { setEditingId(subject.id); setEditName(subject.name); setLocalError(null); setMessage(null); setAddedId(null); }} className="ui-icon-button text-ink-muted before:absolute before:-inset-0.5 before:content-['']"><Pencil aria-hidden="true" size={17} strokeWidth={2} /></button>
             </>}
           </li>)}
           {!subjects.length && <li className="py-1 text-sm text-ink-muted">아직 과목이 없어요. 자주 공부하는 과목을 추가해보세요.</li>}
@@ -166,7 +171,7 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
         <button type="button" disabled={busy || loading || Boolean(editingId) || !draft.trim()} onClick={() => { void saveName(); }} className={cn('ui-button-primary ui-press shrink-0 px-3.5', wide && 'md:min-h-12 md:rounded-tile md:px-[18px]')}>추가</button>
         {(wide || message || localError) && (
           <div className={cn('min-h-[18px] min-w-0 basis-full text-xs', wide && 'md:min-h-0 md:basis-auto md:text-[13px]')}>
-            <p role="status" className="m-0 text-ink-muted">{message}</p>
+            <p role="status" className="m-0 text-ink-muted">{message ? <span key={message} className="animate-fade-in">{message}</span> : null}</p>
             {localError && <p role="alert" className="m-0 text-pomo-deep">{localError}</p>}
           </div>
         )}

@@ -169,4 +169,19 @@ describe('SubjectManager', () => {
     rerender(<SubjectManager userId="user-a" compact />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
+  it('marks only the subject just added and fades the inline editor and result line in', async () => {
+    db.subjects = [{ id: 'existing', user_id: 'user-a', name: 'SQL' }];
+    render(<SubjectManager userId="user-a" />);
+    fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '블록체인' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    const added = (await screen.findByText('블록체인')).closest('li');
+    const existing = screen.getByText('SQL').closest('li');
+    expect(added).toHaveClass('animate-fade-up');
+    expect(existing).not.toHaveClass('animate-fade-up');
+    expect(screen.getByText('블록체인 과목을 추가했어요.')).toHaveClass('animate-fade-in');
+
+    fireEvent.click(screen.getByRole('button', { name: 'SQL 이름 변경' }));
+    expect(screen.getByLabelText('과목 이름 수정').closest('li')).toHaveClass('animate-fade-in');
+    expect(added).not.toHaveClass('animate-fade-up');
+  });
 });

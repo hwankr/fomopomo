@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { addDays, format, startOfWeek } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getDayStart } from '@/lib/dateUtils';
 import { formatStudyDuration } from '@/components/profile/studyDuration';
+import { playMotion } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
 
 interface ContributionGraphProps {
@@ -135,6 +136,13 @@ export default function ContributionGraph({ data, earliestYear, loading = false 
     setFocusKey(null);
   };
   const periodIndex = period.year * 2 + period.half;
+  // 연도·반기를 바꾸면 새 기간의 구슬이 넘긴 쪽에서 6px 들어오며 나타난다(처음 그릴 때는 움직이지 않는다).
+  const shownPeriodRef = useRef(periodIndex);
+  useLayoutEffect(() => {
+    const direction = Math.sign(periodIndex - shownPeriodRef.current);
+    shownPeriodRef.current = periodIndex;
+    if (direction) playMotion(scrollRef.current, [{ opacity: 0, transform: `translateX(${direction * 6}px)`, offset: 0 }]);
+  }, [periodIndex]);
   const canGoPrev = periodIndex > firstYear * 2;
   const canGoNext = periodIndex < currentPeriod.year * 2 + currentPeriod.half;
   const shiftHalf = (direction: -1 | 1) => {
@@ -218,7 +226,7 @@ export default function ContributionGraph({ data, earliestYear, loading = false 
                     }}
                     onKeyDown={event => moveFocus(event, cell.key)}
                     className={cn(
-                      'ui-focus-ink block rounded-full p-0 transition-transform duration-150 hover:scale-130 motion-reduce:transition-none motion-reduce:hover:scale-100',
+                      'ui-focus-ink block rounded-full p-0 transition-[scale,box-shadow] hover:scale-130 motion-reduce:transition-none motion-reduce:hover:scale-100',
                       cellSize,
                       HEAT_CLASSES[getHeatLevel(secondsByDay.get(cell.key) ?? 0)],
                       isPicked && 'ring-2 ring-ink ring-offset-2 ring-offset-white',

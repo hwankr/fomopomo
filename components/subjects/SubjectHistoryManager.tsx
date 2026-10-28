@@ -201,7 +201,8 @@ function HistoryManager({ userId }: { userId: string }) {
             {saving ? '저장 중…' : '저장'}
           </button>
         </div>
-        <p role="status" className="m-0 min-h-5 text-[13px] text-ink-muted">{status}</p>
+        {/* 저장 결과는 살짝 나타난다. 고르는 동안 바뀌는 개수 안내는 그대로 바뀐다. */}
+        <p role="status" className="m-0 min-h-5 text-[13px] text-ink-muted">{selected.size || !notice ? status : <span className="animate-fade-in">{notice}</span>}</p>
         <p className="m-0 text-xs text-ink-subtle">공부 시간과 할 일 제목은 그대로예요. 하루는 오전 5시에 바뀌고, 여러 날에 걸친 공부는 끝난 공부일에 하나로 묶여 함께 바뀌어요.</p>
       </div>
 
