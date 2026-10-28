@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useId, type KeyboardEvent } from 'react';
+import { useState, useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { addMonths, format, startOfMonth } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -12,6 +12,7 @@ import WeeklyPlan from './WeeklyPlan';
 import MonthlyPlan from './MonthlyPlan';
 import LongTermTasks from './LongTermTasks';
 import { supabase } from '@/lib/supabase';
+import { playMotion } from '@/components/ui/motion';
 import { getCalendarDayStart, getCalendarDayEnd } from '@/lib/dateUtils';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import Navbar from '../Navbar';
@@ -47,6 +48,16 @@ export default function Dashboard({ session }: DashboardProps) {
   const timelineTitleId = useId();
   const selectedKey = format(selectedDate, 'yyyy-MM-dd');
   const monthLabel = format(visibleMonth, 'yyyy년 M월');
+  const dayPlanRef = useRef<HTMLElement>(null);
+  const shownDayRef = useRef(selectedKey);
+
+  // 다른 날을 고르면 그날의 계획(할 일·타임라인)이 새로 나타난다. 처음 그릴 때는 움직이지 않는다.
+  useLayoutEffect(() => {
+    const previous = shownDayRef.current;
+    shownDayRef.current = selectedKey;
+    if (previous === selectedKey) return;
+    playMotion(dayPlanRef.current, [{ opacity: 0, offset: 0 }]);
+  }, [selectedKey]);
 
   const goToday = () => {
     const today = new Date();
@@ -130,6 +141,7 @@ export default function Dashboard({ session }: DashboardProps) {
           {session ? (
             <>
               <section
+                ref={dayPlanRef}
                 aria-label="선택한 날의 계획"
                 className="flex min-w-0 flex-col gap-9 max-md:px-1 md:max-w-[520px] md:gap-10 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-w-none"
               >
@@ -165,6 +177,17 @@ function MonthSwitcher({ label, onPrevious, onNext, large = false }: {
   onNext: () => void;
   large?: boolean;
 }) {
+  const labelRef = useRef<HTMLHeadingElement>(null);
+  const shownLabelRef = useRef(label);
+
+  // 달을 넘기면 새 달 이름이 나타난다(처음 그릴 때는 그대로).
+  useLayoutEffect(() => {
+    const previous = shownLabelRef.current;
+    shownLabelRef.current = label;
+    if (previous === label) return;
+    playMotion(labelRef.current, [{ opacity: 0, offset: 0 }]);
+  }, [label]);
+
   return (
     <div className={cn('flex items-center', large ? 'gap-2.5' : 'gap-1')}>
       <button
@@ -176,6 +199,7 @@ function MonthSwitcher({ label, onPrevious, onNext, large = false }: {
         <ChevronLeft aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
       </button>
       <h1
+        ref={labelRef}
         aria-live="polite"
         className={cn(
           'm-0 text-center font-extrabold tracking-[-0.02em]',
@@ -197,11 +221,17 @@ function MonthSwitcher({ label, onPrevious, onNext, large = false }: {
 }
 
 function PlanGoals({ userId, className }: { userId: string; className?: string }) {
-  const [storedTab, setTab] = usePersistedState<GoalTab>('plan_goal_tab', 'weekly');
+  const [storedTab, setStoredTab] = usePersistedState<GoalTab>('plan_goal_tab', 'weekly');
+  // 사용자가 탭을 바꾼 뒤부터 새로 보이는 패널이 나타난다(처음 그릴 때와 저장된 탭을 불러올 때는 그대로).
+  const [switched, setSwitched] = useState(false);
   const baseId = useId();
   const activeTab = GOAL_TABS.some((tab) => tab.id === storedTab) ? storedTab : 'weekly';
   const tabId = (tab: GoalTab) => `${baseId}-tab-${tab}`;
   const panelId = (tab: GoalTab) => `${baseId}-panel-${tab}`;
+  const setTab = (tab: GoalTab) => {
+    setSwitched(true);
+    setStoredTab(tab);
+  };
 
   // 화살표·Home·End로 탭을 옮기고 바로 고른다(WAI-ARIA 탭 패턴).
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -254,6 +284,8 @@ function PlanGoals({ userId, className }: { userId: string; className?: string }
           role="tabpanel"
           aria-labelledby={tabId(tab.id)}
           hidden={tab.id !== activeTab}
+          // hidden이 풀리면 CSS 애니메이션이 처음부터 다시 돈다.
+          className={switched ? 'animate-fade-in' : undefined}
         >
           {tab.id === 'weekly' ? (
             <WeeklyPlan userId={userId} />

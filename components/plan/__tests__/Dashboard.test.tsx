@@ -166,3 +166,46 @@ describe('Dashboard layout', () => {
     expect(screen.getByText('day pomodoros: 0')).toBeInTheDocument();
   });
 });
+
+describe('Dashboard motion', () => {
+  // happy-dom에는 Web Animations가 없으므로 element.animate를 흉내 낸다.
+  const animate = vi.fn<(keyframes: Keyframe[], options?: KeyframeAnimationOptions) => Animation>(() => ({}) as Animation);
+  beforeEach(() => {
+    animate.mockClear();
+    Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    delete (Element.prototype as { animate?: unknown }).animate;
+  });
+  const targets = () => animate.mock.contexts as HTMLElement[];
+
+  it('fades the day plan in only when the user picks another day, and the month name when the month changes', () => {
+    render(<Dashboard session={session('A')} />);
+    expect(animate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select previous day' }));
+    expect(targets()).toEqual([screen.getByRole('region', { name: '선택한 날의 계획' })]);
+    expect(animate.mock.calls[0][0]).toEqual([{ opacity: 0, offset: 0 }]);
+
+    const label = screen.getByRole('heading', { level: 1 });
+    fireEvent.click(screen.getAllByRole('button', { name: '다음 달' })[0]);
+    expect(targets()).toEqual([screen.getByRole('region', { name: '선택한 날의 계획' }), label]);
+    expect(animate.mock.calls[1][0]).toEqual([{ opacity: 0, offset: 0 }]);
+  });
+
+  it('fades a goal panel in only after the user switches tabs', () => {
+    window.localStorage.setItem('plan_goal_tab', '"monthly"');
+    render(<Dashboard session={session('A')} />);
+    // 저장된 탭을 불러와 처음 보여 줄 때는 움직이지 않는다.
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('monthly panel A');
+    expect(screen.getByRole('tabpanel')).not.toHaveClass('animate-fade-in');
+
+    fireEvent.click(screen.getByRole('tab', { name: '장기 과제' }));
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('long-term panel A');
+    // hidden이 풀리면 CSS 애니메이션이 처음부터 다시 돈다.
+    expect(screen.getByRole('tabpanel')).toHaveClass('animate-fade-in');
+    fireEvent.keyDown(screen.getByRole('tab', { name: '장기 과제' }), { key: 'Home' });
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('weekly panel A');
+    expect(screen.getByRole('tabpanel')).toHaveClass('animate-fade-in');
+  });
+});

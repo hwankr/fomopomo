@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { endOfWeek, format, startOfWeek } from 'date-fns';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { formatStudyTime } from './planUi';
 import { usePlanRequestScope } from './usePlanRequestScope';
+import { useEntrance, usePlayOnce } from './usePlayOnce';
 
 interface WeeklyPlan {
   id: string;
@@ -67,6 +68,15 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
   const [editedSubjectId, setEditedSubjectId] = useState<string | null>(null);
+  // 방금 추가하거나 완료한 목표. 그 행에만 움직임을 한 번 붙인다(docs/design-system.md §8 새 항목).
+  const [rowMotion, setRowMotion] = useState<{ type: 'add' | 'complete'; id: string } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // 한 번 돈 뒤 뗀다. 남겨 두면 탭을 다시 열거나 행이 옮겨질 때 다시 돈다.
+  usePlayOnce(rowMotion, rootRef, (played) => setRowMotion((current) => (current === played ? null : current)));
+  const formEntering = useEntrance(isAdding, formRef);
+  const editorEntering = useEntrance(editingPlanId, editorRef);
 
   const fetchPlans = useCallback(async () => {
     const scope = scopeRef.current;
@@ -221,6 +231,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
     const createdPlan = data as WeeklyPlanRow;
     setPlans((currentPlans) => [...currentPlans, { ...createdPlan, duration: 0 }]);
+    setRowMotion({ type: 'add', id: createdPlan.id });
     if (createdPlan.subject_id) notifyStudySubjectsChanged();
     setNewPlanTitle('');
     resetSubject();
@@ -238,6 +249,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
           : currentPlan
       )
     );
+    setRowMotion(nextStatus === 'done' ? { type: 'complete', id: plan.id } : null);
 
     const { error } = await supabase
       .from('weekly_plans')
@@ -330,6 +342,12 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
     resetSubject();
   };
 
+  // 다른 곳(실시간 갱신 등)에서 지워지거나 완료가 풀렸으면 표시를 뗀다. 다시 완료돼도 움직이지 않는다.
+  const motionPlan = rowMotion ? plans.find((plan) => plan.id === rowMotion.id) : undefined;
+  if (rowMotion && (!motionPlan || (rowMotion.type === 'complete' && motionPlan.status !== 'done'))) {
+    setRowMotion(null);
+  }
+
   const handleEditKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter') {
       void updatePlan();
@@ -342,7 +360,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
   const periodLabel = `이번 주 · ${format(start, 'M월 d일')} – ${format(end, 'M월 d일')}`;
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div ref={rootRef} className="flex min-w-0 flex-col gap-3">
       <div className="flex min-h-11 items-center justify-between gap-3 md:min-h-10">
         <p className="m-0 min-w-0 truncate text-sm text-ink-muted">{periodLabel}</p>
         {!isAdding ? (
@@ -359,8 +377,12 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
 
       {isAdding ? (
         <form
+          ref={formRef}
           onSubmit={addPlan}
-          className="flex min-w-0 flex-col gap-3 rounded-panel bg-surface p-4 md:px-5 md:py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white"
+          className={cn(
+            'flex min-w-0 flex-col gap-3 rounded-panel bg-surface p-4 md:px-5 md:py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white',
+            formEntering && 'animate-fade-up'
+          )}
         >
           <input
             type="text"
@@ -388,7 +410,8 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
         </form>
       ) : null}
 
-      {loading ? (
+      {/* 다시 불러오는 동안에도 목록을 그대로 둔다(행이 다시 붙지 않아 움직임이 되풀이되지 않는다). */}
+      {loading && plans.length === 0 ? (
         <p className="m-0 py-2 text-sm text-ink-muted">불러오는 중...</p>
       ) : plans.length === 0 ? (
         <p className="m-0 py-2 text-sm text-ink-muted md:text-[15px]">아직 주간 목표가 없어요.</p>
@@ -402,7 +425,8 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                 key={plan.id}
                 className={cn(
                   'group -mx-3 flex min-h-14 items-center gap-x-2.5 gap-y-1 rounded-tile px-3 py-2 transition-colors',
-                  isEditing ? 'flex-wrap bg-surface' : 'hover:bg-hover'
+                  isEditing ? 'flex-wrap bg-surface' : 'hover:bg-hover',
+                  rowMotion?.type === 'add' && rowMotion.id === plan.id && 'animate-fade-up'
                 )}
               >
                 <button
@@ -419,12 +443,21 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                       isDone ? 'border-pomo bg-pomo text-white' : 'border-control text-transparent'
                     )}
                   >
-                    <Check className="size-3.5" strokeWidth={3} />
+                    <Check
+                      className={cn('size-3.5', isDone && rowMotion?.type === 'complete' && rowMotion.id === plan.id && 'animate-pop-in')}
+                      strokeWidth={3}
+                    />
                   </span>
                 </button>
 
                 {isEditing ? (
-                  <div className="flex min-w-0 flex-1 basis-[min(100%,16rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white">
+                  <div
+                    ref={editorRef}
+                    className={cn(
+                      'flex min-w-0 flex-1 basis-[min(100%,16rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white',
+                      editorEntering && 'animate-fade-up'
+                    )}
+                  >
                     <input
                       type="text"
                       aria-label="목표 제목"
@@ -461,7 +494,7 @@ function ScopedWeeklyPlan({ userId }: WeeklyPlanProps) {
                     <span
                       title={plan.title}
                       className={cn(
-                        'text-[15px] font-semibold break-words max-md:line-clamp-2',
+                        'text-[15px] font-semibold break-words transition-colors max-md:line-clamp-2',
                         isDone ? 'text-ink-muted line-through' : 'text-ink'
                       )}
                     >

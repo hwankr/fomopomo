@@ -167,3 +167,54 @@ describe('Calendar', () => {
     expect(onSelectDate).toHaveBeenCalledWith(new Date(2026, 9, 28));
   });
 });
+
+describe('Calendar month motion', () => {
+  // happy-dom에는 Web Animations가 없으므로 element.animate를 흉내 내 누가 무엇을 재생했는지 본다.
+  const animate = vi.fn<(keyframes: Keyframe[], options?: KeyframeAnimationOptions) => Animation>(() => ({}) as Animation);
+  beforeEach(() => {
+    animate.mockClear();
+    Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    delete (Element.prototype as { animate?: unknown }).animate;
+    vi.restoreAllMocks();
+  });
+
+  const view = (month: Date, selectedDate = new Date(2026, 9, 5)) => (
+    <Calendar month={month} selectedDate={selectedDate} onSelectDate={() => {}} />
+  );
+
+  it('slides only the new month’s days in from the side the user moved to, never on first render', () => {
+    const { rerender } = render(view(OCTOBER));
+    expect(animate).not.toHaveBeenCalled();
+
+    rerender(view(new Date(2026, 10, 1)));
+    expect(animate).toHaveBeenCalledTimes(1);
+    const [keyframes, options] = animate.mock.calls[0];
+    expect(keyframes).toEqual([{ opacity: 0, transform: 'translateX(6px)', offset: 0 }]);
+    expect(options).toMatchObject({ duration: 200, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+    // 날짜 칸 격자만 움직이고 요일 줄은 그대로다.
+    const grid = animate.mock.contexts[0] as HTMLElement;
+    expect(grid).toContainElement(screen.getByRole('button', { name: '11월 1일 일요일' }));
+    expect(grid).not.toHaveTextContent('월화수');
+
+    rerender(view(OCTOBER));
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate.mock.calls[1][0]).toEqual([{ opacity: 0, transform: 'translateX(-6px)', offset: 0 }]);
+
+    // 같은 달을 다시 그릴 때(날 고르기 등)는 움직이지 않는다.
+    rerender(view(OCTOBER, new Date(2026, 9, 6)));
+    expect(animate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not move with reduced motion', () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('prefers-reduced-motion'), media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as MediaQueryList);
+    const { rerender } = render(view(OCTOBER));
+    rerender(view(new Date(2026, 10, 1)));
+    expect(screen.getByRole('button', { name: '11월 1일 일요일' })).toBeInTheDocument();
+    expect(animate).not.toHaveBeenCalled();
+  });
+});

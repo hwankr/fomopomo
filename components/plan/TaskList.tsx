@@ -48,7 +48,8 @@ import { notifyStudySubjectsChanged, type StudySubject } from '@/lib/studySubjec
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
-import { formatDayLabel, formatStudyTime } from './planUi';
+import { formatDayLabel, formatStudyTime, sortableTransition } from './planUi';
+import { useEntrance, usePlayOnce } from './usePlayOnce';
 
 interface Task {
   id: string;
@@ -103,6 +104,9 @@ type SessionDurationRow = PomodoroSessionRow & {
   duration: number | null;
 };
 
+/** 방금 한 동작(추가·완료·고정)과 그 작업. 그 행에만 움직임을 한 번 붙인다(docs/design-system.md §8 새 항목, usePlayOnce). */
+type RowMotion = { type: 'add' | 'complete' | 'pin'; id: string };
+
 // 새 계획의 뽀모도로 목표 기본값(디자인 보드의 추가 양식과 같다)
 const DEFAULT_POMODORO_GOAL = 2;
 // 작업 행에 그리는 구슬 상한(목표를 넘겨 끝낸 경우)
@@ -151,6 +155,8 @@ interface SortableTaskItemProps {
   subjects: StudySubject[];
   createSubject: (name: string) => Promise<StudySubject | null>;
   isDesktop: boolean;
+  /** 이 행에서 방금 한 동작(없으면 null) */
+  motion: RowMotion['type'] | null;
 }
 
 function SortableTaskItem({
@@ -163,12 +169,18 @@ function SortableTaskItem({
   subjects,
   createSubject,
   isDesktop,
+  motion,
 }: SortableTaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.title);
   const [editedSubjectId, setEditedSubjectId] = useState(task.subject_id);
   const [showActions, setShowActions] = useState(false);
   const actionsId = useId();
+  const editorRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  // 열릴 때만 한 번 떠오른다(열린 채로 행이 옮겨져도 다시 돌지 않는다).
+  const editorEntering = useEntrance(isEditing, editorRef);
+  const actionsEntering = useEntrance(showActions, actionsRef);
 
   const {
     attributes,
@@ -177,7 +189,7 @@ function SortableTaskItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id });
+  } = useSortable({ id: task.id, transition: sortableTransition() });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -226,7 +238,7 @@ function SortableTaskItem({
           isPinned ? 'text-pomo' : cn('text-ink-muted', isDesktop && revealOnHover)
         )}
       >
-        <Pin aria-hidden="true" className={cn('size-4', isPinned && 'fill-current')} strokeWidth={1.8} />
+        <Pin aria-hidden="true" className={cn('size-4', isPinned && 'fill-current', isPinned && motion === 'pin' && 'animate-pop')} strokeWidth={1.8} />
         {isDesktop ? null : isPinned ? '고정 해제' : '고정'}
       </button>
       <button
@@ -269,7 +281,8 @@ function SortableTaskItem({
       className={cn(
         'group relative -mx-3 flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-tile px-3 py-2 transition-colors md:min-h-14 md:gap-x-2.5',
         isEditing ? 'bg-surface' : 'hover:bg-hover',
-        isDragging && 'bg-white shadow-popover'
+        isDragging && 'bg-white shadow-popover',
+        motion === 'add' && 'animate-fade-up'
       )}
     >
       <div
@@ -300,12 +313,18 @@ function SortableTaskItem({
             isDone ? 'border-pomo bg-pomo text-white' : 'border-control text-transparent'
           )}
         >
-          <Check className="size-3.5" strokeWidth={3} />
+          <Check className={cn('size-3.5', isDone && motion === 'complete' && 'animate-pop-in')} strokeWidth={3} />
         </span>
       </button>
 
       {isEditing ? (
-        <div className="flex min-w-0 flex-1 basis-[min(100%,16rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white">
+        <div
+          ref={editorRef}
+          className={cn(
+            'flex min-w-0 flex-1 basis-[min(100%,16rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white',
+            editorEntering && 'animate-fade-up'
+          )}
+        >
           <input
             type="text"
             aria-label="작업 제목"
@@ -349,7 +368,7 @@ function SortableTaskItem({
             <span
               title={task.title}
               className={cn(
-                'text-[15px] font-semibold break-words max-md:line-clamp-2 md:truncate',
+                'text-[15px] font-semibold break-words transition-colors max-md:line-clamp-2 md:truncate',
                 isDone ? 'text-ink-muted line-through' : 'text-ink'
               )}
             >
@@ -387,7 +406,7 @@ function SortableTaskItem({
             <>
               {isPinned ? (
                 // 고정·해제 버튼은 더보기 안에 두고, 고정 상태는 항상 보인다.
-                <span role="img" aria-label="고정된 작업" className="flex shrink-0 text-pomo">
+                <span role="img" aria-label="고정된 작업" className={cn('flex shrink-0 text-pomo', motion === 'pin' && 'animate-pop-in')}>
                   <Pin aria-hidden="true" className="size-3.5 fill-current" strokeWidth={1.8} />
                 </span>
               ) : null}
@@ -404,7 +423,12 @@ function SortableTaskItem({
               >
                 <MoreHorizontal aria-hidden="true" className="size-[18px]" strokeWidth={1.8} />
               </button>
-              <div id={actionsId} hidden={!showActions} className="basis-full pl-16">
+              <div
+                ref={actionsRef}
+                id={actionsId}
+                hidden={!showActions}
+                className={cn('basis-full pl-16', actionsEntering && 'animate-fade-up')}
+              >
                 <div className="flex flex-wrap gap-1">{actions}</div>
               </div>
             </>
@@ -464,7 +488,15 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
   const goalLabelId = useId();
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [rowMotion, setRowMotion] = useState<RowMotion | null>(null);
+  // 추가 양식에서 사용자가 목표를 바꿨을 때만 숫자가 튄다(양식을 열 때는 그대로).
+  const [goalChanged, setGoalChanged] = useState(false);
   const scopeRef = useRef<ReturnType<typeof createRequestScope> | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // 방금 동작의 움직임은 한 번 돈 뒤 뗀다. 남겨 두면 실시간으로 행이 옮겨질 때 다시 돈다.
+  usePlayOnce(rowMotion, listRef, (played) => setRowMotion((current) => (current === played ? null : current)));
+  const formEntering = useEntrance(isDesktop && isAdding, formRef);
 
   useLayoutEffect(() => {
     const scope = createRequestScope();
@@ -800,6 +832,7 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
         const pin = normalizePinnedTaskRows([data as PinnedTaskRow])[0];
         setTasks((current) => current.map((row) => row.id === task.id
           ? { ...row, source_pinned_task_id: pin.id } : row));
+        setRowMotion({ type: 'pin', id: task.id });
       }
     } catch (error) {
       if (scope.active) {
@@ -832,6 +865,8 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
       })
     );
 
+    // 행을 옮기면 붙어 있던 등장·팝 애니메이션이 다시 돌므로 함께 뗀다.
+    setRowMotion(null);
     setTasks(reorderedTasks);
 
     try {
@@ -887,9 +922,11 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
 
       const createdTask = normalizeTaskRows([data as TaskRow])[0];
       setTasks((currentTasks) => [...currentTasks, { ...createdTask, duration: 0, pomodoros: 0 }]);
+      setRowMotion({ type: 'add', id: createdTask.id });
       if (createdTask.subject_id) notifyStudySubjectsChanged();
       setNewTaskTitle('');
       setNewGoal(DEFAULT_POMODORO_GOAL);
+      setGoalChanged(false);
       resetSubject();
       setIsAdding(false);
     } catch (error) {
@@ -910,6 +947,7 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
           : currentTask
       )
     );
+    setRowMotion(nextStatus === 'done' ? { type: 'complete', id: task.id } : null);
 
     try {
       const { error } = await supabase
@@ -987,8 +1025,24 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
     setIsAdding(false);
     setNewTaskTitle('');
     setNewGoal(DEFAULT_POMODORO_GOAL);
+    setGoalChanged(false);
     resetSubject();
   };
+
+  const changeGoal = (delta: number) => {
+    setGoalChanged(true);
+    setNewGoal((goal) => clampPomodoroGoal(goal + delta));
+  };
+
+  // 다른 곳(실시간 갱신 등)에서 그 상태가 풀렸으면 표시를 뗀다. 다시 그 상태가 돼도 움직이지 않는다.
+  const motionTask = rowMotion ? tasks.find((task) => task.id === rowMotion.id) : undefined;
+  if (rowMotion && (
+    !motionTask
+    || (rowMotion.type === 'complete' && motionTask.status !== 'done')
+    || (rowMotion.type === 'pin' && !motionTask.source_pinned_task_id)
+  )) {
+    setRowMotion(null);
+  }
 
   const selectedDate = parse(selectedDateKey, 'yyyy-MM-dd', new Date());
   const dayLabel = formatDayLabel(selectedDate, !isDesktop);
@@ -1010,13 +1064,16 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
 
   const addForm = (
     <form
+      ref={formRef}
       onSubmit={addTask}
       className={cn(
         'flex min-w-0 flex-col',
-        // 데스크톱은 회색 판 위 흰 입력칸, 모바일 시트는 흰 바탕 위 회색 입력칸(보드 기준)
+        // 데스크톱은 회색 판 위 흰 입력칸, 모바일 시트는 흰 바탕 위 회색 입력칸(보드 기준).
+        // 데스크톱 판은 열 때 떠오르고, 시트 안에서는 시트가 움직인다.
         isDesktop
           ? 'gap-3 rounded-panel bg-surface px-5 py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white'
-          : 'gap-4'
+          : 'gap-4',
+        formEntering && 'animate-fade-up'
       )}
     >
       <div className="flex flex-col gap-1.5">
@@ -1054,17 +1111,20 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
               type="button"
               aria-label="뽀모도로 줄이기"
               disabled={newGoal <= POMODORO_GOAL_MIN}
-              onClick={() => setNewGoal((goal) => clampPomodoroGoal(goal - 1))}
+              onClick={() => changeGoal(-1)}
               className={cn('ui-icon-button-surface text-xl leading-none', isDesktop ? 'size-[46px] bg-white' : 'size-11')}
             >
               −
             </button>
-            <output aria-live="polite" className="min-w-10 text-center text-base font-bold">{newGoal}</output>
+            <output aria-live="polite" className="min-w-10 text-center text-base font-bold">
+              {/* 값마다 새로 붙어 바뀔 때마다 한 번 튄다. output은 그대로라 읽어 주기는 전과 같다. */}
+              <span key={newGoal} className={cn('inline-block', goalChanged && 'animate-pop')}>{newGoal}</span>
+            </output>
             <button
               type="button"
               aria-label="뽀모도로 늘리기"
               disabled={newGoal >= POMODORO_GOAL_MAX}
-              onClick={() => setNewGoal((goal) => clampPomodoroGoal(goal + 1))}
+              onClick={() => changeGoal(1)}
               className={cn('ui-icon-button-surface text-xl leading-none', isDesktop ? 'size-[46px] bg-white' : 'size-11')}
             >
               +
@@ -1125,7 +1185,7 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
 
       {isDesktop && isAdding ? addForm : null}
 
-      <div className="min-w-0">
+      <div ref={listRef} className="min-w-0">
         {loading && tasks.length === 0 ? (
           <p className="m-0 py-3 text-sm text-ink-muted">작업을 불러오는 중...</p>
         ) : tasks.length === 0 ? (
@@ -1153,6 +1213,7 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
                     createSubject={createSubject}
                     isPinned={Boolean(task.source_pinned_task_id)}
                     isDesktop={isDesktop}
+                    motion={rowMotion?.id === task.id ? rowMotion.type : null}
                   />
                 ))}
               </ul>

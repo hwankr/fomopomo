@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import toast from 'react-hot-toast';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateRunningAnimations } from './motionTestUtils';
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
@@ -936,5 +937,207 @@ describe('TaskList plan board', () => {
     expect(more).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '9월 6일 작업 수정' }));
     expect(screen.getByRole('textbox', { name: '작업 제목' })).toHaveValue('9월 6일 작업');
+  });
+});
+
+describe('TaskList motion', () => {
+  // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다.
+  let animations: ReturnType<typeof simulateRunningAnimations>;
+  beforeEach(() => { animations = simulateRunningAnimations(); });
+  afterEach(() => animations.restore());
+
+  // setDesktop은 모든 미디어 질의를 맞춘다(동작 줄이기 포함). 여기서는 폭 질의만 맞춰 움직임이 돌게 한다.
+  const setViewport = (desktop: boolean) => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: desktop && query.includes('min-width'), media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as MediaQueryList);
+  };
+  const checkOf = (title: string) =>
+    within(taskRow(title)).getByRole('button', { name: `${title} 완료` }).querySelector('svg')!;
+  const animated = () => [...document.querySelectorAll('[class*="animate-"]')];
+  const titles = () => screen.getAllByRole('listitem').map((item) => item.querySelector('span[title]')?.getAttribute('title'));
+  // 다른 곳에서 순서를 바꾼다(서버 순서가 바뀌고 실시간 갱신이 온다).
+  const reorderRemotely = async (order: string[]) => {
+    rows.tasks = [
+      ...order.map((id, position): Row => ({ ...rows.tasks.find((row) => row.id === id)!, position })),
+      ...rows.tasks.filter((row) => !order.includes(row.id as string)),
+    ];
+    await emit();
+  };
+
+  it('plays the new row’s entrance once: a later remote reorder or refresh does not re-arm it', async () => {
+    setViewport(true);
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const existing = taskRow('9월 6일 작업');
+    // 처음 불러온 목록은 움직이지 않는다.
+    expect(animated()).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    const form = screen.getByRole('textbox', { name: '할 일' }).closest('form')!;
+    expect(form).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(form).not.toHaveClass('animate-fade-up');
+
+    fireEvent.change(screen.getByRole('textbox', { name: '할 일' }), { target: { value: '첫 추가' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    await screen.findByText('첫 추가');
+    const added = taskRow('첫 추가');
+    expect(animated()).toEqual([added]);
+    expect(added).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(animated()).toEqual([]);
+
+    // 방금 추가한 행을 다른 곳에서 맨 앞으로, 다시 맨 뒤로 옮겨도(같은 노드가 옮겨진다) 다시 돌지 않는다.
+    await reorderRemotely(['inserted-1', 'a-task']);
+    await waitFor(() => expect(titles()).toEqual(['첫 추가', '9월 6일 작업']));
+    expect(taskRow('첫 추가')).toBe(added);
+    expect(animated()).toEqual([]);
+    await reorderRemotely(['a-task', 'inserted-1']);
+    await waitFor(() => expect(titles()).toEqual(['9월 6일 작업', '첫 추가']));
+    expect(taskRow('9월 6일 작업')).toBe(existing);
+    expect(animated()).toEqual([]);
+  });
+
+  it('plays an open editor’s entrance only when it opens, not when its row is moved', async () => {
+    setViewport(true);
+    rows.tasks.push(task('c-task', '두 번째 작업'));
+    mount();
+    await screen.findByText('두 번째 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 수정' }));
+    const input = screen.getByRole('textbox', { name: '작업 제목' });
+    const editor = input.parentElement!;
+    expect(editor).toHaveClass('animate-fade-up');
+    fireEvent.change(input, { target: { value: '고치는 중' } });
+    await animations.finish();
+    expect(editor).not.toHaveClass('animate-fade-up');
+
+    await reorderRemotely(['c-task', 'a-task']);
+    await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('두 번째 작업'));
+    expect(screen.getByRole('textbox', { name: '작업 제목' })).toBe(input);
+    expect(input).toHaveValue('고치는 중');
+    expect(animated()).toEqual([]);
+  });
+
+  it('pops the check once when the user completes a task, never for a refreshed completion', async () => {
+    setViewport(true);
+    rows.tasks.push(task('c-task', '두 번째 작업'));
+    mount();
+    await screen.findByText('9월 6일 작업');
+    const toggle = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' });
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(checkOf('9월 6일 작업')).toHaveClass('animate-pop-in');
+    expect(screen.getByText('9월 6일 작업', { selector: 'span[title]' })).toHaveClass('transition-colors', 'line-through');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
+    await animations.finish();
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+
+    // 다른 곳에서 순서를 바꿔도 다시 튀지 않는다.
+    await reorderRemotely(['c-task', 'a-task']);
+    await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('두 번째 작업'));
+    expect(animated()).toEqual([]);
+
+    // 사용자가 완료를 풀면 팝 없이 색만 바뀌고, 다시 완료하면 다시 튄다.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('todo'));
+    fireEvent.click(toggle);
+    expect(checkOf('9월 6일 작업')).toHaveClass('animate-pop-in');
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
+
+    // 도는 중에 다른 곳에서 완료를 풀었다가 다시 완료해도 다시 튀지 않는다.
+    rows.tasks = rows.tasks.map((row) => row.id === 'a-task' ? { ...row, status: 'todo' } : row);
+    await emit();
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'false'));
+    rows.tasks = rows.tasks.map((row) => row.id === 'a-task' ? { ...row, status: 'done' } : row);
+    await emit();
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'true'));
+    expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
+  });
+
+  it('pops the goal number only after the user changes it', async () => {
+    setViewport(true);
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    const goal = within(screen.getByRole('group', { name: '뽀모도로' }));
+    const number = () => goal.getByRole('status').firstElementChild!;
+    expect(number()).toHaveTextContent('2');
+    expect(number()).not.toHaveClass('animate-pop');
+
+    fireEvent.click(goal.getByRole('button', { name: '뽀모도로 늘리기' }));
+    expect(goal.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    expect(number()).toHaveTextContent('3');
+    expect(number()).toHaveClass('animate-pop');
+    const three = number();
+    fireEvent.click(goal.getByRole('button', { name: '뽀모도로 줄이기' }));
+    // 값마다 새로 붙어 바뀔 때마다 다시 튄다.
+    expect(number()).not.toBe(three);
+    expect(number()).toHaveClass('animate-pop');
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
+    expect(within(screen.getByRole('group', { name: '뽀모도로' })).getByRole('status').firstElementChild).not.toHaveClass('animate-pop');
+  });
+
+  it('pops the pin once when the user pins a task, and opens the mobile actions with an entrance each time', async () => {
+    setViewport(true);
+    const { unmount } = mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 고정' }));
+    const unpin = await within(taskRow('9월 6일 작업')).findByRole('button', { name: '9월 6일 작업 고정 해제' });
+    expect(unpin.querySelector('svg')).toHaveClass('animate-pop');
+    await animations.finish();
+    expect(unpin.querySelector('svg')).not.toHaveClass('animate-pop');
+    fireEvent.click(unpin);
+    const pin = await within(taskRow('9월 6일 작업')).findByRole('button', { name: '9월 6일 작업 고정' });
+    expect(pin.querySelector('svg')).not.toHaveClass('animate-pop');
+    await waitFor(() => expect(rows.pinned_tasks).toHaveLength(0));
+    unmount();
+
+    setViewport(false);
+    rows.tasks[1] = { ...task('pinned-task', '고정한 작업'), source_pinned_task_id: 'pin-x' };
+    rows.pinned_tasks = [{ id: 'pin-x', user_id: 'user-1', title: '고정한 작업', position: 0 }];
+    mount();
+    await screen.findByText('9월 6일 작업');
+    // 처음부터 고정된 작업의 표시는 그대로 있다.
+    expect(animated()).toEqual([]);
+    const more = within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 더보기' });
+    const actions = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(actions).toHaveAttribute('hidden');
+    fireEvent.click(more);
+    expect(actions).not.toHaveAttribute('hidden');
+    expect(actions).toHaveClass('animate-fade-up');
+    await animations.finish();
+    expect(actions).not.toHaveClass('animate-fade-up');
+
+    fireEvent.click(within(actions).getByRole('button', { name: '9월 6일 작업 고정' }));
+    const mark = await within(taskRow('9월 6일 작업')).findByRole('img', { name: '고정된 작업' });
+    expect(mark).toHaveClass('animate-pop-in');
+    expect(within(taskRow('고정한 작업')).getByRole('img', { name: '고정된 작업' })).not.toHaveClass('animate-pop-in');
+    await animations.finish();
+    expect(animated()).toEqual([]);
+
+    // 닫았다 다시 열면 다시 나타난다.
+    fireEvent.click(more);
+    expect(actions).toHaveAttribute('hidden');
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(actions).toHaveClass('animate-fade-up');
+  });
+
+  it('drops the marks at once with reduced motion', async () => {
+    setDesktop(true); // 모든 질의가 맞는다: 데스크톱 + 동작 줄이기
+    mount();
+    await screen.findByText('9월 6일 작업');
+    fireEvent.click(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' }));
+    expect(within(taskRow('9월 6일 작업')).getByRole('button', { name: '9월 6일 작업 완료' })).toHaveAttribute('aria-pressed', 'true');
+    expect(animated()).toEqual([]);
+    await waitFor(() => expect(rows.tasks.find((row) => row.id === 'a-task')?.status).toBe('done'));
   });
 });

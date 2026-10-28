@@ -1,3 +1,5 @@
+import { motionDuration, motionEasing } from '@/components/ui/motion';
+
 export const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 /** "10월 27일 화요일", short면 "10월 27일 화" */
@@ -20,4 +22,9 @@ export function formatClock(totalMinutes: number): string {
   const minutes = Math.round(totalMinutes);
   const hour = Math.floor(minutes / 60) % 24;
   return `${hour}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/** 끌어서 순서를 바꿀 때 비켜 가는 행과 놓은 행의 움직임(dnd-kit 기본값 대신 움직임 토큰) */
+export function sortableTransition() {
+  return { duration: motionDuration('enter'), easing: motionEasing('enter') };
 }

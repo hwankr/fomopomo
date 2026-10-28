@@ -38,7 +38,8 @@ import {
   type LongTermTaskRow,
 } from '@/lib/longTermTasks';
 import { cn } from '@/lib/utils';
-import { formatStudyTime } from './planUi';
+import { formatStudyTime, sortableTransition } from './planUi';
+import { useEntrance, usePlayOnce } from './usePlayOnce';
 
 interface LongTermTasksProps {
   userId: string;
@@ -46,6 +47,14 @@ interface LongTermTasksProps {
 
 const TASK_SELECT = 'id, title, position, subject_id, parent_task_id';
 const SUBTASK_SELECT = 'id, title, position, completed_at';
+
+/**
+ * 방금 한 동작과 그 대상. 그 항목에만 움직임을 한 번 붙인다(docs/design-system.md §8 새 항목, usePlayOnce).
+ * task: 과제·과목 항목 추가, subtask: 세부 할 일 추가, toggle: 세부 할 일 완료(done)·완료 취소(진행 막대)
+ */
+type LongTermMotion =
+  | { type: 'task' | 'subtask'; id: string }
+  | { type: 'toggle'; id: string; done: boolean };
 
 const normalizeTaskRows = (
   rows: LongTermTaskRow[] | null | undefined
@@ -105,6 +114,8 @@ export async function persistSubtaskPositions(
 
 interface SortableSubtaskItemProps {
   subtask: LongTermSubtaskItem;
+  /** 이 세부 할 일에서 방금 한 동작(없으면 null) */
+  motion: 'add' | 'complete' | null;
   isTogglePending: boolean;
   toggleSubtask: (subtask: LongTermSubtaskItem) => void;
   updateSubtask: (subtaskId: string, title: string) => void;
@@ -113,6 +124,7 @@ interface SortableSubtaskItemProps {
 
 function SortableSubtaskItem({
   subtask,
+  motion,
   isTogglePending,
   toggleSubtask,
   updateSubtask,
@@ -120,6 +132,9 @@ function SortableSubtaskItem({
 }: SortableSubtaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(subtask.title);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // 열릴 때만 한 번 떠오른다(열린 채로 행이 옮겨져도 다시 돌지 않는다).
+  const editorEntering = useEntrance(isEditing, editorRef);
 
   const {
     attributes,
@@ -128,7 +143,7 @@ function SortableSubtaskItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: subtask.id });
+  } = useSortable({ id: subtask.id, transition: sortableTransition() });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -166,7 +181,8 @@ function SortableSubtaskItem({
       className={cn(
         'group relative -mx-3 flex min-h-12 items-center gap-x-2 gap-y-1 rounded-tile px-3 py-1.5 transition-colors max-md:flex-wrap md:gap-x-2.5',
         isEditing ? 'flex-wrap bg-surface' : 'hover:bg-hover',
-        isDragging && 'bg-white shadow-popover'
+        isDragging && 'bg-white shadow-popover',
+        motion === 'add' && 'animate-fade-up'
       )}
     >
       <div
@@ -194,12 +210,15 @@ function SortableSubtaskItem({
             isCompleted ? 'border-pomo bg-pomo text-white' : 'border-control text-transparent'
           )}
         >
-          <Check className="size-3" strokeWidth={3} />
+          <Check className={cn('size-3', isCompleted && motion === 'complete' && 'animate-pop-in')} strokeWidth={3} />
         </span>
       </button>
 
       {isEditing ? (
-        <div className="flex min-w-0 flex-1 basis-[min(100%,14rem)] items-center gap-2">
+        <div
+          ref={editorRef}
+          className={cn('flex min-w-0 flex-1 basis-[min(100%,14rem)] items-center gap-2', editorEntering && 'animate-fade-up')}
+        >
           <input
             type="text"
             aria-label="세부 할 일 제목"
@@ -230,7 +249,7 @@ function SortableSubtaskItem({
         <span
           title={subtask.title}
           className={cn(
-            'min-w-0 flex-1 text-[15px] font-medium break-words max-md:line-clamp-2',
+            'min-w-0 flex-1 text-[15px] font-medium break-words transition-colors max-md:line-clamp-2',
             isCompleted ? 'text-ink-muted line-through' : 'text-ink'
           )}
         >
@@ -269,7 +288,12 @@ function SortableSubtaskItem({
 
       {/* 데스크톱은 행 오른쪽 끝, 모바일은 제목 아래 줄(제목 시작선에 맞춘다) */}
       {!isEditing && subtask.completed_at ? (
-        <span className="text-xs whitespace-nowrap text-ink-subtle max-md:-mt-2 max-md:basis-full max-md:pb-1 max-md:pl-[76px]">
+        <span
+          className={cn(
+            'text-xs whitespace-nowrap text-ink-subtle max-md:-mt-2 max-md:basis-full max-md:pb-1 max-md:pl-[76px]',
+            motion === 'complete' && 'animate-fade-in'
+          )}
+        >
           {format(new Date(subtask.completed_at), 'M월 d일')} 완료
         </span>
       ) : null}
@@ -302,6 +326,22 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   const [isAddingSubject, setIsAddingSubject] = useState(false);
   const pendingSubjectRef = useRef(false);
   const [collapsedSubjectIds, setCollapsedSubjectIds] = useState<Set<string>>(() => new Set());
+  const [motion, setMotion] = useState<LongTermMotion | null>(null);
+  // 사용자가 방금 펼친 과목 항목(그 내용만 떠오른다. 처음 그릴 때 펼쳐져 있는 항목은 그대로)
+  const [expandedSubjectId, setExpandedSubjectId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const subtaskFormRef = useRef<HTMLFormElement>(null);
+  const subjectFormRef = useRef<HTMLFormElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // 방금 동작의 움직임(등장·팝·진행 막대 전환)은 한 번 돈 뒤 뗀다. 남겨 두면 행이 옮겨지거나 탭을 다시 열 때,
+  // 또는 같은 과제의 다음 실시간 변경에서 다시 움직인다.
+  usePlayOnce(motion, rootRef, (played) => setMotion((current) => (current === played ? null : current)));
+  usePlayOnce(expandedSubjectId, rootRef, (played) => setExpandedSubjectId((current) => (current === played ? null : current)));
+  const formEntering = useEntrance(isAdding, formRef);
+  const subtaskFormEntering = useEntrance(addingSubtaskTaskId, subtaskFormRef);
+  const subjectFormEntering = useEntrance(addingSubjectTaskId, subjectFormRef);
+  const editorEntering = useEntrance(editingTaskId, editorRef);
   // 요청 세대 번호. 늦게 도착한 이전 refetch 응답이 더 새로운 상태를
   // 덮어쓰지 못하도록 fetchTasks가 응답 적용 전에 최신 세대인지 확인한다.
   // 로컬 변경(생성·이름 변경·삭제·토글·정렬)을 커밋하는 쪽도 커밋 시점에
@@ -344,6 +384,8 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     setIsAddingSubject(false);
     pendingSubjectRef.current = false;
     setCollapsedSubjectIds(new Set());
+    setMotion(null);
+    setExpandedSubjectId(null);
     pendingSubtaskIdsRef.current = new Set();
     setPendingSubtaskIds(new Set());
   }
@@ -529,6 +571,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
           )
         : [...currentTasks, { ...createdTask, subtasks: [], durationSeconds: 0 }]
     );
+    setMotion({ type: 'task', id: createdTask.id });
     setLoading(false);
     setNewTaskTitle('');
     resetSubject();
@@ -581,6 +624,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
           ? current.map((task) => task.id === created.id ? { ...task, ...created, subtasks: task.subtasks } : task)
           : [...current, { ...created, durationSeconds: 0 }];
       });
+      setMotion({ type: 'task', id: created.id });
       setLoading(false);
       setAddingSubjectTaskId(null);
       setNewGroupSubjectId(null);
@@ -751,6 +795,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         };
       })
     );
+    setMotion({ type: 'subtask', id: createdSubtask.id });
     setLoading(false);
     setNewSubtaskTitle('');
     setAddingSubtaskTaskId(null);
@@ -783,6 +828,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         ),
       }))
     );
+    setMotion({ type: 'toggle', id: subtaskId, done: nextCompletedAt !== null });
     setLoading(false);
 
     try {
@@ -895,6 +941,8 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
     // 드롭 전에 시작된 refetch가 커밋한 순서를 덮어쓰지 못하게 한다.
     fetchEpochRef.current += 1;
+    // 행을 옮기면 붙어 있던 등장·팝 애니메이션이 다시 돌므로 함께 뗀다.
+    setMotion(null);
     setTasks((currentTasks) =>
       currentTasks.map((currentTask) =>
         currentTask.id === taskId
@@ -912,6 +960,25 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     if (!persisted) {
       void fetchTasks(generation);
     }
+  };
+
+  // 다른 곳(실시간 갱신, 실패 롤백)에서 지워지거나 완료 상태가 바뀌었으면 표시를 뗀다.
+  // 그 뒤에 같은 상태가 다시 와도 움직이지 않는다.
+  const motionTargetStands = motion?.type === 'task'
+    ? tasks.some((task) => task.id === motion.id)
+    : tasks.some((task) => task.subtasks.some((subtask) => subtask.id === motion?.id
+      && (motion.type !== 'toggle' || Boolean(subtask.completed_at) === motion.done)));
+  if (motion && !motionTargetStands) setMotion(null);
+
+  const toggleSubjectGroup = (taskId: string) => {
+    const expanding = collapsedSubjectIds.has(taskId);
+    setExpandedSubjectId(expanding ? taskId : null);
+    setCollapsedSubjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
   };
 
   const handleEditKeyDown = (event: React.KeyboardEvent) => {
@@ -932,12 +999,16 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     // 과목 항목은 제목이 과목 이름과 같으면 과목을 다시 적지 않는다.
     const showSubject = !nested || subjectName !== task.title;
     const isEditing = editingTaskId === task.id;
+    // 사용자가 이 과제(과목 항목)의 세부 할 일을 방금 완료·취소했을 때 그 한 번만 진행 막대가 움직인다.
+    // 전환이 끝나면 표시를 떼므로 뒤이은 실시간 갱신은 바로 바뀐다.
+    const progressMoves = motion?.type === 'toggle'
+      && [task, ...children].some((item) => item.subtasks.some((subtask) => subtask.id === motion.id));
 
     return (
       <div
         key={task.id}
         data-long-term-task={task.id}
-        className="flex min-w-0 flex-col gap-1"
+        className={cn('flex min-w-0 flex-col gap-1', motion?.type === 'task' && motion.id === task.id && 'animate-fade-up')}
       >
         <div
           className={cn(
@@ -946,7 +1017,13 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
           )}
         >
           {isEditing ? (
-            <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white">
+            <div
+              ref={editorRef}
+              className={cn(
+                'flex min-w-0 flex-1 basis-[min(100%,18rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white',
+                editorEntering && 'animate-fade-up'
+              )}
+            >
               <input
                 type="text"
                 aria-label="장기 과제 제목"
@@ -988,12 +1065,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                   aria-expanded={!isCollapsed}
                   aria-controls={`long-term-details-${task.id}`}
                   aria-label={`${task.title} ${isCollapsed ? '펼치기' : '접기'}`}
-                  onClick={() => setCollapsedSubjectIds((current) => {
-                    const next = new Set(current);
-                    if (next.has(task.id)) next.delete(task.id);
-                    else next.add(task.id);
-                    return next;
-                  })}
+                  onClick={() => toggleSubjectGroup(task.id)}
                   className="-ml-1 flex min-h-11 max-w-full items-center gap-1 rounded-chip text-left text-[15px] font-bold md:min-h-0 md:items-start"
                 >
                   <ChevronDown aria-hidden="true" className={cn('mt-0.5 size-4 shrink-0 text-ink-muted transition-transform motion-reduce:transition-none', isCollapsed && '-rotate-90')} />
@@ -1050,14 +1122,19 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
         {totalCount > 0 && (
           <div aria-hidden="true" className="h-1 w-full overflow-hidden rounded-full bg-track">
+            {/* 너비 대신 transform으로 채운다(왼쪽 끝은 막대가 가린다). */}
             <div
-              className="h-full rounded-full bg-pomo transition-[width] duration-300 motion-reduce:transition-none"
-              style={{ width: `${progressPercent}%` }}
+              className={cn('h-full w-full rounded-full bg-pomo', progressMoves && 'transition-transform duration-(--duration-emphasized)')}
+              style={{ transform: `translateX(${progressPercent - 100}%)` }}
             />
           </div>
         )}
 
-        <div id={`long-term-details-${task.id}`} hidden={isCollapsed} className="min-w-0">
+        <div
+          id={`long-term-details-${task.id}`}
+          hidden={isCollapsed}
+          className={cn('min-w-0', nested && expandedSubjectId === task.id && 'animate-fade-up')}
+        >
           {task.subtasks.length > 0 && (
             <DndContext
               sensors={sensors}
@@ -1075,6 +1152,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                     <SortableSubtaskItem
                       key={subtask.id}
                       subtask={subtask}
+                      motion={motion?.id !== subtask.id ? null
+                        : motion.type === 'subtask' ? 'add'
+                          : motion.type === 'toggle' && motion.done ? 'complete' : null}
                       isTogglePending={pendingSubtaskIds.has(
                         subtask.id
                       )}
@@ -1103,8 +1183,9 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
           <div className="mt-1 flex min-w-0 flex-col items-start gap-2">
             {addingSubtaskTaskId === task.id ? (
               <form
+                ref={subtaskFormRef}
                 onSubmit={(event) => void addSubtask(event, task.id)}
-                className="flex w-full min-w-0 flex-wrap items-center gap-2"
+                className={cn('flex w-full min-w-0 flex-wrap items-center gap-2', subtaskFormEntering && 'animate-fade-up')}
               >
                 <input
                   type="text"
@@ -1139,8 +1220,12 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
             {!nested && addingSubjectTaskId === task.id ? (
               <form
+                ref={subjectFormRef}
                 onSubmit={(event) => void addSubjectGroup(event, task.id)}
-                className="flex w-full min-w-0 flex-col gap-2 rounded-panel bg-surface p-4 [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white"
+                className={cn(
+                  'flex w-full min-w-0 flex-col gap-2 rounded-panel bg-surface p-4 [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white',
+                  subjectFormEntering && 'animate-fade-up'
+                )}
               >
                 <SubjectSelect
                   subjects={subjects}
@@ -1193,7 +1278,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div ref={rootRef} className="flex min-w-0 flex-col gap-4">
       <div className="flex min-h-11 items-start justify-between gap-3 md:min-h-10">
         <p className="m-0 min-w-0 pt-2 text-sm text-ink-muted">
           이름만 등록하고 타이머에서 바로 공부하세요. 필요하면 과목과 세부 할 일을 추가할 수 있어요.
@@ -1212,8 +1297,12 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
 
       {isAdding ? (
         <form
+          ref={formRef}
           onSubmit={addTask}
-          className="flex min-w-0 flex-col gap-3 rounded-panel bg-surface p-4 md:px-5 md:py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white"
+          className={cn(
+            'flex min-w-0 flex-col gap-3 rounded-panel bg-surface p-4 md:px-5 md:py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white',
+            formEntering && 'animate-fade-up'
+          )}
         >
           <input
             type="text"
@@ -1249,7 +1338,8 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         </form>
       ) : null}
 
-      {loading ? (
+      {/* 다시 불러오는 동안에도 목록을 그대로 둔다(행이 다시 붙지 않아 움직임이 되풀이되지 않는다). */}
+      {loading && tasks.length === 0 ? (
         <p className="m-0 py-2 text-sm text-ink-muted">불러오는 중...</p>
       ) : tasks.length === 0 ? (
         <p className="m-0 py-2 text-sm text-ink-muted md:text-[15px]">아직 장기 과제가 없어요.</p>
