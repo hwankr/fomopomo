@@ -2,19 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import {
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Circle,
-  GripVertical,
-  Pencil,
-  Plus,
-  Target,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Check, ChevronDown, GripVertical, Pencil, Plus, Trash2, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -38,7 +26,6 @@ import SubjectSelect from '@/components/subjects/SubjectSelect';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import { notifyStudySubjectsChanged } from '@/lib/studySubjects';
-import { usePersistedState } from '@/hooks/usePersistedState';
 import { supabase } from '@/lib/supabase';
 import {
   fetchLongTermTaskDurations,
@@ -50,7 +37,8 @@ import {
   type LongTermTaskItem,
   type LongTermTaskRow,
 } from '@/lib/longTermTasks';
-import { cn, formatDuration } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { formatStudyTime } from './planUi';
 
 interface LongTermTasksProps {
   userId: string;
@@ -172,107 +160,120 @@ function SortableSubtaskItem({
   };
 
   return (
-    <div
+    <li
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group flex items-center gap-2 rounded-lg border border-transparent bg-white p-2 transition-all hover:border-emerald-200 dark:bg-gray-900/50 dark:hover:border-emerald-800',
-        isEditing ? 'max-sm:flex-wrap' : 'max-sm:grid max-sm:grid-cols-[auto_auto_minmax(0,1fr)]',
-        isDragging &&
-          'border-emerald-200 bg-white shadow-lg dark:border-emerald-900 dark:bg-gray-800'
+        'group relative -mx-3 flex min-h-12 items-center gap-x-2 gap-y-1 rounded-tile px-3 py-1.5 transition-colors max-md:flex-wrap md:gap-x-2.5',
+        isEditing ? 'flex-wrap bg-surface' : 'hover:bg-hover',
+        isDragging && 'bg-white shadow-popover'
       )}
     >
       <div
         {...attributes}
         {...listeners}
-        className="shrink-0 cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+        aria-label={`${subtask.title} 순서 바꾸기`}
+        // 모바일은 손가락으로 잡기 쉽게 44px 칸(아이콘은 그대로), 데스크톱은 행 왼쪽 여백에 띄운다.
+        className="-ml-3 flex size-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-chip text-ink-faint hover:text-ink-muted active:cursor-grabbing md:absolute md:top-1/2 md:-left-4 md:ml-0 md:h-9 md:w-4 md:-translate-y-1/2 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
       >
-        <GripVertical className="h-4 w-4" />
+        <GripVertical aria-hidden="true" className="size-4" />
       </div>
 
       <button
+        type="button"
         onClick={() => toggleSubtask(subtask)}
         disabled={isTogglePending}
-        className={cn(
-          'flex-shrink-0 transition-colors',
-          isCompleted
-            ? 'text-emerald-500'
-            : 'text-gray-400 hover:text-emerald-400'
-        )}
+        aria-pressed={isCompleted}
+        aria-label={`${subtask.title} 완료`}
+        className={cn('-mx-2 flex size-11 shrink-0 items-center justify-center rounded-full disabled:cursor-wait md:-mx-1.5 md:size-9', isCompleted && 'ui-focus-ink')}
       >
-        {isCompleted ? (
-          <CheckCircle2 className="h-5 w-5" />
-        ) : (
-          <Circle className="h-5 w-5" />
-        )}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex size-5 items-center justify-center rounded-full border-[1.5px] transition-colors',
+            isCompleted ? 'border-pomo bg-pomo text-white' : 'border-control text-transparent'
+          )}
+        >
+          <Check className="size-3" strokeWidth={3} />
+        </span>
       </button>
 
       {isEditing ? (
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-sm:order-last max-sm:basis-full max-sm:justify-end">
+        <div className="flex min-w-0 flex-1 basis-[min(100%,14rem)] items-center gap-2">
           <input
             type="text"
+            aria-label="세부 할 일 제목"
             value={editedTitle}
             onChange={(event) => setEditedTitle(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            className="ui-input min-h-11 min-w-0 flex-1 bg-white md:min-h-10"
             autoFocus
           />
           <button
+            type="button"
             onClick={handleSave}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
+            aria-label="세부 할 일 저장"
+            className="ui-icon-button size-11 text-pomo md:size-9"
           >
-            <Check className="h-4 w-4" />
+            <Check aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
           </button>
           <button
+            type="button"
             onClick={handleCancel}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+            aria-label="세부 할 일 수정 취소"
+            className="ui-icon-button size-11 text-ink-muted md:size-9"
           >
-            <X className="h-4 w-4" />
+            <X aria-hidden="true" className="size-[18px]" strokeWidth={2} />
           </button>
         </div>
       ) : (
         <span
           title={subtask.title}
           className={cn(
-            'min-w-0 flex-1 break-words text-sm font-medium transition-all max-sm:line-clamp-2',
-            isCompleted
-              ? 'text-gray-400 line-through'
-              : 'text-gray-700 dark:text-gray-200'
+            'min-w-0 flex-1 text-[15px] font-medium break-words max-md:line-clamp-2',
+            isCompleted ? 'text-ink-muted line-through' : 'text-ink'
           )}
         >
           {subtask.title}
         </span>
       )}
 
-      <div className="ml-auto flex shrink-0 items-center gap-2 max-sm:col-span-full max-sm:justify-end">
-        {!isEditing && subtask.completed_at ? (
-          <span className="whitespace-nowrap text-xs text-gray-400">
-            {format(new Date(subtask.completed_at), 'M월 d일')} 완료
-          </span>
-        ) : null}
+      <div className="ml-auto flex shrink-0 items-center gap-1 max-md:-mr-3">
+        <div className="flex items-center md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => {
+                // 실시간 갱신이나 실패 롤백으로 제목이 바뀌었을 수 있으므로
+                // 편집을 열 때마다 현재 제목에서 초안을 다시 시작한다.
+                setEditedTitle(subtask.title);
+                setIsEditing(true);
+              }}
+              aria-label={`${subtask.title} 수정`}
+              className="ui-icon-button size-11 text-ink-muted md:size-8"
+            >
+              <Pencil aria-hidden="true" className="size-4" strokeWidth={1.8} />
+            </button>
+          )}
 
-        {!isEditing && (
           <button
-            onClick={() => {
-              // 실시간 갱신이나 실패 롤백으로 제목이 바뀌었을 수 있으므로
-              // 편집을 열 때마다 현재 제목에서 초안을 다시 시작한다.
-              setEditedTitle(subtask.title);
-              setIsEditing(true);
-            }}
-            className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+            type="button"
+            onClick={() => deleteSubtask(subtask.id)}
+            aria-label={`${subtask.title} 삭제`}
+            className="ui-icon-button size-11 text-ink-muted hover:text-pomo-deep md:size-8"
           >
-            <Pencil className="h-4 w-4" />
+            <Trash2 aria-hidden="true" className="size-4" strokeWidth={1.8} />
           </button>
-        )}
-
-        <button
-          onClick={() => deleteSubtask(subtask.id)}
-          className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        </div>
       </div>
-    </div>
+
+      {/* 데스크톱은 행 오른쪽 끝, 모바일은 제목 아래 줄(제목 시작선에 맞춘다) */}
+      {!isEditing && subtask.completed_at ? (
+        <span className="text-xs whitespace-nowrap text-ink-subtle max-md:-mt-2 max-md:basis-full max-md:pb-1 max-md:pl-[76px]">
+          {format(new Date(subtask.completed_at), 'M월 d일')} 완료
+        </span>
+      ) : null}
+    </li>
   );
 }
 
@@ -284,10 +285,6 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
   const { subjectId: newSubjectId, selectSubject, resetSubject, isAutomatic } =
     useSuggestedSubject(newTaskTitle, subjects);
   const [isAdding, setIsAdding] = useState(false);
-  const [isExpanded, setIsExpanded] = usePersistedState(
-    'long_term_expanded',
-    true
-  );
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [deletingSubtaskId, setDeletingSubtaskId] = useState<string | null>(
     null
@@ -931,18 +928,25 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
     const isCollapsed = nested && collapsedSubjectIds.has(task.id);
     const progressPercent =
       totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+    const subjectName = subjects.find((subject) => subject.id === task.subject_id)?.name;
+    // 과목 항목은 제목이 과목 이름과 같으면 과목을 다시 적지 않는다.
+    const showSubject = !nested || subjectName !== task.title;
+    const isEditing = editingTaskId === task.id;
 
     return (
       <div
         key={task.id}
         data-long-term-task={task.id}
-        className={nested
-          ? 'min-w-0 border-l-2 border-emerald-200 py-2 pl-3 dark:border-emerald-800'
-          : 'min-w-0 rounded-xl border border-transparent bg-emerald-50 p-3 transition-all hover:border-emerald-200 dark:bg-emerald-900/20 dark:hover:border-emerald-800'}
+        className="flex min-w-0 flex-col gap-1"
       >
-        <div className="group flex items-center gap-3 max-sm:flex-wrap max-sm:gap-2">
-          {editingTaskId === task.id ? (
-            <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 max-sm:basis-full max-sm:justify-end">
+        <div
+          className={cn(
+            'group -mx-3 flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 rounded-tile px-3 py-2 transition-colors',
+            isEditing ? 'bg-surface' : 'hover:bg-hover'
+          )}
+        >
+          {isEditing ? (
+            <div className="flex min-w-0 flex-1 basis-[min(100%,18rem)] flex-wrap items-center gap-2 [&_[role=combobox]]:bg-white">
               <input
                 type="text"
                 aria-label="장기 과제 제목"
@@ -951,28 +955,33 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                   setEditedTitle(event.target.value)
                 }
                 onKeyDown={handleEditKeyDown}
-                className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-sm:basis-full dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                className="ui-input min-h-11 min-w-0 flex-[1_1_12rem] bg-white md:min-h-10"
                 autoFocus
               />
-              <div className="min-w-0 max-w-full max-sm:basis-full">
+              <div className="min-w-0 flex-[1_1_10rem]">
                 <SubjectSelect subjects={subjects} value={editedSubjectId} onChange={setEditedSubjectId} onCreate={createSubject} compact />
               </div>
-              <button
-                onClick={() => void updateTask()}
-                aria-label="장기 과제 저장"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-green-500 transition-colors hover:bg-green-50 dark:hover:bg-green-900/30"
-              >
-                <Check className="h-4 w-4" />
-              </button>
-              <button
-                onClick={cancelEditing}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 items-center">
+                <button
+                  type="button"
+                  onClick={() => void updateTask()}
+                  aria-label="장기 과제 저장"
+                  className="ui-icon-button size-11 text-pomo md:size-9"
+                >
+                  <Check aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  aria-label="장기 과제 수정 취소"
+                  className="ui-icon-button size-11 text-ink-muted md:size-9"
+                >
+                  <X aria-hidden="true" className="size-[18px]" strokeWidth={2} />
+                </button>
+              </div>
             </div>
           ) : (
-            <span className="min-w-0 flex-1 text-sm font-bold text-gray-700 max-sm:basis-full dark:text-gray-200">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               {nested ? (
                 <button
                   type="button"
@@ -985,73 +994,83 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                     else next.add(task.id);
                     return next;
                   })}
-                  className="flex max-w-full items-start gap-1.5 text-left"
+                  className="-ml-1 flex min-h-11 max-w-full items-center gap-1 rounded-chip text-left text-[15px] font-bold md:min-h-0 md:items-start"
                 >
-                  <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 transition-transform', isCollapsed && '-rotate-90')} />
+                  <ChevronDown aria-hidden="true" className={cn('mt-0.5 size-4 shrink-0 text-ink-muted transition-transform motion-reduce:transition-none', isCollapsed && '-rotate-90')} />
                   <span title={task.title} className="min-w-0 break-words">{task.title}</span>
                 </button>
-              ) : <span title={task.title} className="block break-words max-sm:line-clamp-2">{task.title}</span>}
-              {(!nested || subjects.find((subject) => subject.id === task.subject_id)?.name !== task.title) && <span className="block truncate text-xs font-normal text-gray-500 dark:text-gray-400">
-                {subjects.find((subject) => subject.id === task.subject_id)?.name ?? '미분류'}
-              </span>}
-              <span className="mt-1 block text-xs font-normal text-emerald-700 dark:text-emerald-300">
-                {task.durationSeconds === undefined
-                  ? '누적 시간 조회 실패'
-                  : `누적 ${formatDuration(task.durationSeconds)}`}
+              ) : (
+                <span title={task.title} className="text-base font-bold break-words max-md:line-clamp-2 md:text-[17px]">{task.title}</span>
+              )}
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] text-ink-subtle">
+                {showSubject ? (
+                  <>
+                    <span className="min-w-0 truncate">{subjectName ?? '미분류'}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                ) : null}
+                <span className="whitespace-nowrap">
+                  {task.durationSeconds === undefined
+                    ? '누적 시간 조회 실패'
+                    : `누적 ${formatStudyTime(task.durationSeconds)}`}
+                </span>
               </span>
-            </span>
+            </div>
           )}
 
-          <div className="ml-auto flex shrink-0 items-center gap-3 max-sm:gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div className={cn('flex items-center', !isEditing && 'md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100')}>
+              {!isEditing && (
+                <button
+                  type="button"
+                  onClick={() => startEditing(task)}
+                  aria-label={`${task.title} 수정`}
+                  className="ui-icon-button size-11 text-ink-muted md:size-8"
+                >
+                  <Pencil aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setDeletingTaskId(task.id)}
+                aria-label={`${task.title} 삭제`}
+                className="ui-icon-button size-11 text-ink-muted hover:text-pomo-deep md:size-8"
+              >
+                <Trash2 aria-hidden="true" className="size-4" strokeWidth={1.8} />
+              </button>
+            </div>
             {totalCount > 0 && (
-              <span className="whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
+              <span className="min-w-9 pl-1 text-right text-[13px] font-semibold text-ink-muted">
                 {`${completedCount}/${totalCount}`}
               </span>
             )}
-
-            {editingTaskId !== task.id && (
-              <button
-                onClick={() => startEditing(task)}
-                aria-label={`${task.title} 수정`}
-                className="p-1.5 text-gray-400 transition-all hover:text-emerald-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-            )}
-
-            <button
-              onClick={() => setDeletingTaskId(task.id)}
-              aria-label={`${task.title} 삭제`}
-              className="p-1.5 text-gray-400 transition-all hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
           </div>
         </div>
 
         {totalCount > 0 && (
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+          <div aria-hidden="true" className="h-1 w-full overflow-hidden rounded-full bg-track">
             <div
-              className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+              className="h-full rounded-full bg-pomo transition-[width] duration-300 motion-reduce:transition-none"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         )}
 
-        <div id={`long-term-details-${task.id}`} hidden={isCollapsed}>
+        <div id={`long-term-details-${task.id}`} hidden={isCollapsed} className="min-w-0">
           {task.subtasks.length > 0 && (
-            <div className="mt-3 space-y-2">
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={(event) =>
-                  void handleSubtaskDragEnd(task.id, event)
-                }
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={(event) =>
+                void handleSubtaskDragEnd(task.id, event)
+              }
+            >
+              <SortableContext
+                items={task.subtasks.map((subtask) => subtask.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <SortableContext
-                  items={task.subtasks.map((subtask) => subtask.id)}
-                  strategy={verticalListSortingStrategy}
-                >
+                <ul aria-label={`${task.title} 세부 할 일`} className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
                   {task.subtasks.map((subtask) => (
                     <SortableSubtaskItem
                       key={subtask.id}
@@ -1070,66 +1089,59 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                       }
                     />
                   ))}
-                </SortableContext>
-              </DndContext>
-            </div>
+                </ul>
+              </SortableContext>
+            </DndContext>
           )}
 
           {children.length > 0 && (
-            <div className="mt-3 space-y-2" role="group" aria-label={`${task.title} 과목`}>
+            <div className="mt-3 flex flex-col gap-4 pl-4 md:pl-5" role="group" aria-label={`${task.title} 과목`}>
               {children.map((child) => renderTask(child, true))}
             </div>
           )}
 
-          <div className="mt-3">
+          <div className="mt-1 flex min-w-0 flex-col items-start gap-2">
             {addingSubtaskTaskId === task.id ? (
               <form
                 onSubmit={(event) => void addSubtask(event, task.id)}
-                className="flex min-w-0 flex-col gap-2"
+                className="flex w-full min-w-0 flex-wrap items-center gap-2"
               >
                 <input
                   type="text"
+                  aria-label="세부 할 일"
                   value={newSubtaskTitle}
                   onChange={(event) =>
                     setNewSubtaskTitle(event.target.value)
                   }
+                  onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setAddingSubtaskTaskId(null); } }}
                   placeholder="세부 할 일을 입력하세요"
-                  className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  className="ui-input min-h-11 min-w-0 flex-[1_1_14rem] md:min-h-10"
                   autoFocus
                 />
-                <div className="flex justify-end gap-2">
+                <div className="ml-auto flex gap-2">
                   <button
                     type="button"
                     onClick={() => setAddingSubtaskTaskId(null)}
-                    className="rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
+                    className="ui-button-ghost min-h-11 px-3 text-sm md:min-h-10"
                   >
                     취소
                   </button>
                   <button
                     type="submit"
                     disabled={!newSubtaskTitle.trim()}
-                    className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="ui-button-primary ui-press min-h-11 px-4 text-sm md:min-h-10"
                   >
                     추가
                   </button>
                 </div>
               </form>
-            ) : (
-              <button
-                onClick={() => {
-                  setAddingSubtaskTaskId(task.id);
-                  setNewSubtaskTitle('');
-                }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-200 py-2 text-xs font-medium text-gray-400 transition-all hover:border-emerald-300 hover:text-emerald-500 dark:border-emerald-800 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+            ) : null}
+
+            {!nested && addingSubjectTaskId === task.id ? (
+              <form
+                onSubmit={(event) => void addSubjectGroup(event, task.id)}
+                className="flex w-full min-w-0 flex-col gap-2 rounded-panel bg-surface p-4 [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white"
               >
-                <Plus className="h-3.5 w-3.5" />
-                세부 할 일 추가
-              </button>
-            )}
-          </div>
-          {!nested && (
-            addingSubjectTaskId === task.id ? (
-              <form onSubmit={(event) => void addSubjectGroup(event, task.id)} className="mt-3 min-w-0 space-y-2">
                 <SubjectSelect
                   subjects={subjects}
                   value={newGroupSubjectId}
@@ -1138,126 +1150,114 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
                   disabled={isAddingSubject}
                   label="추가할 과목"
                 />
-                {subjectGroupError && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{subjectGroupError}</p>}
+                {subjectGroupError && <p role="alert" className="m-0 text-[13px] text-pomo-deep">{subjectGroupError}</p>}
                 <div className="flex justify-end gap-2">
                   <button type="button" disabled={isAddingSubject}
                     onClick={() => { setAddingSubjectTaskId(null); setNewGroupSubjectId(null); setSubjectGroupError(null); }}
-                    className="rounded-lg px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-800">취소</button>
+                    className="ui-button-ghost min-h-11 px-3 text-sm md:min-h-10">취소</button>
                   <button type="submit" disabled={!newGroupSubjectId || isAddingSubject}
-                    className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
+                    className="ui-button-primary ui-press min-h-11 px-4 text-sm md:min-h-10">
                     {isAddingSubject ? '추가 중…' : '과목 추가'}
                   </button>
                 </div>
               </form>
-            ) : (
-              <button type="button"
-                disabled={isAddingSubject}
-                onClick={() => { setAddingSubjectTaskId(task.id); setNewGroupSubjectId(null); setSubjectGroupError(null); }}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-emerald-600 hover:bg-emerald-100 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
-                <Plus className="h-3.5 w-3.5" />과목 추가
-              </button>
-            )
-          )}
+            ) : null}
+
+            <div className="-ml-3 flex flex-wrap items-center">
+              {addingSubtaskTaskId !== task.id ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingSubtaskTaskId(task.id);
+                    setNewSubtaskTitle('');
+                  }}
+                  className="ui-button-ghost min-h-11 gap-1.5 rounded-chip px-3 text-[13px] text-ink-muted hover:text-ink md:min-h-9"
+                >
+                  <Plus aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
+                  세부 할 일 추가
+                </button>
+              ) : null}
+              {!nested && addingSubjectTaskId !== task.id ? (
+                <button type="button"
+                  disabled={isAddingSubject}
+                  onClick={() => { setAddingSubjectTaskId(task.id); setNewGroupSubjectId(null); setSubjectGroupError(null); }}
+                  className="ui-button-ghost min-h-11 gap-1.5 rounded-chip px-3 text-[13px] text-ink-muted hover:text-ink md:min-h-9">
+                  <Plus aria-hidden="true" className="size-3.5" strokeWidth={2.2} />과목 추가
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-300 sm:p-6 dark:border-gray-700 dark:bg-gray-800">
-      <div
-        className="mb-6 flex cursor-pointer items-center justify-between lg:cursor-default"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold">
-            <Target className="h-5 w-5 text-emerald-500" />
-            장기 과제
-          </h2>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            이름만 등록하고 타이머에서 바로 공부하세요. 필요하면 과목과 세부 할 일을 추가할 수 있어요.
-          </p>
-        </div>
-        <div className="text-gray-400 lg:hidden">
-          {isExpanded ? (
-            <ChevronUp className="h-5 w-5" />
-          ) : (
-            <ChevronDown className="h-5 w-5" />
-          )}
-        </div>
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-h-11 items-start justify-between gap-3 md:min-h-10">
+        <p className="m-0 min-w-0 pt-2 text-sm text-ink-muted">
+          이름만 등록하고 타이머에서 바로 공부하세요. 필요하면 과목과 세부 할 일을 추가할 수 있어요.
+        </p>
+        {!isAdding ? (
+          <button
+            type="button"
+            onClick={() => setIsAdding(true)}
+            className="ui-button-ghost ui-press min-h-11 shrink-0 gap-1.5 text-pomo md:min-h-10"
+          >
+            <Plus aria-hidden="true" className="size-4" strokeWidth={2.5} />
+            장기 과제 추가
+          </button>
+        ) : null}
       </div>
 
-      <div
-        className={cn(
-          'flex flex-1 flex-col transition-all duration-300',
-          !isExpanded && 'hidden lg:flex'
-        )}
-      >
-        <div className="custom-scrollbar min-h-[100px] max-h-[480px] flex-1 space-y-3 overflow-y-auto">
-          {loading ? (
-            <div className="py-6 text-center text-gray-400">불러오는 중...</div>
-          ) : tasks.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center py-6 text-gray-400">
-              <p className="text-sm">아직 장기 과제가 없어요.</p>
-              {!isAdding && (
-                <button
-                  onClick={() => setIsAdding(true)}
-                  className="mt-2 text-sm font-medium text-emerald-500 hover:text-emerald-600"
-                >
-                  + 과제 추가
-                </button>
-              )}
-            </div>
-          ) : (
-            getLongTermTaskRoots(tasks).map((task) => renderTask(task))
-          )}
-        </div>
-
-        <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
-          {isAdding ? (
-            <form onSubmit={addTask} className="flex min-w-0 flex-col gap-3">
-              <input
-                type="text"
-                value={newTaskTitle}
-                onChange={(event) => setNewTaskTitle(event.target.value)}
-                placeholder="장기 과제를 입력하세요 (예: 빅데이터분석기사)"
-                className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                autoFocus
-              />
-              <SubjectSelect subjects={subjects} value={newSubjectId} onChange={selectSubject} onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} />
-              <p className="text-xs text-gray-500">과목은 선택 사항이에요. 직접 공부하거나 세부 할 일을 할 때 이 과목으로 기록됩니다.</p>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAdding(false);
-                    setNewTaskTitle('');
-                    resetSubject();
-                  }}
-                  className="rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newTaskTitle.trim()}
-                  className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  추가
-                </button>
-              </div>
-            </form>
-          ) : (
+      {isAdding ? (
+        <form
+          onSubmit={addTask}
+          className="flex min-w-0 flex-col gap-3 rounded-panel bg-surface p-4 md:px-5 md:py-[18px] [&_.ui-input]:bg-white [&_[role=combobox]]:bg-white"
+        >
+          <input
+            type="text"
+            aria-label="장기 과제"
+            value={newTaskTitle}
+            onChange={(event) => setNewTaskTitle(event.target.value)}
+            placeholder="장기 과제를 입력하세요 (예: 빅데이터분석기사)"
+            className="ui-input min-h-[46px] w-full"
+            autoFocus
+          />
+          <SubjectSelect subjects={subjects} value={newSubjectId} onChange={selectSubject} onCreate={createSubject} automatic={isAutomatic} onAutoSelect={resetSubject} />
+          <p className="m-0 text-[13px] text-ink-subtle">과목은 선택 사항이에요. 직접 공부하거나 세부 할 일을 할 때 이 과목으로 기록돼요.</p>
+          <div className="flex justify-end gap-2">
             <button
-              onClick={() => setIsAdding(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-3 text-sm font-medium text-gray-400 transition-all hover:border-emerald-200 hover:text-emerald-500 dark:border-gray-700 dark:hover:border-emerald-800 dark:hover:text-emerald-400"
+              type="button"
+              onClick={() => {
+                setIsAdding(false);
+                setNewTaskTitle('');
+                resetSubject();
+              }}
+              className="ui-button-ghost min-h-[46px] px-4"
             >
-              <Plus className="h-4 w-4" />
-              장기 과제 추가
+              취소
             </button>
-          )}
+            <button
+              type="submit"
+              disabled={!newTaskTitle.trim()}
+              className="ui-button-primary ui-press min-h-[46px] px-5"
+            >
+              추가
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {loading ? (
+        <p className="m-0 py-2 text-sm text-ink-muted">불러오는 중...</p>
+      ) : tasks.length === 0 ? (
+        <p className="m-0 py-2 text-sm text-ink-muted md:text-[15px]">아직 장기 과제가 없어요.</p>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-7">
+          {getLongTermTaskRoots(tasks).map((task) => renderTask(task))}
         </div>
-      </div>
+      )}
 
       <ConfirmModal
         isOpen={!!deletingTaskId}
@@ -1274,7 +1274,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         })()}
         confirmText="삭제"
         cancelText="취소"
-        isDangerous={true}
+        confirmTone="danger"
       />
 
       <ConfirmModal
@@ -1285,7 +1285,7 @@ export default function LongTermTasks({ userId }: LongTermTasksProps) {
         message="이 세부 할 일을 삭제할까요? 이미 만들어진 일일 작업과 공부 기록은 남습니다."
         confirmText="삭제"
         cancelText="취소"
-        isDangerous={true}
+        confirmTone="danger"
       />
     </div>
   );

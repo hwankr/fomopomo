@@ -174,7 +174,7 @@ describe('MonthlyPlan', () => {
     renderPlan();
 
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
-    expect(screen.getByText('2h 0m')).toBeInTheDocument();
+    expect(screen.getByText('2시간')).toBeInTheDocument();
   });
 
   it('infers and saves a subject from a new title while keeping subject-only edits available', async () => {
@@ -267,11 +267,14 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[0]);
+    const toggle = within(card).getByRole('button', { name: 'Finish portfolio 완료' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
 
     await waitFor(() => {
-      expect(screen.getByText('Finish portfolio').parentElement).toHaveClass('line-through');
+      expect(screen.getByText('Finish portfolio')).toHaveClass('line-through');
     });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('edits a monthly goal title on Enter', async () => {
@@ -280,7 +283,7 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[1]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish portfolio 수정' }));
 
     const input = within(card).getByDisplayValue('Finish portfolio');
     fireEvent.change(input, { target: { value: 'Finish redesign' } });
@@ -297,7 +300,7 @@ describe('MonthlyPlan', () => {
     expect(await screen.findByText('Finish portfolio')).toBeInTheDocument();
 
     const card = getCardForTitle('Finish portfolio');
-    fireEvent.click(within(card).getAllByRole('button')[2]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish portfolio 삭제' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     await waitFor(() => {

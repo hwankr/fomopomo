@@ -202,7 +202,7 @@ describe('Timeline session details', () => {
   async function showTimeline() {
     render(<><Timeline userId="A" selectedDate={new Date(2026, 8, 7)} /><button>다음 항목</button></>);
     await reply(0, [sessionRow('데이터베이스 복습', 7)]);
-    return screen.getByRole('button', { name: '데이터베이스 복습 세션 정보' });
+    return screen.getByRole('button', { name: '데이터베이스 복습 기록 정보, 10:50–11:00, 뽀모도로 1개' });
   }
 
   it('opens a portalled information card on hover without moving focus', async () => {
@@ -267,23 +267,27 @@ describe('Timeline session details', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('preserves midnight bar splitting and shows the whole displayed stopwatch session', async () => {
+  it('keeps a session across midnight as one block on the study-day axis and shows the whole displayed stopwatch session', async () => {
     render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
     await reply(0, [{ ...sessionRow('심야 복습', 7), mode: 'stopwatch', duration: 1200, created_at: new Date(2026, 8, 8, 0, 10).toISOString() }]);
-    const bars = screen.getAllByRole('button', { name: '심야 복습 세션 정보' });
-    expect(bars).toHaveLength(2);
-    fireEvent.click(bars[1]);
+    // 축이 공부일(다음날 04:59까지)을 따라 이어지므로 자정에서 나누지 않고, 다음날 0시 눈금까지 늘어난다.
+    const blocks = screen.getAllByRole('button', { name: /^심야 복습 기록 정보/ });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toHaveAccessibleName('심야 복습 기록 정보, 23:50–0:10, 스톱워치 20분');
+    expect(screen.getByText('23:00')).toBeInTheDocument();
+    expect(screen.getByText('0:00')).toBeInTheDocument();
+    fireEvent.click(blocks[0]);
     const popup = await screen.findByRole('dialog', { name: '심야 복습' });
     expect(within(popup).getByText('스톱워치')).toBeInTheDocument();
-    expect(within(popup).getByText('23:50–00:10')).toBeInTheDocument();
+    expect(within(popup).getByText('23:50–0:10')).toBeInTheDocument();
     expect(within(popup).getByText('20분')).toBeInTheDocument();
   });
 
   it('shows only the latest hovered bar even when another bar retains focus or a pending close', async () => {
     render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
     await reply(0, [sessionRow('첫 번째 공부', 7), sessionRow('두 번째 공부', 7)]);
-    const first = screen.getByRole('button', { name: '첫 번째 공부 세션 정보' });
-    const second = screen.getByRole('button', { name: '두 번째 공부 세션 정보' });
+    const first = screen.getByRole('button', { name: /^첫 번째 공부 기록 정보/ });
+    const second = screen.getByRole('button', { name: /^두 번째 공부 기록 정보/ });
     act(() => first.focus());
     fireEvent.click(first);
     await screen.findByRole('dialog', { name: '첫 번째 공부' });
@@ -299,5 +303,157 @@ describe('Timeline session details', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
     expect(screen.getByRole('dialog', { name: '두 번째 공부' })).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+});
+
+describe('Timeline blocks', () => {
+  const at = (hour: number, minute: number) => new Date(2026, 8, 7, hour, minute).toISOString();
+  const session = (id: string, task: string, taskId: string | null, end: string, extra: Record<string, unknown> = {}) => ({
+    id, task, task_id: taskId, mode: 'pomo', duration: 1500, created_at: end, session_batch_id: id, ...extra,
+  });
+  const setDesktop = (desktop: boolean) => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: desktop, media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as MediaQueryList);
+  };
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('merges back-to-back sessions of one task and fills the block once that task is done', async () => {
+    setDesktop(true);
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [
+      session('s1', '알고리즘 문제 풀기', 't1', at(9, 25)),
+      session('s2', '알고리즘 문제 풀기', 't1', at(9, 55)),
+      session('s3', '영어 단어', 't2', at(10, 30)),
+    ]);
+    // 연결된 작업의 상태를 읽어 끝낸 작업의 블록을 채운다.
+    await reply(1, [{ id: 't1', status: 'done' }, { id: 't2', status: 'todo' }]);
+
+    const merged = await screen.findByRole('button', { name: '알고리즘 문제 풀기 기록 정보, 9:00–9:55, 뽀모도로 2개' });
+    const english = screen.getByRole('button', { name: '영어 단어 기록 정보, 10:05–10:30, 뽀모도로 1개' });
+    expect(merged).toHaveClass('bg-pomo');
+    expect(merged).not.toHaveClass('bg-pomo-tint');
+    expect(english).toHaveClass('bg-pomo-tint');
+    expect(within(merged).getByRole('img', { name: '뽀모도로 2개' })).toBeInTheDocument();
+    expect(screen.getByText('8:00')).toBeInTheDocument();
+    expect(screen.getByText('21:00')).toBeInTheDocument();
+    expect(screen.queryByText('7:00')).not.toBeInTheDocument();
+
+    fireEvent.click(merged);
+    const popup = await screen.findByRole('dialog', { name: '알고리즘 문제 풀기' });
+    expect(within(popup).getByText('50분')).toBeInTheDocument();
+    expect(within(popup).getByText(/9:00–9:25/)).toBeInTheDocument();
+    expect(within(popup).getByText(/9:30–9:55/)).toBeInTheDocument();
+  });
+
+  it('keeps separate blocks for different tasks, long gaps and stopwatch runs', async () => {
+    setDesktop(true);
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [
+      session('s1', '통계', null, at(9, 25)),
+      session('s2', '통계', null, at(10, 25)),
+      session('s3', '통계', null, at(10, 50), { mode: 'stopwatch', duration: 1200 }),
+    ]);
+    expect(await screen.findAllByRole('button', { name: /^통계 기록 정보/ })).toHaveLength(3);
+    expect(screen.getByRole('button', { name: '통계 기록 정보, 10:30–10:50, 스톱워치 20분' })).toHaveClass('bg-watch-tint');
+  });
+
+  it('shows the empty hour grid on desktop and a time list on mobile', async () => {
+    setDesktop(true);
+    const { unmount } = render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, []);
+    expect(await screen.findByText('이날 기록된 활동이 없어요.')).toBeInTheDocument();
+    expect(screen.getByText('8:00')).toBeInTheDocument();
+    unmount();
+
+    setDesktop(false);
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(1, [session('s1', '논문 읽기', null, at(16, 25)), session('s2', '논문 읽기', null, at(16, 55))]);
+    const row = await screen.findByRole('button', { name: '논문 읽기 기록 정보, 16:00–16:55, 뽀모도로 2개' });
+    expect(row.closest('li')).not.toBeNull();
+    expect(within(row).getByText('16:00')).toBeInTheDocument();
+    expect(within(row).getByText('16:00–16:55')).toBeInTheDocument();
+    expect(within(row).getByText('50분')).toBeInTheDocument();
+    expect(within(row).getByRole('img', { name: '뽀모도로 2개' })).toBeInTheDocument();
+  });
+
+  it('opens full session details from a mobile row by tap and keyboard, including each merged session', async () => {
+    setDesktop(false);
+    const longTitle = '통계학개론 7장 회귀분석 연습문제 전체 풀이와 오답 정리';
+    render(<><Timeline userId="A" selectedDate={new Date(2026, 8, 7)} /><button>다음 항목</button></>);
+    await reply(0, [
+      session('s1', longTitle, null, at(7, 55), { duration: 1200 }),
+      session('s2', longTitle, null, at(8, 30)),
+      session('s3', '영어 듣기', null, at(9, 30), { mode: 'stopwatch', duration: 1800 }),
+    ]);
+    const row = await screen.findByRole('button', { name: `${longTitle} 기록 정보, 7:35–8:30, 뽀모도로 2개` });
+
+    // 터치: 포커스가 클릭보다 먼저 와도 열린 채로 있고, 밖을 누르면 닫힌다.
+    fireEvent.pointerDown(row, { pointerType: 'touch', button: 0 });
+    act(() => row.focus());
+    fireEvent.pointerUp(row, { pointerType: 'touch', button: 0 });
+    fireEvent.click(row);
+    const popup = await screen.findByRole('dialog', { name: longTitle });
+    expect(within(popup).getByRole('heading', { name: longTitle })).toBeInTheDocument();
+    expect(within(popup).getByText('뽀모도로')).toBeInTheDocument();
+    expect(within(popup).getByText('7:35–8:30')).toBeInTheDocument();
+    expect(within(popup).getByText('45분')).toBeInTheDocument();
+    expect(within(popup).getByText('2개')).toBeInTheDocument();
+    expect(within(popup).getByText('7:35–7:55 · 20분')).toBeInTheDocument();
+    expect(within(popup).getByText('8:05–8:30 · 25분')).toBeInTheDocument();
+    fireEvent.keyDown(row, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(row).toHaveFocus();
+
+    // 키보드: 포커스로 열고, 다음 컨트롤로 옮기면 닫힌다.
+    const stopwatch = screen.getByRole('button', { name: '영어 듣기 기록 정보, 9:00–9:30, 스톱워치 30분' });
+    act(() => stopwatch.focus());
+    const stopwatchPopup = await screen.findByRole('dialog', { name: '영어 듣기' });
+    expect(within(stopwatchPopup).getByText('스톱워치')).toBeInTheDocument();
+    expect(within(stopwatchPopup).getByText('9:00–9:30')).toBeInTheDocument();
+    act(() => screen.getByRole('button', { name: '다음 항목' }).focus());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('puts short or overlapping blocks of different tasks side by side at full height', async () => {
+    setDesktop(true);
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [
+      // 1분짜리 기록이 5분 간격으로 이어지면 최소 높이(28px)끼리 겹친다.
+      session('a', '짧은 기록 A', null, at(9, 10), { duration: 60 }),
+      session('b', '짧은 기록 B', null, at(9, 15), { duration: 60 }),
+      session('c', '짧은 기록 C', null, at(9, 20), { duration: 60 }),
+      // 실제로 시간이 겹치는 기록
+      session('w', '동시 스톱워치', null, at(11, 40), { mode: 'stopwatch', duration: 2400 }),
+      session('p', '동시 뽀모도로', null, at(11, 35)),
+      // 떨어진 기록은 혼자 전체 폭을 쓴다.
+      session('z', '저녁 복습', null, at(19, 25)),
+    ]);
+    const block = (name: RegExp) => screen.getByRole('button', { name });
+    await screen.findByRole('button', { name: /^짧은 기록 A 기록 정보/ });
+
+    const short = ['A', 'B', 'C'].map((letter) => block(new RegExp(`^짧은 기록 ${letter} 기록 정보`)));
+    expect(short.map((item) => item.dataset.lane)).toEqual(['0', '1', '2']);
+    expect(short.map((item) => item.dataset.lanes)).toEqual(['3', '3', '3']);
+    for (const item of short) expect(item.style.height).toBe('28px');
+    // 칸 위치는 --lane / --lanes로 정하고, 정적 클래스가 그 값으로 왼쪽·너비를 나눈다.
+    expect(short.map((item) => item.style.getPropertyValue('--lane'))).toEqual(['0', '1', '2']);
+    for (const item of short) {
+      expect(item.style.getPropertyValue('--lanes')).toBe('3');
+      expect(item.className).toContain('left-[calc(56px_+_(100%_-_56px)_*_var(--lane)_/_var(--lanes))]');
+      expect(item.className).not.toContain('right-0');
+    }
+    // 시각 위치는 그대로다(9:09, 9:14 시작).
+    expect(short[0].style.top).toBe('71px');
+    expect(short[1].style.top).toBe('76px');
+
+    const together = [block(/^동시 스톱워치 기록 정보/), block(/^동시 뽀모도로 기록 정보/)];
+    expect(together.map((item) => [item.dataset.lane, item.dataset.lanes])).toEqual([['0', '2'], ['1', '2']]);
+
+    const alone = block(/^저녁 복습 기록 정보/);
+    expect(alone.dataset.lanes).toBe('1');
+    expect(alone).toHaveClass('left-14', 'right-0');
+    expect(alone.className).not.toContain('var(--lanes)');
   });
 });

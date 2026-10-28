@@ -515,8 +515,8 @@ describe('LongTermTasks', () => {
     expect(within(courses).getByText('데이터베이스')).toBeInTheDocument();
     expect(screen.getAllByText('데이터베이스')).toHaveLength(1);
     expect(within(getRowForTitle('빅데이터분석기사')).getByText('1/3')).toBeInTheDocument();
-    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 30m 0s')).toBeInTheDocument();
-    expect(within(getRowForTitle('데이터베이스')).getByText('누적 10m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 30분')).toBeInTheDocument();
+    expect(within(getRowForTitle('데이터베이스')).getByText('누적 10분')).toBeInTheDocument();
     expect(within(courses).queryByRole('button', { name: '과목 추가' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '데이터베이스 접기' }));
     expect(screen.getByText('정규화 복습')).not.toBeVisible();
@@ -700,20 +700,20 @@ describe('LongTermTasks', () => {
     renderTasks();
 
     await screen.findByText('빅데이터분석기사');
-    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 1h 5m')).toBeInTheDocument();
-    expect(within(getRowForTitle('영어 읽기')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 1시간 5분')).toBeInTheDocument();
+    expect(within(getRowForTitle('영어 읽기')).getByText('누적 0분')).toBeInTheDocument();
     expect(screen.queryByText('1/2')).not.toBeInTheDocument();
   });
 
   it('refreshes cumulative time when a study session changes', async () => {
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 600]]));
     renderTasks();
-    await screen.findByText('누적 10m 0s');
+    await screen.findByText('누적 10분');
 
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 1800]]));
     await fireRealtime('long-term-task-session-updates');
-    expect(await screen.findByText('누적 30m 0s')).toBeInTheDocument();
-    expect(screen.queryByText('누적 10m 0s')).not.toBeInTheDocument();
+    expect(await screen.findByText('누적 30분')).toBeInTheDocument();
+    expect(screen.queryByText('누적 10분')).not.toBeInTheDocument();
   });
 
   it('keeps tasks visible and shows a failed total instead of inventing zero, then recovers on refresh', async () => {
@@ -723,11 +723,11 @@ describe('LongTermTasks', () => {
 
     await screen.findByText('빅데이터분석기사');
     expect(screen.getByText('누적 시간 조회 실패')).toBeInTheDocument();
-    expect(screen.queryByText('누적 0m 0s')).not.toBeInTheDocument();
+    expect(screen.queryByText('누적 0분')).not.toBeInTheDocument();
 
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
     await fireRealtime('long-term-task-session-updates');
-    expect(await screen.findByText('누적 2m 0s')).toBeInTheDocument();
+    expect(await screen.findByText('누적 2분')).toBeInTheDocument();
     expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
   });
 
@@ -735,7 +735,7 @@ describe('LongTermTasks', () => {
     const oldDurations = createDeferred<Map<string, number>>();
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 60]]));
     const { rerender } = renderTasks();
-    await screen.findByText('누적 1m 0s');
+    await screen.findByText('누적 1분');
     fetchDurationsMock.mockImplementationOnce(() => oldDurations.promise);
     const oldChannels = [...channelMocks];
     await fireRealtime('long-term-task-session-updates');
@@ -743,7 +743,7 @@ describe('LongTermTasks', () => {
     longTermTasks = [{ id: 'task-1', title: '새 사용자 공부', position: 0 }];
     fetchDurationsMock.mockResolvedValue(new Map([['task-1', 120]]));
     rerender(<LongTermTasks userId="user-2" />);
-    expect(screen.queryByText('누적 1m 0s')).not.toBeInTheDocument();
+    expect(screen.queryByText('누적 1분')).not.toBeInTheDocument();
     await screen.findByText('새 사용자 공부');
     const count = fetchDurationsMock.mock.calls.length;
     await act(async () => {
@@ -753,7 +753,7 @@ describe('LongTermTasks', () => {
     });
 
     expect(fetchDurationsMock).toHaveBeenCalledTimes(count);
-    expect(screen.getByText('누적 2m 0s')).toBeInTheDocument();
+    expect(screen.getByText('누적 2분')).toBeInTheDocument();
     expect(screen.queryByText('누적 시간 조회 실패')).not.toBeInTheDocument();
   });
 
@@ -767,7 +767,7 @@ describe('LongTermTasks', () => {
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await screen.findByText('코딩테스트');
 
-    expect(within(getRowForTitle('코딩테스트')).getByText('누적 0m 0s')).toBeInTheDocument();
+    expect(within(getRowForTitle('코딩테스트')).getByText('누적 0분')).toBeInTheDocument();
     expect(within(getRowForTitle('빅데이터분석기사')).getByText('누적 시간 조회 실패')).toBeInTheDocument();
   });
 

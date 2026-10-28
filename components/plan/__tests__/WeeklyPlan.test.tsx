@@ -174,7 +174,7 @@ describe('WeeklyPlan', () => {
     renderPlan();
 
     expect(await screen.findByText('Read chapter 1')).toBeInTheDocument();
-    expect(screen.getByText('1h 30m')).toBeInTheDocument();
+    expect(screen.getByText('1시간 30분')).toBeInTheDocument();
   });
 
   it('infers and saves a subject from a new title while keeping subject-only edits available', async () => {
@@ -267,11 +267,14 @@ describe('WeeklyPlan', () => {
     expect(await screen.findByText('Read chapter 1')).toBeInTheDocument();
 
     const card = getCardForTitle('Read chapter 1');
-    fireEvent.click(within(card).getAllByRole('button')[0]);
+    const toggle = within(card).getByRole('button', { name: 'Read chapter 1 완료' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
 
     await waitFor(() => {
-      expect(screen.getByText('Read chapter 1').parentElement).toHaveClass('line-through');
+      expect(screen.getByText('Read chapter 1')).toHaveClass('line-through');
     });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('edits a weekly goal title on Enter', async () => {
@@ -280,7 +283,7 @@ describe('WeeklyPlan', () => {
     expect(await screen.findByText('Read chapter 1')).toBeInTheDocument();
 
     const card = getCardForTitle('Read chapter 1');
-    fireEvent.click(within(card).getAllByRole('button')[1]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Read chapter 1 수정' }));
 
     const input = within(card).getByDisplayValue('Read chapter 1');
     fireEvent.change(input, { target: { value: 'Read chapter 2' } });
@@ -297,7 +300,7 @@ describe('WeeklyPlan', () => {
     expect(await screen.findByText('Read chapter 1')).toBeInTheDocument();
 
     const card = getCardForTitle('Read chapter 1');
-    fireEvent.click(within(card).getAllByRole('button')[2]);
+    fireEvent.click(within(card).getByRole('button', { name: 'Read chapter 1 삭제' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     await waitFor(() => {
