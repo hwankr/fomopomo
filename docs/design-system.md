@@ -239,6 +239,7 @@
 
 - 할 것: 흰 페이지는 여백과 글자 크기로만 나눈다. 탭은 알약(`ui-segmented`), 아이콘 버튼은 배경 없이(`ui-icon-button`), 주요 동작 하나만 모드 색으로 채운다. 문구는 짧은 해요체(예: “아직 기록이 없어요. 첫 뽀모도로를 시작하면 여기에 쌓여요.”).
 - 할 것: 색·모서리·그림자는 토큰 유틸리티로, 굵기·크기는 이 문서의 글자 표대로 쓴다. 동작 줄이기 설정을 지킨다.
+- 할 것: 토스트(모양은 `app/layout.tsx`의 `Toaster`)의 성공·실패는 `toast.success`/`toast.error` 기본 아이콘을 쓴다. 그 밖의 아이콘은 이모지 대신 lucide 선 아이콘 18px(`strokeWidth={2}`, `aria-hidden`, `shrink-0`)에 토큰 색을 준다(경고 `text-pomo-deep`, 휴식·완료 `text-rest`, 집중 `text-pomo`, 스톱워치 `text-watch`, 안내 `text-ink-muted`). 토스트 문구에도 이모지를 넣지 않는다.
 - 하지 말 것: 카드(테두리·그림자 상자), 구분선, 그라데이션, 이모지 장식, `bg-slate-*`/`text-gray-*` 같은 기본 팔레트, hex 직접 입력, `dark:` 클래스.
 - 하지 말 것: 페이지마다 헤더·탭 바·알림 구독·대화상자 포커스 처리를 새로 만들기. `Navbar`·`MobileTopBar`·`useShell`·`ModalDialog`를 쓴다.
 - 팝오버·선택 컨트롤의 키 경계는 `components/ui/keyBoundary.ts`를 쓴다. **트리거는 자기가 쓰는 키만 막고 Escape·Tab은 올려 보낸다**: 버튼형 트리거 `onKeyDown={stopActivationKeys}`(Enter·Space), 선택 트리거 `stopSelectTriggerKeys`(Enter·Space·위아래 화살표·글자 검색). **열린 팝오버 내용**은 `onKeyDown={stopAllKeys}`(열려 있는 동안은 팝오버가 키보드를 가진다). 그래야 Space가 타이머 전역 단축키로 새지 않으면서 대화상자·폼의 Escape와 Tab이 동작한다(`NotificationBell`, `AppSelect`, `DatePicker` 참고).

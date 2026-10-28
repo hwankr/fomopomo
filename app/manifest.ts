@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     display: 'standalone', // 주소창 없는 앱 모드
     background_color: '#ffffff',
-    theme_color: '#f43f5e', // 우리가 쓰는 Rose-500 색상
+    theme_color: '#ffffff', // 라이트 테마의 흰 바탕(app/layout.tsx의 viewport.themeColor와 같다)
     icons: [
       {
         src: '/icon.png',

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
+import { Check, Coffee, Pause, RefreshCw, Timer, TriangleAlert } from 'lucide-react';
 import TaskSidebar from './TaskSidebar';
 import type { BeadTone } from '@/components/ui/Beads';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
@@ -150,9 +151,19 @@ const closeStopwatchIntervals = (
   return closed;
 };
 
+// 토스트 아이콘: 이모지 대신 18px 선 아이콘을 토큰 색으로 쓴다(성공·실패는 Toaster 기본 아이콘).
+const toastIcons = {
+  autoPause: <Pause aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-watch" />,
+  warning: <TriangleAlert aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-pomo-deep" />,
+  rest: <Coffee aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-rest" />,
+  focus: <Timer aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-pomo" />,
+  completed: <Check aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-rest" />,
+  refresh: <RefreshCw aria-hidden="true" size={18} strokeWidth={2} className="shrink-0 text-ink-muted" />,
+};
+
 const notifyStopwatchAutoPause = () => toast(
   '4시간 연속 실행되어 자동 일시정지했어요. 기록은 유지되며 다시 시작하거나 저장할 수 있어요.',
-  { icon: '⏸️', duration: 6000 }
+  { icon: toastIcons.autoPause, duration: 6000 }
 );
 
 // Pure completion-transition kernel shared by the live completion handler and
@@ -496,7 +507,7 @@ export default function TimerApp({
             </button>
           </div>
         ),
-        { duration: 12000, icon: '⚠️' }
+        { duration: 12000, icon: toastIcons.warning }
       );
     }
     // 'skipped': another save is in flight or the account changed — the
@@ -568,7 +579,7 @@ export default function TimerApp({
             void finish(handoff);
           }}>재시도</button>
         </div>
-      ), { duration: 12000, icon: '⚠️' });
+      ), { duration: 12000, icon: toastIcons.warning });
       return;
     }
     const ready = { ...handoff, completionPending: false };
@@ -728,7 +739,7 @@ export default function TimerApp({
       setFocusLoggedSeconds(0);
       setCycleCount(nextCycle);
 
-      toast(nextMode === 'longBreak' ? '🎉 긴 휴식 시간입니다!' : '잠시 휴식하세요.', { icon: '☕' });
+      toast(nextMode === 'longBreak' ? '긴 휴식 시간입니다!' : '잠시 휴식하세요.', { icon: toastIcons.rest });
       if (settings.autoStartBreaks) setTimeout(() => {
         autoStartTimerRef.current(nextMode, nextSeconds);
       }, 1000);
@@ -736,7 +747,7 @@ export default function TimerApp({
       // 긴 휴식 완료 후 focus로 돌아올 때 사이클 리셋
       if (nextCycle !== cycleCount) setCycleCount(nextCycle);
       setFocusLoggedSeconds(0);
-      toast('다시 집중할 시간입니다!', { icon: '🔥' });
+      toast('다시 집중할 시간입니다!', { icon: toastIcons.focus });
       if (settings.autoStartPomos) setTimeout(() => {
         autoStartTimerRef.current('focus', nextSeconds);
       }, 1000);
@@ -1250,10 +1261,10 @@ export default function TimerApp({
         savedDirectly
           ? '자리 비운 사이 뽀모도로가 완료되어 기록을 저장했어요. 휴식할 시간!'
           : '자리 비운 사이 뽀모도로가 완료되었어요.',
-        { icon: '✅' }
+        { icon: toastIcons.completed }
       );
     } else {
-      toast('휴식이 끝났어요. 다시 집중할 시간입니다!', { icon: '🔥' });
+      toast('휴식이 끝났어요. 다시 집중할 시간입니다!', { icon: toastIcons.focus });
     }
 
     // The session is settled: skip this mount's server-state sync so stale
@@ -1504,7 +1515,7 @@ export default function TimerApp({
         // The source device keeps its local time and can resume to publish ID.
         if (!isStudySessionIdentity({ id: data.study_session_id, progressStart: data.study_session_offset })) {
           if (data.study_start_time || data.total_stopwatch_time > 0) {
-            toast('다른 기기의 기록을 이어하려면 해당 기기를 새로고침한 뒤 한 번 재개해주세요.', { icon: '🔄' });
+            toast('다른 기기의 기록을 이어하려면 해당 기기를 새로고침한 뒤 한 번 재개해주세요.', { icon: toastIcons.refresh });
           }
           return;
         }
@@ -1581,7 +1592,7 @@ export default function TimerApp({
           setStopwatchTime(0);
           saveState('timer', mode, running, remaining, targetTime, cycle, logged,
             false, 0, null, importedIntervals, currentStart, duration);
-          if (running) toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.', { icon: '🔄' });
+          if (running) toast.success('다른 기기에서 진행 중인 타이머를 불러왔습니다.');
           return;
         }
 
@@ -1631,7 +1642,7 @@ export default function TimerApp({
           running, elapsed, running ? startTime : null, importedIntervals, currentStart, focusDuration);
         if (snapshot?.autoPaused) {
           pauseRecoveredStopwatch(snapshot);
-        } else if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.', { icon: '🔄' });
+        } else if (running) toast.success('다른 기기에서 진행 중인 스톱워치를 불러왔습니다.');
       } catch (e) {
         console.error('Sync failed', e);
       }
