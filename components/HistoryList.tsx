@@ -566,8 +566,7 @@ export default function HistoryList({
         onClose={cancelEditing}
         aria-labelledby={sheetTitleId}
         initialFocusRef={memoRef}
-        overlayClassName="animate-fade-in"
-        className="animate-scale-in gap-3"
+        className="gap-3"
       >
         <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
         {editingItem ? (

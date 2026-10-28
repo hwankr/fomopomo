@@ -40,8 +40,7 @@ export default function FriendNicknameDialog({
       onClose={onCancel}
       aria-labelledby={titleId}
       initialFocusRef={inputRef}
-      overlayClassName="animate-fade-in"
-      className="animate-scale-in md:max-w-[400px]"
+      className="md:max-w-[400px]"
     >
       <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
       <h2 id={titleId} className="ui-dialog-title">

@@ -109,8 +109,6 @@ export default function TransferLeadershipModal({
                 onClose={onClose}
                 aria-labelledby={titleId}
                 aria-describedby={descriptionId}
-                overlayClassName="animate-fade-in"
-                className="animate-scale-in"
             >
                 <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
                 <div className="flex flex-col gap-1">

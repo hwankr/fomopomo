@@ -64,6 +64,8 @@
 
 글꼴은 `app/layout.tsx`에서 `next/font/google`로 불러온다(Noto Sans KR 가변 400–800, Funnel Display 가변 500–700). Pretendard는 사용자 기기에 있을 때만 쓰인다.
 
+움직임 토큰(`--duration-*`, `--ease-*`, `animate-*`)은 §8에 있다.
+
 ## 2. 기본 스타일
 
 - `body`: 흰 바탕, `text-ink`, 15px / 1.5, `tabular-nums`, antialiased. 숫자에 따로 `tabular-nums`를 줄 필요는 없다.
@@ -80,26 +82,26 @@
 | 클래스 | 모양 | 덧붙이는 예 |
 | --- | --- | --- |
 | `ui-input` | 최소 높이 44px, `rounded-control`, `bg-surface`, 테두리 없음, 15px, placeholder `ink-faint` | 설정 화면 입력 `min-h-12 rounded-tile px-4` |
-| `ui-button-primary` | 44px, `bg-pomo`, 흰 글자 700, 호버 `brightness(.96)` | 모드 색 바꾸기 `bg-rest`, 시작 버튼 `min-h-14 min-w-[200px] rounded-cta px-9 text-[17px]`, 확인 대화상자 `min-h-12 rounded-tile px-6` |
+| `ui-button-primary` | 44px, `bg-pomo`, 흰 글자 700, 호버 `brightness(.96)`. 버튼 셋·아이콘 버튼 둘·`ui-segmented` 버튼은 누르는 동안 `scale(.97)`(§8) | 모드 색 바꾸기 `bg-rest`, 시작 버튼 `min-h-14 min-w-[200px] rounded-cta px-9 text-[17px]`, 확인 대화상자 `min-h-12 rounded-tile px-6` |
 | `ui-button-secondary` | 44px, `bg-surface`, `ink` 600, 호버 `brightness(.97)` | 취소 `min-h-12 rounded-tile px-5`, 무대 위 칩 `bg-white/75` |
 | `ui-button-ghost` | 44px, 배경 없음, `ink` 600, 호버 `bg-hover` | 위험 동작 `text-pomo-deep`, 저장 `text-pomo font-bold` |
 | `ui-icon-button` | 40px 원, 배경 없음, 글자색 상속, 호버 `bg-hover` | 아이콘은 18–21px, `strokeWidth={1.8}` |
 | `ui-icon-button-surface` | 40px 원, `bg-surface` | 달 넘기기, 모바일 프로필의 설정 링크; 48px은 `size-12` |
-| `ui-segmented` | 알약 탭 묶음(간격 2px, 넘치면 가로 스크롤). 안의 `<button>`은 36px·14px 600·`ink-muted`, `aria-pressed="true"` 또는 `aria-selected="true"`이면 `bg-ink` 흰 글자 + 먹색 포커스 링. 포커스 링이 잘리지 않게 안쪽 5px 여유를 두고 `-m-[5px]`로 자리를 상쇄하므로 바깥 여백은 감싸는 요소에 준다 | 모바일 `[&>button]:h-8 [&>button]:px-3 [&>button]:text-[13px]` |
+| `ui-segmented` | 알약 탭 묶음(간격 2px, 넘치면 가로 스크롤). 안의 `<button>`은 36px·14px 600·`ink-muted`, `aria-pressed="true"` 또는 `aria-selected="true"`이면 `bg-ink` 흰 글자 + 먹색 포커스 링(선택이 `--duration-instant`로 바뀐다). 포커스 링이 잘리지 않게 안쪽 5px 여유를 두고 `-m-[5px]`로 자리를 상쇄하므로 바깥 여백은 감싸는 요소에 준다 | 모바일 `[&>button]:h-8 [&>button]:px-3 [&>button]:text-[13px]` |
 | `ui-popover-surface` | 흰 바탕, `rounded-cta`, `shadow-popover`, 안쪽 8px | 작업 선택 `rounded-panel p-3` |
-| `ui-popover` | Radix `data-state` 등장·퇴장 애니메이션만 | 팝오버 내용에 `ui-popover ui-popover-surface` 함께 |
-| `ui-dialog-overlay` | 고정 덮개 `bg-scrim`, z-50, 모바일은 아래 정렬, `md`부터 가운데 | 직접 쓰지 않는다. `ModalDialog`가 붙인다(`overlayClassName`) |
-| `ui-dialog` | 모바일: 전체 너비 시트(`rounded-t-dialog`, 20px, 아래 28px+안전 영역). `md`: 최대 440px, `rounded-dialog`, 28px, `shadow-dialog` | 직접 쓰지 않는다. `ModalDialog`의 `className`으로 너비 `md:max-w-[400px]`, 간격 `gap-3` 등 |
+| `ui-popover` | Radix `data-state` 등장·퇴장 애니메이션: 트리거 쪽(`--radix-popper-transform-origin`)을 기준으로 `scale(.96)`+투명에서 나타나고(`--duration-enter`) `scale(.97)`+투명으로 사라진다(`--duration-exit`, Radix가 끝날 때까지 남겨 둔다). 닫히는 순간부터는 클릭(`pointer-events: none`)·포커스(`inert`, `ShellProvider`가 설치한 `guardClosingPopovers`)를 받지 않고, 안에 있던 포커스는 바로 트리거로 한 번만 간다(§8 닫히는 팝오버의 포커스). 선택 목록(`role="listbox"`, `AppSelect`)은 퇴장 없이 바로 닫힌다 | 팝오버 내용에 `ui-popover ui-popover-surface` 함께. 트리거로 돌아가면 안 되는 내용은 `data-close-autofocus="off"` |
+| `ui-dialog-overlay` | 고정 덮개 `bg-scrim`, z-50, 모바일은 아래 정렬, `md`부터 가운데. `data-state`에 따라 바탕색만 나타나고 사라진다(닫히는 동안 클릭을 받지 않는다) | 직접 쓰지 않는다. `ModalDialog`가 붙인다(`overlayClassName`). 등장 클래스를 덧붙이지 않는다 |
+| `ui-dialog` | 모바일: 전체 너비 시트(`rounded-t-dialog`, 20px, 아래 28px+안전 영역). `md`: 최대 440px, `rounded-dialog`, 28px, `shadow-dialog`. 모바일은 아래 가장자리에서 올라오는 시트, `md`는 살짝 커지며 나타나는 패널(§8) | 직접 쓰지 않는다. `ModalDialog`의 `className`으로 너비 `md:max-w-[400px]`, 간격 `gap-3` 등. `animate-*`·`ui-panel-enter`를 덧붙이지 않는다(두 번 움직인다) |
 | `ui-dialog-title` | 19px(모바일) / 20px 700 | |
 | `ui-sheet-grabber` | 36×4 손잡이(`bg-line`) | 모바일 시트 맨 위에 `md:hidden` |
 | `ui-h1` | 22px(모바일) / 28px 800, 자간 -0.02em | |
 | `ui-h2` | 18px / 20px 800 | |
 | `ui-bead` | 구슬 한 알(아래 `Beads`가 쓴다) | |
 | `ui-focus-ink` | 포커스 링을 먹색으로(흰 글자 채움 컨트롤용) | |
-| `ui-press` | 눌릴 때 1px 아래로 | |
+| `ui-press` | 누르는 동안 `scale(.97)`(직접 만든 버튼용. `ui-button-*`·`ui-icon-button*`·`ui-segmented` 버튼은 이미 들어 있다) | |
 | `ui-scrollbar-horizontal` | 가로 스크롤 막대(`surface` 길, `bar` 손잡이) | |
 | `ui-scrollbar-none` | 스크롤 막대 숨김(모바일 가로 탭 줄) | |
-| `animate-fade-in`, `animate-scale-in`, `ui-panel-enter` | 160ms 등장 | |
+| `animate-*`, `ui-panel-enter`, `ui-stagger`, `ui-collapse` | 등장·퇴장·팝·순차 등장·접기(§8) | |
 
 대화상자 버튼 줄: 데스크톱 `flex justify-end gap-2`, 모바일 `flex gap-2` + 각 버튼 `min-h-[50px] flex-1`(`ConfirmModal` 참고). 확인 버튼 색은 세 가지다. `ConfirmModal`에서는 `confirmTone`으로 고른다.
 
@@ -120,8 +122,9 @@
   - 고정하지 않고 투명하다. 타이머 무대 색이 그대로 비친다. 페이지 루트에 안쪽 여백을 주면 헤더까지 밀리므로 여백은 본문 래퍼에 준다.
   - 선택 메뉴는 경로로 정한다: `/` 타이머, `/plan*` 계획, `/friends*` 친구, `/groups`·`/groups/[id]` 그룹, `/profile`·`/settings`·그 밖은 없음. `/profile`에서는 아바타가 `tone="solid"`(로즈 바탕 흰 글자) + `aria-current="page"`.
   - 타이머가 실행 중일 때 아바타 바탕은 상위 요소에서 `--header-avatar-bg`(예: `[--header-avatar-bg:rgb(255_255_255/.75)]`)로 바꾼다.
+  - 데스크톱 헤더(와 `MobileTopBar`)에는 `data-shell-header`가 있어 화면을 옮길 때 그 아래 본문만 떠오르고 머리는 그대로다(§8 화면 전환). 메뉴 호버 색은 기본 전환(`--duration-instant`)을 쓴다. 메뉴를 옮기면 새 로즈 점이 직전 점 자리에서 미끄러져 오고(`--duration-emphasized`), 두 메뉴 글자색이 서로 바뀐다. 선택이 없던 화면(프로필·설정)에서 오면 점이 나타난다. 처음 불러올 때는 움직이지 않는다.
   - `mobileTopBar`: 생략하면 기본 상단 바(워드마크 + 알림 종, 로그아웃이면 `로그인`), `<MobileTopBar …/>`를 주면 그것을, `null`이면 아무것도 그리지 않는다.
-- **`MobileTopBar`** (`components/layout/MobileTopBar.tsx`) `{ start?, center?, end?, sticky?, className? }` — `md` 미만에서만 보인다. 높이 44px + 위 안전 영역, 투명. `center`가 없으면 양끝 정렬(왼쪽 20px, 오른쪽 16px), 있으면 3칸 격자(좌우 12px). `sticky`는 흰 바탕으로 위에 붙인다(저장 버튼이 있는 설정 화면). 함께 내보내는 `Wordmark`, `TopBarTitle { title, subtitle?, titleClassName? }`(22px 800 h1 + 13px 회색 부제).
+- **`MobileTopBar`** (`components/layout/MobileTopBar.tsx`) `{ start?, center?, end?, sticky?, className? }` — `md` 미만에서만 보인다. `data-shell-header`가 있어 화면을 옮길 때 그대로 있다(§8 화면 전환). 높이 44px + 위 안전 영역, 투명. `center`가 없으면 양끝 정렬(왼쪽 20px, 오른쪽 16px), 있으면 3칸 격자(좌우 12px). `sticky`는 흰 바탕으로 위에 붙인다(저장 버튼이 있는 설정 화면). 함께 내보내는 `Wordmark`, `TopBarTitle { title, subtitle?, titleClassName? }`(22px 800 h1 + 13px 회색 부제).
 
   | 화면 | 구성 |
   | --- | --- |
@@ -131,9 +134,9 @@
   | 그룹 | 친구와 같고 `end`에 그룹 만들기(`ui-icon-button ui-focus-ink bg-pomo text-white`, + 18px)를 종 앞에 둔다(`gap-2`로 감싼다) |
   | 프로필 | `start={<TopBarTitle title="프로필" titleClassName="text-xl" />}` · `end`에 `/settings`로 가는 `ui-icon-button-surface`(`aria-label="설정"`) |
   | 설정 | `start` 뒤로(`ui-icon-button`, ChevronLeft 22px, `/profile`) · `center` 제목(h1 17px 700) · `end` 저장(`ui-button-ghost min-h-10 text-pomo font-bold`) · `sticky` |
-- **`NotificationBell`** `{ variant?: 'header' | 'topbar' }` — 받은 친구 요청이 있으면 로즈 점과 `aria-label="알림 N개"`, 팝오버(`role="region"`, 바깥 너비 데스크톱 336px / 모바일 316px)에 `받은 친구 요청이 N개 있어요.`(`/friends?tab=requests` 링크 — 친구 화면의 받은 요청 탭)를, 없으면 `새 알림이 없어요.`를 보여 준다. 앱에 없는 알림은 만들지 않는다.
+- **`NotificationBell`** `{ variant?: 'header' | 'topbar' }` — 받은 친구 요청이 있으면 로즈 점과 `aria-label="알림 N개"`, 팝오버(`role="region"`, 바깥 너비 데스크톱 336px / 모바일 316px)에 `받은 친구 요청이 N개 있어요.`(`/friends?tab=requests` 링크 — 친구 화면의 받은 요청 탭)를, 없으면 `새 알림이 없어요.`를 보여 준다. 앱에 없는 알림은 만들지 않는다. 종이 그려진 뒤 새 요청이 오면(`friendRequestPulse`가 바뀌면) 점이 한 번 `animate-pop-in`으로 튄다. 처음 불러올 때나 화면을 옮겨 종이 새로 그려질 때는 튀지 않는다.
 - **`MobileTabBar`** — 레이아웃이 그리므로 페이지에서 렌더링하지 않는다. `/`, `/plan`, `/friends`, `/groups`(+`/groups/[id]`), `/profile`에서만 보이고 설정·약관·관리자 화면에는 없다. 흰 바탕 고정, 5탭(Timer·Calendar·Users·LayoutGrid·User 22px, 선택 굵기 2.2 / 나머지 1.8, 11px 라벨, 선택 `ink` 700 + `aria-current`, 나머지 `ink-faint` 500). 흰 페이지에서는 위에 `line-soft` 선, 타이머에서는 선 없음. 친구 탭에 받은 친구 요청 점. 바로 앞에 같은 높이의 빈 칸을 두어 푸터와 본문이 가려지지 않는다.
-- **`ShellProvider` / `useShell()`** → `{ session, friendRequestCount }`. 받은 친구 요청 구독(`useFriendRequestCount`)은 여기서 한 번만 연다. 같은 사용자로 훅을 또 부르면 같은 Realtime 채널을 두 번 구독하려다 오류가 나므로, 화면에서는 `useShell().friendRequestCount`를 쓴다.
+- **`ShellProvider` / `useShell()`** → `{ session, friendRequestCount, friendRequestPulse }`. 받은 친구 요청 구독(`useFriendRequestCount`/`useFriendRequestState`)은 여기서 한 번만 연다. `friendRequestPulse`는 첫 조회(`loaded`)가 끝난 뒤 같은 계정에서 요청 수가 늘 때마다 1씩 는다(처음 불러온 수·계정 전환·줄어듦은 세지 않는다). 알림 점의 팝에 쓴다(§8). 닫히는 팝오버·메뉴가 클릭·포커스를 받지 않게 하는 `guardClosingPopovers`도 여기서 앱 전체에 한 번 설치한다. 같은 사용자로 훅을 또 부르면 같은 Realtime 채널을 두 번 구독하려다 오류가 나므로, 화면에서는 `useShell().friendRequestCount`를 쓴다.
 - **`Footer`** — 흰 바탕, 최대 960px. 워드마크 + ©, 회색 14px 링크(타이머·계획·친구·그룹·문의하기·후원하기·이용약관·개인정보처리방침), 문의 이메일 복사 버튼.
 
 ### 구슬 `components/ui/Beads.tsx`
@@ -170,6 +173,7 @@
 ```
 
 - `document.body`로 포털해 띄우고, 패널에 `role`·`aria-modal="true"`를 붙인다. 모바일은 아래 시트, `md`부터 가운데 패널(`.ui-dialog`).
+- 움직임은 `ModalDialog`가 맡는다(덮개·패널의 `data-state="open|closed"`, §8): 덮개는 바탕색이 나타나고, 패널은 모바일에서 아래 가장자리부터 끝까지 올라오는 시트(280ms), `md`부터 `scale(.96)`에서 커지는 패널(200ms)이다. 호출하는 쪽은 `className`·`overlayClassName`에 `animate-*`나 `ui-panel-enter`를 붙이지 않는다.
 - 열 때: 연 요소를 기억하고 포커스를 안으로 옮긴다. 되돌릴 수 없는 확인은 안전한 취소에, 일반 확인은 확인 버튼에, 입력 대화상자는 첫 실제 컨트롤에 `initialFocusRef`를 준다.
 - 열린 동안: Tab/Shift+Tab을 패널 안에서 돈다(문서 캡처 단계에서 처리하므로 안쪽 컨트롤이 전파를 막아도 빠져나가지 않는다. 포털된 팝오버 내용 안의 Tab은 그 팝오버가 다룬다). body의 다른 자식은 `inert`가 된다(포인터·키보드·보조기기 모두 차단). 계속 보여야 하는 영역은 `data-dialog-keep`으로 남긴다(토스트). 패널 안 키 입력은 부모 대화상자나 window 단축키(타이머 Space)로 전달되지 않는다.
 - Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 겹친 층은 안쪽부터 하나씩 닫힌다.
@@ -179,6 +183,10 @@
   - 안쪽 요소가 전파만 막고 `preventDefault`를 하지 않은 Escape도 이벤트 처리가 끝난 뒤 대화상자가 닫는다(그래서 닫힌 선택·날짜 트리거에 포커스가 있어도 Escape로 닫힌다).
   - `ConfirmModal`처럼 다른 대화상자 위에 뜬 것은 자기만 닫힌다.
 - 닫을 때(`open=false`): `inert`를 되돌리고 연 요소로 포커스를 돌려준다. 다른 대화상자 위에 띄워도(예: 설정 창 위의 `ConfirmModal`) 아래 대화상자는 그대로다.
+  - 퇴장 애니메이션(모바일 200ms, `md` 140ms) 동안 대화상자는 붙어 있지만, 닫히기 시작하는 순간 배경 `inert`와 포커스를 돌려주고 키(Escape·Tab)를 더 다루지 않으며, 자신은 `inert` + `pointer-events: none`에 `aria-modal`이 빠진다(열린 층으로 세지 않는다. 겹친 대화상자는 아래 것이 바로 맨 위가 된다). 애니메이션이 끝나면 내린다. 애니메이션이 없으면(동작 줄이기, 테스트 환경) 같은 커밋에서 바로 내리고, 끝 소식이 없으면 남은 시간 + 100ms(최대 1초) 뒤에 내린다.
+  - 닫히는 동안에는 마지막으로 열려 있던 내용을 그대로 보여 준다(부모가 닫으면서 비운 상태로 패널이 바뀌지 않는다). 닫히는 중에 다시 열면 새 대화상자를 처음부터 그린다(이전 입력이 남지 않는다).
+  - 한 대화상자가 닫히는 순간 다른 대화상자가 열려도 배경은 `inert`로 남고(대화상자마다 잡은 `inert`를 센다), 새 대화상자를 닫으면 처음 연 요소로 포커스가 돌아간다.
+  - **호출하는 쪽은 대화상자를 마운트한 채로 두고 `open`만 바꾼다.** 대화상자 컴포넌트를 조건부로 그리거나(`{open && <X/>}`), 닫을 때 `key`가 바뀌거나, 부모가 내용 대신 `null`을 돌려주면 퇴장 애니메이션 없이 사라진다. 닫히는 동안 보여 줄 대상(예: 리포트의 멤버)은 마지막 값을 남겨 둔다(패널 내용은 `ModalDialog`가 마지막 열린 상태로 고정한다). 앱 설치 안내(`InstallPrompt`)가 이 방식이다.
 
 ### 확인·로그인·선택
 
@@ -245,3 +253,148 @@
 - 하지 말 것: 페이지마다 헤더·탭 바·알림 구독·대화상자 포커스 처리를 새로 만들기. `Navbar`·`MobileTopBar`·`useShell`·`ModalDialog`를 쓴다.
 - 팝오버·선택 컨트롤의 키 경계는 `components/ui/keyBoundary.ts`를 쓴다. **트리거는 자기가 쓰는 키만 막고 Escape·Tab은 올려 보낸다**: 버튼형 트리거 `onKeyDown={stopActivationKeys}`(Enter·Space), 선택 트리거 `stopSelectTriggerKeys`(Enter·Space·위아래 화살표·글자 검색). **열린 팝오버 내용**은 `onKeyDown={stopAllKeys}`(열려 있는 동안은 팝오버가 키보드를 가진다). 그래야 Space가 타이머 전역 단축키로 새지 않으면서 대화상자·폼의 Escape와 Tab이 동작한다(`NotificationBell`, `AppSelect`, `DatePicker` 참고).
 - 하지 말 것: 트리거에서 모든 키의 전파를 막기(`onKeyDown={(e) => e.stopPropagation()}`). 대화상자·폼이 Escape와 Tab을 받지 못한다.
+
+## 8. 움직임
+
+동작마다 가볍고 빠른 반응을 준다. 화면 코드는 아래 토큰·클래스·도구만 쓰고, 시간·가속을 직접 적지 않는다(`duration-300`, `ease-out`, 인라인 `transition` 등 금지). 새 의존성(framer-motion 등)은 쓰지 않는다.
+
+### 원칙
+
+| 할 것 | 하지 말 것 |
+| --- | --- |
+| 누름·호버 100–150ms, 나타남 160–240ms, 사라짐은 나타남보다 짧게 | 300ms를 넘는 움직임(아래 시트 280ms만 예외) |
+| 거리는 작게: 이동 8px 이하, 크기 `.96` 이상. 완료 팝만 최고 `1.08` | 튕김·흔들림·새 반복 애니메이션(지금 구슬 박동만 있다) |
+| 아래 가장자리에 붙은 시트(md 미만 `ModalDialog` 패널 등)만 자기 높이만큼 끝까지 올라오고 내려간다(유일한 예외) | 다른 요소를 화면 밖에서 끌어오기 |
+| `transform`·`opacity`, 색·바탕색 바뀜만 움직인다. 접기·펼치기는 `ui-collapse` | `width`/`height`/`top`/`left`/`margin` 움직이기, 주변 레이아웃을 미는 움직임 |
+| 상태는 바로 바꾸고 움직임은 꾸밈으로만. 사라지는 요소는 닫히는 순간부터 클릭·포커스를 받지 않고, 안에 있던 포커스는 바로 트리거로 간다(`ModalDialog`, `ui-popover`, `ui-collapse` 예제) | 애니메이션이 끝날 때까지 입력을 막기·기다리기, 사라지는 요소에 Tab·클릭이 닿게 두기 |
+| 사용자가 한 동작과 정말 새로 생긴 항목만 움직인다 | 타이머 틱, 실시간·주기 갱신, 평범한 다시 그리기, 처음 불러오기·하이드레이션에서 움직이기 |
+| 동작 줄이기(`prefers-reduced-motion: reduce`)면 움직임도 지연도 없다 | JS가 `animationend`만 기다리기(테스트 환경·동작 줄이기에서는 오지 않는다) |
+
+### 토큰 (`app/globals.css` `@theme`)
+
+| 토큰 | 값 | 쓰임 |
+| --- | --- | --- |
+| `--duration-instant` | 150ms | 누름, 호버·선택·체크 색 바뀜. `transition-*` 유틸리티의 기본 시간(`--default-transition-duration`)이기도 하다 |
+| `--duration-enter` | 200ms | 나타남: 팝오버·메뉴, `md` 대화상자, 목록 항목·섹션, 화면 전환 |
+| `--duration-exit` | 140ms | 사라짐 |
+| `--duration-emphasized` | 240ms | 큰 이동·강조: 메뉴 점 이동, 펼치기, 완료 팝 |
+| `--duration-sheet-enter` / `--duration-sheet-exit` | 280ms / 200ms | 아래 가장자리 시트 |
+| `--ease-enter` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | 나타남·상태 바뀜(감속). `transition-*` 유틸리티의 기본 가속이기도 하다. 유틸리티 `ease-enter` |
+| `--ease-exit` | `cubic-bezier(0.4, 0, 1, 1)` | 사라짐(가속). `ease-exit` |
+| `--ease-pop` | `cubic-bezier(0.3, 0, 0.2, 1)` | 팝 키프레임 구간. `ease-pop` |
+| `--ease-sheet` | `cubic-bezier(0.32, 0.72, 0, 1)` | 아래 시트가 올라올 때. `ease-sheet` |
+| `--press-scale` | `0.97` | 누르는 동안의 크기 |
+| `--stagger-step` | 24ms | 순차 등장 간격 |
+
+CSS 전환에 시간을 따로 줄 때는 `duration-(--duration-enter) ease-enter`처럼 토큰을 쓴다. JS에서는 `components/ui/motion.ts`의 `motionDuration('enter')`, `motionEasing('enter')`.
+
+### 클래스
+
+| 클래스 | 움직임 | 언제 |
+| --- | --- | --- |
+| (기본) `ui-button-*`, `ui-icon-button`, `ui-icon-button-surface`, `ui-segmented > button` | 누르는 동안 `scale(.97)`(`--duration-instant`), 비활성이면 없음. 호버·선택 색은 `--duration-instant`로 바뀐다 | 따로 붙일 것 없음. 이 버튼에 `transition-[…]`을 덮어쓸 때는 목록에 `scale`을 넣는다(빼면 누름이 바로 바뀐다) |
+| `ui-press` | 같은 누름 | 위 클래스가 아닌 직접 만든 버튼·링크 |
+| `hover:bg-hover` | 바탕색이 `--duration-instant`로 바뀐다(따로 준 `transition-*`이 있으면 그것) | 목록 행 호버. 따로 붙일 것 없음 |
+| `animate-fade-in` | 투명 → 보임, 200ms | 자리를 옮기지 않고 나타나는 것(빈 상태 문구, 덮개) |
+| `animate-fade-up` (`ui-panel-enter`도 같다) | 투명 + 6px 아래 → 제자리, 200ms | 펼친 섹션·패널, 새로 추가한 목록 항목, 인라인 폼 |
+| `animate-scale-in` | 투명 + `scale(.96)` → 제자리, 200ms | 직접 만든 팝오버·메뉴·작은 패널(Radix 내용은 `ui-popover`) |
+| `animate-sheet-in` / `animate-sheet-out` | 자기 높이만큼 아래 → 제자리(280ms, `ease-sheet`) / 반대로(200ms) | 아래 가장자리에 붙은 시트(md 미만) |
+| `animate-fade-out`, `animate-scale-out` | 사라짐(140ms, 끝 상태 유지) | `usePresence`로 남겨 둔 요소의 `data-state="closed"` |
+| `animate-pop` | `1 → 1.08 → 1`, 240ms | 이미 있는 것의 완료·변화 강조: 구슬이 채워짐, 배지 숫자 바뀜 |
+| `animate-pop-in` | 투명 + `.96` → `1.08` → `1`, 240ms | 새로 나타나는 작은 표시: 체크 표시, 새 알림 점 |
+| `ui-popover` | Radix 팝오버·메뉴 등장·퇴장(트리거 쪽 기준 `scale`). 닫히는 동안 `pointer-events: none` + `inert`(`guardClosingPopovers`), 포커스는 닫히는 순간 한 번만 움직인다(아래 닫히는 팝오버의 포커스). 선택 목록(`role="listbox"`)은 등장만 있고 바로 닫혀 Radix의 페이지 클릭·스크롤 잠금이 곧바로 풀린다 | Radix `Content`에 `ui-popover ui-popover-surface`. 보통은 따로 할 일 없음. 포커스로 열리는 트리거나 직접 만든 `onCloseAutoFocus`가 있으면 아래 규칙 |
+| `ui-stagger` | 자식의 등장을 `--stagger-step`씩 늦춘다. 앞 8개만(0–168ms), 그 뒤는 8번째와 함께 | 짧은 목록을 한꺼번에 열 때(작업 선택 팝오버, 펼친 목록). 목록에 `ui-stagger`, 항목에 `animate-fade-up`. 순서를 직접 주려면 항목에 `style={{ '--stagger-index': i }}` |
+| `ui-collapse` + `data-state="open"` | `grid-template-rows: 0fr ↔ 1fr`(펼침 240ms, 접힘 140ms). 접히기 시작하면 바로 클릭을 받지 않고(`pointer-events: none`), 다 접힌 뒤 숨는다 | 접기·펼치기. 안쪽 요소 하나로 감싼다(그 요소는 `overflow: hidden`이므로 가장자리 포커스 링이 필요하면 안쪽에 여백을 둔다). 감싼 요소에 `inert={!open}`, 닫을 때 안에 있던 포커스는 `releaseFocus(panel, trigger)`로 트리거에(아래 예) |
+
+`animate-*`는 Tailwind 유틸리티라 실제로 쓴 것만 CSS에 생긴다(`@theme`의 `--animate-*`가 정의). 등장 키프레임은 시작 상태만 적어 끝나면 원래 스타일로 돌아가므로, 같은 요소의 다른 상태 클래스(투명도 등)를 가리지 않는다.
+
+```tsx
+// 짧은 목록을 열 때 순차 등장
+<ul className="ui-stagger">
+  {tasks.map((task) => <li key={task.id} className="animate-fade-up">…</li>)}
+</ul>
+
+// 접기·펼치기: 닫히는 순간부터 안쪽은 포커스·클릭을 받지 않는다(inert + CSS). 안에 있던 포커스는 트리거로.
+const toggle = () => {
+  if (open && panelRef.current) releaseFocus(panelRef.current, triggerRef.current); // components/ui/popoverExit
+  setOpen(!open);
+};
+<button ref={triggerRef} aria-expanded={open} aria-controls={id} onClick={toggle}>세부 할 일</button>
+<div ref={panelRef} id={id} className="ui-collapse" data-state={open ? 'open' : 'closed'} inert={!open || undefined}>
+  <div>…</div>
+</div>
+```
+
+### 닫히는 팝오버의 포커스
+
+`ShellProvider`가 설치한 `guardClosingPopovers`(`components/ui/popoverExit.ts`)가 `.ui-popover` 내용이 닫히는 순간(`data-state="closed"`) 처리한다. 한 번 닫을 때 포커스는 한 번만 움직인다.
+
+- 안에 포커스가 있었으면 바로 트리거로 옮긴다. 트리거는 열려 있을 때 `aria-controls`로 내용의 `id`를 가리킨 요소다(Radix `Trigger`는 저절로 단다). 바깥(트리거가 아닌 곳)을 눌러 닫았으면 누른 곳에 둔다. 포커스가 안에 없었으면(트리거에서 Escape, 트리거를 다시 눌러 닫기) 건드리지 않는다.
+- 그 뒤 Radix가 내용을 내리면서 다시 옮기는 포커스(`onCloseAutoFocus`의 기본 동작, 내린 뒤 `setTimeout 0`)는 취소한다. 그래서 퇴장하는 동안이나 닫은 직후 사용자가 옮긴 포커스(Tab, 다른 입력)는 그대로다.
+- 선택 목록(`AppSelect`)도 같다. 목록은 닫히는 순간 내려가므로 함께 사라진 포커스를 트리거로 한 번 돌려주고 Radix의 복귀는 취소한다. 바깥을 눌러 닫았을 때만 Radix에 맡긴다(기본 select처럼 트리거로 간다).
+- 닫히는 중에 다시 열면 `inert`와 취소를 지운다.
+- **복귀 끄기**: 트리거로 돌아가면 안 되는 내용에는 `Content`에 `data-close-autofocus="off"`(`CLOSE_AUTOFOCUS_ATTRIBUTE`)를 단다. 가드는 안에 있던 포커스를 놓기만 한다. 포커스를 받으면 열리는 트리거(`onFocus`로 여는 타임라인 기록 카드)가 그렇다. 트리거로 돌려주면 다시 열린다. 가드가 없을 때(단위 테스트)를 위해 `onCloseAutoFocus={(event) => event.preventDefault()}`도 함께 둔다.
+- **직접 만든 `onCloseAutoFocus`**: Radix는 가드가 취소한 뒤에도 이 처리기를 부른다(내용을 내린 뒤, 퇴장이 끝난 뒤). 처음에 `if (event.defaultPrevented) return;`으로 빠진다. 가드가 이미 포커스를 정했다는 뜻이다. 그렇지 않으면 그새 옮긴 포커스를 빼앗는다. 부모가 내용을 열린 채로 바로 내리면(가드가 닫힘을 못 본다) `defaultPrevented`가 아니므로 처리기는 전처럼 돈다.
+- `Trigger` 없이 `Anchor`(`virtualRef`)로 여는 팝오버는 가드가 트리거를 모른다. 여는 버튼에 열려 있는 동안 `aria-controls={contentId}`를, `Content`에 같은 `id`를 줘서 가드가 그 버튼으로 돌려주게 한다. 닫는 순간 다른 곳으로 보내야 하면 `data-close-autofocus="off"`를 달고 닫는 처리(`onOpenChange(false)`)에서 직접 옮긴다.
+
+```tsx
+// 작업 선택처럼 Anchor로 여는 팝오버를 남겨 두고 open으로 닫을 때
+<button ref={anchorRef} aria-expanded={open} aria-controls={open ? pickerId : undefined}>…</button>
+<Popover.Content id={pickerId} className="ui-popover ui-popover-surface"
+  onCloseAutoFocus={(event) => {
+    if (event.defaultPrevented) return; // 가드가 이미 버튼(또는 누른 곳)으로 옮겼다
+    event.preventDefault();
+    if (!interactedOutsideRef.current) anchorRef.current?.focus();
+  }}>…</Popover.Content>
+```
+
+### 새 항목 vs 새로 고친 목록
+
+- **사용자가 추가한 항목**: 만든 항목의 id를 상태로 기억해(예: `lastAddedId`) 그 항목에만 `animate-fade-up`(완료 표시는 `animate-pop-in`)을 붙인다. CSS 애니메이션은 요소가 붙을 때 한 번만 돌므로, 같은 `key`로 다시 그려져도 반복되지 않는다. 다음 동작에서 id를 비운다.
+- **새로 고친 목록**(실시간 구독, 주기 갱신, 다시 불러오기, 처음 불러오기): 등장 클래스를 붙이지 않는다. 안정된 `key`(서버 id)를 써서 DOM을 유지하면 아무것도 움직이지 않는다. 배열 인덱스를 `key`로 쓰거나 목록을 통째로 다시 마운트하면 붙어 있는 등장 클래스가 다시 돈다.
+- **사용자가 연 목록**(팝오버를 열 때, 섹션을 펼칠 때): 목록 전체에 `ui-stagger` + 항목 `animate-fade-up`을 써도 된다. 열 때 한 번만 돈다.
+- 실시간으로 들어온 알림처럼 사용자가 알아야 하는 새 소식은 내용 대신 표시(점·배지)를 `animate-pop-in`으로 한 번 강조한다(`NotificationBell`의 `friendRequestPulse`처럼, 처음 불러온 값은 세지 않는다).
+
+### 사라짐과 `usePresence`
+
+`components/ui/usePresence.ts`는 닫힌 요소를 퇴장 애니메이션이 끝날 때까지 남겨 둔다(`ModalDialog`가 쓴다).
+
+```tsx
+const { ref, mounted, closing } = usePresence<HTMLDivElement>(open);
+if (!mounted) return null;
+return (
+  <div ref={ref} data-state={closing ? 'closed' : 'open'} inert={closing || undefined}
+    className="data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-up">…</div>
+);
+```
+
+- `ref` 요소와 그 안에서 도는 유한한 애니메이션이 끝나면 내린다. 없으면(동작 줄이기, 테스트, 퇴장을 정하지 않음) 같은 커밋에서 바로, 끝 소식이 없으면 최대 1초 뒤.
+- 닫히는 동안에는 `inert`(+ 필요하면 `pointer-events-none`)를 붙여 클릭·포커스를 받지 않게 한다. 닫히는 중에 다시 열면 `key`가 바뀐다. 내용을 `key`로 새로 그리면 이전 상태가 남지 않는다.
+- 반환값은 구조 분해해서 쓴다(`presence.ref`를 렌더 중에 다른 값과 함께 읽으면 React Compiler 린트가 ref 접근으로 본다).
+
+### JS 움직임 (`components/ui/motion.ts`)
+
+- `playMotion(element, keyframes, { duration?, easing?, composite? })`: 토큰으로 Web Animation을 한 번 재생한다. 동작 줄이기거나 지원하지 않으면 아무것도 하지 않는다. 끝 상태를 남기지 않는다(`fill` 없음). 시작 상태만 적는다(`[{ opacity: 0, offset: 0 }]`).
+- `prefersReducedMotion()`, `motionDuration(name)`, `motionEasing(name)`, `readCssToken('--color-ink')`.
+- `getRunningAnimations(elements, { subtree })` + `whenAnimationsFinish(animations, onDone)`: 애니메이션을 기다릴 때는 이 둘을 쓴다(없으면 바로, 멈추면 시간 제한).
+- CSS 애니메이션은 동작 줄이기에서 `globals.css`가 시간·지연을 0으로 만들지만, Web Animation은 그 규칙을 받지 않으므로 반드시 `playMotion`을 거친다.
+- `components/ui/popoverExit.ts`: `releaseFocus(container, target?)`(안에 있는 포커스를 target으로, 없으면 놓기 — 직접 만든 사라지는 요소에 쓴다), `guardClosingPopovers()`(`ShellProvider`가 앱 전체에 한 번 설치한다. 화면에서 다시 부르지 않는다. 돌려준 정리 함수는 관찰·리스너와 함께 닫히는 내용에 붙인 `inert`·취소 처리기도 되돌리므로 StrictMode·HMR로 다시 설치해도 하나만 동작한다), `CLOSE_AUTOFOCUS_ATTRIBUTE`(위 복귀 끄기).
+
+### 화면 전환
+
+- `app/template.tsx` → `components/layout/RouteEnter.tsx`. 경로 첫 단계가 바뀌어 Next가 템플릿을 새로 붙일 때만, 머리(`data-shell-header`: 데스크톱 헤더와 모바일 상단 바)를 뺀 본문 덩어리들이 투명 + 6px 아래에서 한 번 떠오른다(200ms, Web Animation, `transform`은 기존 값에 더한다). 화면이 처음엔 불러오는 중 표시(`role="status"`·`aria-busy`)만 그리면 재생하지 않고 기다렸다가 머리가 붙는 순간(1.5초 안, 그리기 전) 재생한다. 이미 움직인 요소와 그 안은 다시 움직이지 않고, 먼저 움직인 덩어리가 나중에 머리를 품게 되면(불러오는 중 상자가 화면 틀로 다시 쓰일 때) 그 움직임을 그리기 전에 멈춘다. 머리는 어떤 폭에서도 움직이지 않는다.
+- 레이아웃(`ShellProvider`, 토스트, 탭 바, 푸터, 알림 구독)은 템플릿 바깥이라 다시 그려지지 않는다. 화면 컴포넌트는 원래도 화면을 옮기면 새로 그려지므로 템플릿이 더 지우는 상태는 없다. 래퍼는 `display: contents`라 레이아웃에 끼지 않고, 스크롤 처리(Next의 스크롤 처리기는 템플릿 안쪽)를 바꾸지 않는다. 다만 뒤로 가기의 스크롤 복원은 원래부터 불완전하다: 계획 화면을 y=500에서 떠났다가 돌아오면 템플릿이 없는 기준판(HEAD)과 지금 모두 y=355로 돌아온다(돌아오는 순간 화면이 로그인 확인 중 표시라 짧기 때문으로 보인다). 움직임과는 별개의 기존 문제다.
+- 같은 화면 안의 상태·검색어(`?tab=`)·`history.replaceState`(그룹 선택), 타이머 틱, 실시간 갱신에는 돌지 않는다. `/groups` ↔ `/groups/[id]`처럼 첫 단계가 같은 이동도 돌지 않는다.
+- 처음 불러올 때(서버 렌더·하이드레이션)는 움직이지 않는다. 스타일이 아니라 JS 애니메이션이므로 JS가 늦거나 동작 줄이기면 내용은 처음부터 그대로 보인다.
+- 메뉴 점(`Navbar`)은 §4대로 따로 움직인다. 모바일 탭 바는 움직이지 않는다.
+
+### 동작 줄이기
+
+- `globals.css`가 모든 CSS 애니메이션·전환 시간을 0.01ms로, 지연을 0으로 만든다. 누름 크기 변화도 없다. 지금 구슬은 박동 대신 옅은 테두리.
+- `playMotion`은 아무것도 재생하지 않는다(화면 전환·메뉴 점). `usePresence`·`ModalDialog`는 기다리지 않고 바로 내린다.
+- 토스트(`react-hot-toast`)는 라이브러리 애니메이션을 그대로 쓴다. 동작 줄이기면 라이브러리가 스스로 페이드만 쓴다.
+
+### 확인
+
+- 브라우저에서 동작 직후 `document.getAnimations()`로 무엇이 도는지 보고, `pause()` + `currentTime`으로 중간 프레임을 멈춰 본다(`.design-ref/BRIEF.md` §8).
+- 테스트(happy-dom)는 애니메이션을 돌리지 않는다. 퇴장을 기다리는 동작은 `Element.prototype.getAnimations`를 흉내 내 시험한다(`components/ui/__tests__/ModalDialogExit.test.tsx`).

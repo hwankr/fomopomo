@@ -86,8 +86,6 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
             open={isOpen}
             onClose={onClose}
             aria-labelledby={titleId}
-            overlayClassName="animate-fade-in"
-            className="animate-scale-in"
         >
             <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
             <div className="flex items-start justify-between gap-3">

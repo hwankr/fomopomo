@@ -40,8 +40,6 @@ export default function JoinGroupModal({ isOpen, onClose, onJoined, initialCode 
             onClose={handleClose}
             aria-labelledby={titleId}
             initialFocusRef={inputRef}
-            overlayClassName="animate-fade-in"
-            className="animate-scale-in"
         >
             <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
             <h2 id={titleId} className="ui-dialog-title">초대 코드로 참여</h2>

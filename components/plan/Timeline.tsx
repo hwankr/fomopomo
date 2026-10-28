@@ -208,7 +208,9 @@ function TimelineBlockTrigger({ block, origin, open, onOpenChange, className, st
           collisionPadding={12}
           aria-labelledby={titleId}
           onOpenAutoFocus={event => event.preventDefault()}
+          // 트리거가 포커스로 열리므로 닫힐 때 포커스를 트리거로 돌려주지 않는다(guardClosingPopovers도 안의 포커스만 놓는다).
           onCloseAutoFocus={event => event.preventDefault()}
+          data-close-autofocus="off"
           onPointerEnter={clearCloseTimer}
           onPointerLeave={scheduleHide}
           onEscapeKeyDown={event => event.stopPropagation()}

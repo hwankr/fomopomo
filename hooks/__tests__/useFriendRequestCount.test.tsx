@@ -41,7 +41,7 @@ vi.mock('@/lib/supabase', () => ({
   supabase: supabaseMock,
 }));
 
-import { useFriendRequestCount } from '@/hooks/useFriendRequestCount';
+import { useFriendRequestCount, useFriendRequestState } from '@/hooks/useFriendRequestCount';
 
 const sessionFor = (id: string) =>
   ({ user: { id } } as unknown as Session);
@@ -114,5 +114,28 @@ describe('useFriendRequestCount 로그아웃/계정 전환 잔존 카운트 방�
     await waitFor(() => expect(supabaseMock.removeChannel).toHaveBeenCalledTimes(1));
     // 로그아웃 상태에서는 새 조회를 시작하지 않는다.
     expect(pendingCounts.length).toBe(1);
+  });
+
+  it('첫 조회가 끝나야 loaded가 되고, 계정이 바뀌면 다시 false가 된다', async () => {
+    function StateProbe({ session }: { session: Session | null }) {
+      const { count, loaded } = useFriendRequestState(session);
+      return <div data-testid="state">{`${count}:${loaded}`}</div>;
+    }
+    const { rerender } = render(<StateProbe session={sessionFor('user-a')} />);
+    expect(screen.getByTestId('state').textContent).toBe('0:false');
+
+    await waitFor(() => expect(pendingCounts.length).toBe(1));
+    await resolveCount(0, 0);
+    // 요청이 0개여도 조회가 끝났음을 알 수 있다.
+    expect(screen.getByTestId('state').textContent).toBe('0:true');
+
+    rerender(<StateProbe session={sessionFor('user-b')} />);
+    expect(screen.getByTestId('state').textContent).toBe('0:false');
+    await waitFor(() => expect(pendingCounts.length).toBe(2));
+    await resolveCount(1, 2);
+    expect(screen.getByTestId('state').textContent).toBe('2:true');
+
+    rerender(<StateProbe session={null} />);
+    expect(screen.getByTestId('state').textContent).toBe('0:false');
   });
 });

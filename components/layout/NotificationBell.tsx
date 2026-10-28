@@ -16,8 +16,10 @@ type NotificationBellProps = {
 
 // 알림 종 + 팝오버. 지금 앱에 실제로 있는 알림(받은 친구 요청)만 보여 준다.
 export default function NotificationBell({ variant = 'header', className }: NotificationBellProps) {
-  const { friendRequestCount } = useShell();
+  const { friendRequestCount, friendRequestPulse } = useShell();
   const [open, setOpen] = useState(false);
+  // 이 종이 그려진 뒤 새 요청이 오면 점이 한 번 톡 튄다. 화면을 옮겨 종을 새로 그리거나 처음 불러올 때는 튀지 않는다.
+  const [mountedPulse] = useState(friendRequestPulse);
   const hasRequests = friendRequestCount > 0;
   const isHeader = variant === 'header';
 
@@ -35,10 +37,13 @@ export default function NotificationBell({ variant = 'header', className }: Noti
           <Bell aria-hidden="true" size={isHeader ? 21 : 20} strokeWidth={1.8} />
           {hasRequests ? (
             <span
+              // 새 요청마다 새로 붙여 팝을 다시 재생한다.
+              key={friendRequestPulse}
               aria-hidden="true"
               className={cn(
                 'absolute size-[7px] rounded-full bg-pomo',
                 isHeader ? 'top-2 right-[9px]' : 'top-[9px] right-2.5',
+                friendRequestPulse !== mountedPulse && 'animate-pop-in',
               )}
             />
           ) : null}

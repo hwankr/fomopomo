@@ -62,8 +62,6 @@ export default function CreateGroupModal({ isOpen, onClose, onCreated }: CreateG
             onClose={handleClose}
             aria-labelledby={titleId}
             initialFocusRef={inputRef}
-            overlayClassName="animate-fade-in"
-            className="animate-scale-in"
         >
             <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
             <h2 id={titleId} className="ui-dialog-title">새 그룹</h2>

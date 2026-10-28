@@ -3,6 +3,7 @@
 import {
   useLayoutEffect,
   useRef,
+  useState,
   useSyncExternalStore,
   type KeyboardEvent,
   type MouseEvent,
@@ -11,6 +12,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import { usePresence } from './usePresence';
 
 type ModalDialogProps = {
   open: boolean;
@@ -97,18 +99,47 @@ function containTab(panel: HTMLElement, event: globalThis.KeyboardEvent) {
   }
 }
 
+// 대화상자가 inert로 만든 요소와 그 inert를 잡고 있는 대화상자들. 닫히는 대화상자가 놓는 것과
+// 같은 순간 열리는 대화상자가 잡는 것의 순서와 상관없이, 잡은 대화상자가 하나라도 있으면 inert로 남는다.
+const inertHolders = new WeakMap<Element, Set<number>>();
+
 // 대화상자 밖의 body 자식을 inert로 만들어 포인터·키보드·보조기기에서 뺀다.
 // 토스트처럼 계속 읽혀야 하는 영역은 data-dialog-keep으로 남긴다.
-function inertOutside(container: HTMLElement) {
-  const changed: HTMLElement[] = [];
+function inertOutside(container: HTMLElement, id: number) {
+  const held: HTMLElement[] = [];
   Array.from(document.body.children).forEach((child) => {
     if (!(child instanceof HTMLElement) || child === container) return;
-    if (child.hasAttribute('inert') || child.hasAttribute('data-dialog-keep')) return;
+    if (child.hasAttribute('data-dialog-keep')) return;
     if (['SCRIPT', 'STYLE', 'NEXTJS-PORTAL'].includes(child.tagName)) return;
-    child.setAttribute('inert', '');
-    changed.push(child);
+    const holders = inertHolders.get(child);
+    if (holders) {
+      holders.add(id);
+    } else {
+      // 대화상자가 아닌 쪽(닫히는 대화상자 자신 등)이 붙인 inert는 건드리지 않는다.
+      if (child.hasAttribute('inert')) return;
+      inertHolders.set(child, new Set([id]));
+      child.setAttribute('inert', '');
+    }
+    held.push(child);
   });
-  return () => changed.forEach((element) => element.removeAttribute('inert'));
+  return () => held.forEach((element) => {
+    const holders = inertHolders.get(element);
+    holders?.delete(id);
+    if (holders && holders.size > 0) return;
+    inertHolders.delete(element);
+    element.removeAttribute('inert');
+  });
+}
+
+// 대화상자를 연 요소. 닫히는 중인 대화상자 안에서 다른 대화상자를 열었다면
+// (확인 버튼이 곧 사라지므로) 닫히는 대화상자를 처음 연 요소를 이어받는다.
+const dialogOpeners = new WeakMap<Element, HTMLElement | null>();
+
+function findOpener() {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const closingOverlay = active?.closest('.ui-dialog-overlay[data-state="closed"]');
+  if (closingOverlay && dialogOpeners.has(closingOverlay)) return dialogOpeners.get(closingOverlay) ?? null;
+  return active;
 }
 
 const subscribeNothing = () => () => {};
@@ -116,13 +147,39 @@ const subscribeNothing = () => () => {};
 // 앱의 모든 모달 대화상자가 쓰는 공통 틀. body로 포털해 띄우고,
 // 열 때 안으로 포커스를 옮기고, Tab을 안에 가두고, 배경을 inert로 만들고,
 // Escape는 맨 위 대화상자만 닫고, 닫히면 연 요소로 포커스를 돌려준다.
+// 덮개는 바탕색이, 패널은 모바일 시트 / md 가운데 패널로 나타나고 사라진다(globals.css, data-state).
+// 닫히기 시작하면 곧바로 배경과 포커스를 돌려주고, 퇴장 애니메이션이 끝나면 내린다(없으면 바로).
 export default function ModalDialog(props: ModalDialogProps) {
   const isClient = useSyncExternalStore(subscribeNothing, () => true, () => false);
-  if (!props.open || !isClient) return null;
-  return createPortal(<OpenModalDialog {...props} />, document.body);
+  const presence = usePresence<HTMLDivElement>(props.open);
+  // 닫히는 동안에는 마지막으로 열려 있던 내용을 그대로 보여 준다
+  // (부모가 닫으면서 비운 상태 때문에 패널 내용이 바뀌거나 줄어들지 않게).
+  const [openChildren, setOpenChildren] = useState(props.children);
+  if (props.open && openChildren !== props.children) setOpenChildren(props.children);
+
+  if (!presence.mounted || !isClient) return null;
+  return createPortal(
+    <OpenModalDialog
+      key={presence.key}
+      {...props}
+      closing={presence.closing}
+      overlayRef={presence.ref}
+    >
+      {presence.closing ? openChildren : props.children}
+    </OpenModalDialog>,
+    document.body,
+  );
 }
 
+type OpenModalDialogProps = ModalDialogProps & {
+  /** 닫히는 중(퇴장 애니메이션). 키·포커스·배경은 이미 돌려줬고 클릭도 받지 않는다. */
+  closing: boolean;
+  overlayRef: RefObject<HTMLDivElement | null>;
+};
+
 function OpenModalDialog({
+  closing,
+  overlayRef,
   onClose,
   role = 'dialog',
   'aria-labelledby': labelledBy,
@@ -133,11 +190,11 @@ function OpenModalDialog({
   overlayClassName,
   closeOnOverlayClick = false,
   children,
-}: ModalDialogProps) {
-  const overlayRef = useRef<HTMLDivElement>(null);
+}: OpenModalDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
   const onCloseRef = useRef(onClose);
+  const teardownRef = useRef(() => {});
 
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
@@ -148,11 +205,12 @@ function OpenModalDialog({
     const panel = panelRef.current;
     if (!overlay || !panel) return;
 
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = findOpener();
     const id = ++lastDialogId;
     idRef.current = id;
     openDialogs.push(id);
-    const restoreBackground = inertOutside(overlay);
+    dialogOpeners.set(overlay, opener);
+    const restoreBackground = inertOutside(overlay, id);
 
     const target = initialFocusRef?.current ?? getTabbableElements(panel)[0] ?? panel;
     target.focus();
@@ -192,18 +250,30 @@ function OpenModalDialog({
     document.addEventListener('keydown', handleCapture, true);
     document.addEventListener('keydown', handleBubble);
 
-    return () => {
+    // 닫히기 시작할 때(퇴장 애니메이션 전) 한 번, 늦어도 내릴 때 부른다.
+    const teardown = () => {
+      if (closed) return;
       closed = true;
       document.removeEventListener('keydown', handleCapture, true);
       document.removeEventListener('keydown', handleBubble);
       const index = openDialogs.indexOf(id);
       if (index >= 0) openDialogs.splice(index, 1);
       restoreBackground();
-      if (opener?.isConnected && opener !== document.body) opener.focus();
+      // 같은 순간 열린 다른 대화상자가 이미 포커스를 가져갔으면 빼앗지 않는다.
+      const active = document.activeElement;
+      const focusInOtherDialog = active instanceof Element && !overlay.contains(active)
+        && active.closest('[aria-modal="true"]') !== null;
+      if (!focusInOtherDialog && opener?.isConnected && opener !== document.body) opener.focus();
     };
+    teardownRef.current = teardown;
+    return teardown;
     // 열려 있는 동안 한 번만 설정한다(initialFocusRef는 처음 포커스에만 쓴다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    if (closing) teardownRef.current();
+  }, [closing]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // 안쪽 키 입력이 부모 대화상자나 window 단축키(타이머 Space 등)로 새지 않게 한다.
@@ -231,6 +301,9 @@ function OpenModalDialog({
   return (
     <div
       ref={overlayRef}
+      data-state={closing ? 'closed' : 'open'}
+      // 닫히는 동안: 포커스·클릭·보조기기에서 빠지고(inert), 열린 층으로 세지 않는다(aria-modal 없음).
+      inert={closing || undefined}
       className={cn('ui-dialog-overlay', overlayClassName)}
       onMouseDown={keepFocus}
       onClick={handleOverlayClick}
@@ -238,7 +311,8 @@ function OpenModalDialog({
       <div
         ref={panelRef}
         role={role}
-        aria-modal="true"
+        aria-modal={closing ? undefined : 'true'}
+        data-state={closing ? 'closed' : 'open'}
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
         aria-label={label}

@@ -53,6 +53,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: supabaseMock }));
 import WeeklyPlan from '../WeeklyPlan';
 import MonthlyPlan from '../MonthlyPlan';
 import Timeline from '../Timeline';
+import { guardClosingPopovers } from '@/components/ui/popoverExit';
 
 const plan = (title: string) => ({
   id: title, title, status: 'todo', start_date: '2026-09-07', end_date: '2026-09-13',
@@ -303,6 +304,70 @@ describe('Timeline session details', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
     expect(screen.getByRole('dialog', { name: '두 번째 공부' })).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+});
+
+// 셸이 설치하는 닫힘 가드와 함께: 트리거가 포커스로 열리므로 가드가 포커스를 트리거로 돌려주면 다시 열린다.
+describe('Timeline information card with the closing popover guard', () => {
+  const realGetComputedStyle = window.getComputedStyle;
+  let stopGuard: () => void;
+
+  beforeEach(() => {
+    // happy-dom은 CSS를 읽지 않으므로, 닫힌 카드에 퇴장 애니메이션이 걸린 것처럼 Radix Presence에 알린다.
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) => {
+      const style = realGetComputedStyle.call(window, element, pseudo);
+      if (!element.classList?.contains('ui-popover')) return style;
+      return new Proxy(style, {
+        get(target, property) {
+          if (property === 'animationName') return element.getAttribute('data-state') === 'closed' ? 'ui-scale-out' : 'ui-scale-in';
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    });
+    stopGuard = guardClosingPopovers();
+  });
+  afterEach(() => {
+    stopGuard();
+    vi.restoreAllMocks();
+  });
+
+  const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  const card = () => document.querySelector<HTMLElement>('.ui-popover');
+
+  async function showTimeline() {
+    render(<Timeline userId="A" selectedDate={new Date(2026, 8, 7)} />);
+    await reply(0, [sessionRow('데이터베이스 복습', 7)]);
+    return screen.getByRole('button', { name: '데이터베이스 복습 기록 정보, 10:50–11:00, 뽀모도로 1개' });
+  }
+
+  it('stays closed after Escape on the focused trigger', async () => {
+    const trigger = await showTimeline();
+    act(() => trigger.focus());
+    await screen.findByRole('dialog');
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    await settle();
+
+    expect(card()).toHaveAttribute('data-state', 'closed');
+    expect(trigger).toHaveFocus();
+  });
+
+  it('stays closed after Escape inside the card and lets go of the focus inside it', async () => {
+    const trigger = await showTimeline();
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog');
+    const content = card()!;
+    act(() => content.focus());
+    expect(content).toHaveFocus();
+
+    fireEvent.keyDown(content, { key: 'Escape' });
+    await settle();
+
+    expect(content).toHaveAttribute('data-state', 'closed');
+    expect(content).toHaveAttribute('inert');
+    expect(content).not.toContainElement(document.activeElement as HTMLElement | null);
+    expect(trigger).not.toHaveFocus();
   });
 });
 

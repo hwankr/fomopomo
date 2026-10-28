@@ -146,3 +146,87 @@ describe('Navbar', () => {
     expect(screen.getAllByRole('button', { name: '알림' })).toHaveLength(1);
   });
 });
+
+// 헤더는 화면마다 새로 그려지므로, 메뉴 점은 직전 헤더의 점 자리에서 미끄러져 온다.
+describe('Navbar menu indicator', () => {
+  const ORIGINAL_MATCH_MEDIA = window.matchMedia;
+  const DOT_LEFT: Record<string, number> = { timer: 520, plan: 600, friends: 670, groups: 740 };
+  const animate = vi.fn<(keyframes: Keyframe[], options?: KeyframeAnimationOptions) => Animation>(function (this: Element) {
+    return { cancel: vi.fn() } as unknown as Animation;
+  });
+  const callsOn = (element: Element) => animate.mock.calls.filter((_, index) => animate.mock.contexts[index] === element)
+    .map(([keyframes]) => keyframes);
+
+  beforeEach(() => {
+    animate.mockClear();
+    Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+    // happy-dom은 레이아웃이 없으므로 보이는 헤더의 점 위치를 흉내 낸다.
+    vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [{}] as unknown as DOMRectList);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const section = this.closest('[data-nav-section]')?.getAttribute('data-nav-section');
+      const left = this.hasAttribute('data-nav-dot') && section ? DOT_LEFT[section] : 0;
+      return { left, top: 50, width: left ? 5 : 0, height: left ? 5 : 0 } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    delete (Element.prototype as { animate?: unknown }).animate;
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: ORIGINAL_MATCH_MEDIA });
+  });
+
+  it('does not animate the first header after a page load', async () => {
+    vi.resetModules();
+    const { default: FreshNavbar } = await import('@/components/Navbar');
+    navigation.pathname = '/plan';
+    render(<FreshNavbar session={session} />);
+    expect(animate).not.toHaveBeenCalled();
+  });
+
+  it('slides the dot from the previous menu and crossfades both labels', () => {
+    navigation.pathname = '/plan';
+    render(<Navbar session={session} />).unmount();
+    animate.mockClear();
+
+    navigation.pathname = '/friends';
+    render(<Navbar session={session} />);
+
+    const friends = within(headerNav()).getByRole('link', { name: '친구' });
+    const plan = within(headerNav()).getByRole('link', { name: '계획' });
+    const dot = friends.querySelector('[data-nav-dot]')!;
+    expect(callsOn(dot)).toEqual([[{ transform: 'translateX(-70px)', offset: 0 }]]);
+    expect(callsOn(friends)).toHaveLength(1);
+    expect(callsOn(plan)).toHaveLength(1);
+    expect(animate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ duration: 240 }));
+  });
+
+  it('fades the dot in when coming from a screen without a selected menu, and stays still on the same menu', () => {
+    navigation.pathname = '/profile';
+    render(<Navbar session={session} />).unmount();
+    animate.mockClear();
+
+    navigation.pathname = '/groups';
+    const { unmount } = render(<Navbar session={session} />);
+    const dot = within(headerNav()).getByRole('link', { name: '그룹' }).querySelector('[data-nav-dot]')!;
+    expect(callsOn(dot)).toEqual([[{ opacity: 0, transform: 'scale(0.96)', offset: 0 }]]);
+    unmount();
+    animate.mockClear();
+
+    navigation.pathname = '/groups/abc-123';
+    render(<Navbar session={session} />);
+    expect(animate).not.toHaveBeenCalled();
+  });
+
+  it('does not move with reduced motion', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes('prefers-reduced-motion'), media: query }),
+    });
+    navigation.pathname = '/';
+    render(<Navbar session={session} />).unmount();
+    navigation.pathname = '/plan';
+    render(<Navbar session={session} />);
+    expect(animate).not.toHaveBeenCalled();
+  });
+});

@@ -3,7 +3,6 @@
 import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Download, Share, X } from 'lucide-react';
 import ModalDialog from './ui/ModalDialog';
-import { cn } from '../lib/utils';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -88,15 +87,11 @@ function BrowserInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [showAndroidPrompt, setShowAndroidPrompt] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
 
+  // 바로 닫는다. 사라지는 움직임은 ModalDialog의 공통 퇴장이 맡는다(동작 줄이기면 즉시).
   const hidePrompt = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsIOSPromptVisible(false);
-      setShowAndroidPrompt(false);
-      setIsClosing(false);
-    }, 300);
+    setIsIOSPromptVisible(false);
+    setShowAndroidPrompt(false);
   };
 
   useEffect(() => {
@@ -145,30 +140,27 @@ function BrowserInstallPrompt() {
     return null;
   }
 
-  if (isIOSPromptVisible) {
-    return (
-      <PromptSurface isClosing={isClosing} onClose={handleClose}>
-        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-ink-muted">
-          <span>공유 버튼을 누른 뒤</span>
-          <Share aria-hidden="true" className="size-[18px] text-ink" strokeWidth={1.8} />
-          <span>홈 화면에 추가를 선택하세요.</span>
-        </p>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={handlePermanentDismiss}
-            className="ui-button-secondary flex-1 md:flex-none"
-          >
-            다시 보지 않기
-          </button>
-        </div>
-      </PromptSurface>
-    );
-  }
-
-  if (showAndroidPrompt) {
-    return (
-      <PromptSurface isClosing={isClosing} onClose={handleClose}>
+  // 대화상자는 늘 그려 두고 open만 바꾼다(닫힐 때 퇴장 애니메이션이 돌도록).
+  return (
+    <PromptSurface open={isIOSPromptVisible || showAndroidPrompt} onClose={handleClose}>
+      {isIOSPromptVisible ? (
+        <>
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-ink-muted">
+            <span>공유 버튼을 누른 뒤</span>
+            <Share aria-hidden="true" className="size-[18px] text-ink" strokeWidth={1.8} />
+            <span>홈 화면에 추가를 선택하세요.</span>
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handlePermanentDismiss}
+              className="ui-button-secondary flex-1 md:flex-none"
+            >
+              다시 보지 않기
+            </button>
+          </div>
+        </>
+      ) : (
         <div className="flex gap-2 md:justify-end">
           <button
             type="button"
@@ -186,21 +178,19 @@ function BrowserInstallPrompt() {
             앱 설치하기
           </button>
         </div>
-      </PromptSurface>
-    );
-  }
-
-  return null;
+      )}
+    </PromptSurface>
+  );
 }
 
 // 설치 안내 면: ModalDialog(덮개를 누르거나 Escape로 닫힘, 다음 안내까지 쉬는 기간을 남긴다).
 // 패널은 대화상자 대신 아래쪽에 뜨는 팝오버 모양이다. 모바일은 가장자리에서 12px 안쪽, 데스크톱은 오른쪽 아래 360px.
 function PromptSurface({
-  isClosing,
+  open,
   onClose,
   children,
 }: {
-  isClosing: boolean;
+  open: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -208,20 +198,12 @@ function PromptSurface({
 
   return (
     <ModalDialog
-      open
+      open={open}
       onClose={onClose}
       aria-labelledby={titleId}
       closeOnOverlayClick
-      overlayClassName={cn(
-        'p-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:items-end md:justify-end md:p-6',
-        isClosing ? 'opacity-0 transition-opacity duration-300' : 'animate-fade-in'
-      )}
-      className={cn(
-        'gap-3 rounded-panel p-5 shadow-popover md:w-[360px]',
-        isClosing
-          ? 'translate-y-1 opacity-0 transition-[opacity,translate] duration-300'
-          : 'ui-panel-enter'
-      )}
+      overlayClassName="p-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:items-end md:justify-end md:p-6"
+      className="gap-3 rounded-panel p-5 shadow-popover md:w-[360px]"
     >
       <div className="flex items-start gap-3">
         <h2 id={titleId} className="m-0 flex-1 pt-2 text-[15px] font-bold">

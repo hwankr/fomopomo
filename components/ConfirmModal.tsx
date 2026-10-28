@@ -52,8 +52,8 @@ export default function ConfirmModal({
             aria-describedby={messageId}
             // 되돌릴 수 없는 동작이면 안전한 취소에, 아니면 확인에 먼저 포커스를 둔다.
             initialFocusRef={tone === 'danger' ? cancelRef : confirmRef}
-            overlayClassName="z-70 animate-fade-in"
-            className="animate-scale-in gap-3 md:gap-4"
+            overlayClassName="z-70"
+            className="gap-3 md:gap-4"
         >
             <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
             <h2 id={titleId} className="ui-dialog-title">

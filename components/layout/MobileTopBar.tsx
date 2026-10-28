@@ -20,6 +20,8 @@ export default function MobileTopBar({ start, center, end, sticky = false, class
 
   return (
     <div
+      // 화면을 옮길 때 본문만 떠오르고 상단 바는 그대로 있게 한다(RouteEnter).
+      data-shell-header=""
       className={cn(
         'relative z-[5] h-[calc(44px+env(safe-area-inset-top))] w-full pt-[env(safe-area-inset-top)] md:hidden',
         hasCenter

@@ -55,8 +55,7 @@ export default function LogoutDialog({ open, onClose, beforeLogout, onLogoutFail
       aria-labelledby={titleId}
       aria-describedby={messageId}
       initialFocusRef={confirmRef}
-      overlayClassName="animate-fade-in"
-      className="animate-scale-in gap-3.5 md:max-w-[400px] md:gap-5"
+      className="gap-3.5 md:max-w-[400px] md:gap-5"
     >
       <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
       <h2 id={titleId} className="ui-dialog-title">로그아웃할까요?</h2>
