@@ -1,13 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
+import Avatar from '@/components/ui/Avatar';
 
 interface FriendRequestListProps {
   session: Session;
   refreshTrigger: number;
   onUpdate: () => void;
+  /** 앱 셸이 구독하는 받은 요청 수. 바뀌면(새 요청 도착 등) 목록을 다시 불러온다. */
+  incomingCount?: number;
+  /** 받은 요청 수가 바뀔 때마다 알린다(탭 라벨용). */
+  onCountChange?: (count: number) => void;
 }
 
 interface FriendRequest {
@@ -16,9 +22,22 @@ interface FriendRequest {
   created_at: string;
 }
 
-export default function FriendRequestList({ session, refreshTrigger, onUpdate }: FriendRequestListProps) {
+function formatRequestDate(createdAt: string) {
+  const date = new Date(createdAt);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return `${sameYear ? '' : `${date.getFullYear()}년 `}${date.getMonth() + 1}월 ${date.getDate()}일에 받은 요청`;
+}
+
+export default function FriendRequestList({
+  session,
+  refreshTrigger,
+  onUpdate,
+  incomingCount,
+  onCountChange,
+}: FriendRequestListProps) {
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -30,13 +49,15 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setRequests(data || []);
+      const nextRequests = data || [];
+      setRequests(nextRequests);
+      onCountChange?.(nextRequests.length);
     } catch (error) {
       console.error('Error fetching requests:', error);
     } finally {
       setLoading(false);
     }
-  }, [session.user.id]);
+  }, [onCountChange, session.user.id]);
 
   useEffect(() => {
     const load = async () => {
@@ -44,9 +65,10 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
     };
 
     void load();
-  }, [fetchRequests, refreshTrigger]);
+  }, [fetchRequests, refreshTrigger, incomingCount]);
 
   const handleAccept = async (requestId: string) => {
+    setPendingId(requestId);
     try {
       const { error } = await supabase.rpc('accept_friend_request', { request_id: requestId });
       if (error) throw error;
@@ -54,11 +76,14 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
       fetchRequests();
     } catch (error) {
       console.error('Error accepting request:', error);
-      alert('친구 요청 수락에 실패했습니다.');
+      toast.error('친구 요청을 수락하지 못했어요.');
+    } finally {
+      setPendingId(null);
     }
   };
 
   const handleReject = async (requestId: string) => {
+    setPendingId(requestId);
     try {
       const { error } = await supabase.rpc('reject_friend_request', { request_id: requestId });
       if (error) throw error;
@@ -66,44 +91,63 @@ export default function FriendRequestList({ session, refreshTrigger, onUpdate }:
       fetchRequests();
     } catch (error) {
       console.error('Error rejecting request:', error);
-      alert('친구 요청 거절에 실패했습니다.');
+      toast.error('친구 요청을 거절하지 못했어요.');
+    } finally {
+      setPendingId(null);
     }
   };
 
-  if (loading) return <div className="text-gray-500">요청 목록을 불러오는 중...</div>;
-
-  if (requests.length === 0) {
-    return <div className="text-gray-500">받은 친구 요청이 없습니다.</div>;
-  }
+  const message = loading
+    ? '받은 요청을 불러오는 중이에요.'
+    : requests.length === 0
+      ? '받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.'
+      : null;
 
   return (
-    <ul className="space-y-3">
-      {requests.map((req) => (
-        <li key={req.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl hover:border-indigo-100 dark:hover:border-indigo-900 transition-colors">
-          <div className="mb-3 sm:mb-0 min-w-0 flex-1 mr-4">
-            <p className="font-medium text-gray-900 dark:text-white truncate" title={req.sender_email}>
-              {req.sender_email}
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {new Date(req.created_at).toLocaleDateString()}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleAccept(req.id)}
-              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 text-sm font-medium rounded-lg transition-colors"
-            >
-              수락
-            </button>
-            <button
-              onClick={() => handleReject(req.id)}
-              className="px-3 py-1.5 text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 text-sm font-medium rounded-lg transition-colors"
-            >
-              거절
-            </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <section aria-label="받은 친구 요청" className="flex flex-col gap-0.5">
+      {message ? (
+        <p className="m-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]">{message}</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {requests.map((req) => {
+            const busy = pendingId === req.id;
+            return (
+              <li
+                key={req.id}
+                className="flex min-h-20 items-center gap-3 rounded-tile p-2 md:min-h-[92px] md:flex-wrap md:gap-4 md:rounded-2xl md:px-3 md:py-2.5"
+              >
+                <Avatar name={req.sender_email} className="bg-surface text-ink md:size-10 md:text-[15px]" />
+                <div className="flex min-w-0 flex-1 flex-col gap-px md:basis-[200px] md:gap-0.5">
+                  <span className="truncate text-[15px] font-semibold md:text-base" title={req.sender_email}>
+                    {req.sender_email}
+                  </span>
+                  <span className="text-xs text-ink-muted md:text-[13px]">{formatRequestDate(req.created_at)}</span>
+                </div>
+                <div className="flex shrink-0 gap-1.5 md:gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleReject(req.id)}
+                    disabled={busy}
+                    aria-label={`${req.sender_email} 친구 요청 거절`}
+                    className="ui-button-secondary min-h-10 rounded-control px-3 text-sm md:min-h-11 md:rounded-tile md:px-[18px] md:text-[15px]"
+                  >
+                    거절
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAccept(req.id)}
+                    disabled={busy}
+                    aria-label={`${req.sender_email} 친구 요청 수락`}
+                    className="ui-button-primary ui-press min-h-10 rounded-control px-3.5 text-sm md:min-h-11 md:rounded-tile md:px-5 md:text-[15px]"
+                  >
+                    수락
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

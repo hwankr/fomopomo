@@ -10,12 +10,22 @@ interface LiveStudyDurationProps {
   className?: string;
 }
 
-function calculateLiveSeconds(studyStartTime: string): number {
-  const now = Date.now();
+/**
+ * 지금 진행 중인 공부가 since(기본: 오늘 공부일 시작) 이후로 쌓은 초.
+ * 공부일·공부주 경계 전에 시작했으면 경계부터 센다.
+ */
+export function getLiveSeconds(
+  studyStartTime: string,
+  since: Date = getDayStart(),
+  now: number = Date.now()
+): number {
   const startTime = new Date(studyStartTime).getTime();
-  const dayStartMs = getDayStart().getTime();
-  const effectiveStart = Math.max(startTime, dayStartMs);
+  const effectiveStart = Math.max(startTime, since.getTime());
   return Math.max(0, Math.floor((now - effectiveStart) / 1000));
+}
+
+function calculateLiveSeconds(studyStartTime: string): number {
+  return getLiveSeconds(studyStartTime);
 }
 
 function formatDuration(seconds: number): string {
@@ -44,6 +54,39 @@ export function formatDurationCompact(seconds: number): string {
   }
 
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+/** 시:분(예: 2:05). 친구 순위처럼 초가 필요 없는 누적 시간에 쓴다. */
+export function formatHoursMinutes(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  return `${hours}:${minutes.toString().padStart(2, '0')}`;
+}
+
+/**
+ * active인 동안 1초마다 바뀌는 지금 시각(ms). 여러 줄의 실시간 시간을 한 시계로 맞춰
+ * 계산할 때 쓴다(예: 친구 순위 정렬). active가 아니면 마지막 값에서 멈춘다.
+ */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    const update = () => {
+      setNow(Date.now());
+    };
+
+    update();
+    const interval = setInterval(update, 1000);
+
+    return () => clearInterval(interval);
+  }, [active]);
+
+  return now;
 }
 
 export function useLiveStudyDuration(

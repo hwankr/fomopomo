@@ -1,83 +1,46 @@
-'use client';
+import { cn } from '@/lib/utils';
 
-import { useLiveStudyDuration, formatDurationCompact } from '@/components/common/LiveStudyDuration';
+export type FriendStatus = 'online' | 'offline' | 'studying' | 'paused' | null;
 
-interface FriendCardStatusProps {
-    status: 'online' | 'offline' | 'studying' | 'paused' | null;
-    task: string | null;
-    studyStartTime: string | null;
-    totalStopwatchTime?: number | null;
-    dailyStudyTime?: number; // 당일 누적 공부 시간 (초)
+type StatusKey = NonNullable<FriendStatus>;
+
+const STATUS_WORD: Record<StatusKey, string> = {
+    studying: '공부 중',
+    paused: '일시정지',
+    online: '접속 중',
+    offline: '오프라인',
+};
+
+const STATUS_DOT: Record<StatusKey, string> = {
+    studying: 'bg-pomo',
+    paused: 'bg-away',
+    online: 'bg-rest',
+    offline: 'bg-bead-past',
+};
+
+interface FriendStatusBadgeProps {
+    status: FriendStatus;
+    task?: string | null;
+    className?: string;
 }
 
 /**
- * Real-time status badge for friend card
- * Displays live studying duration when friend is studying
- * Now includes daily accumulated study time like group page
+ * 친구 순위 이름 아래의 상태 줄: 색 점 + 상태 말(회색) + 공부 중·일시정지일 때 지금 하는 작업.
+ * 실시간 시간은 순위의 오늘·이번 주 칸이 보여 준다.
  */
-export function FriendStatusBadge({ status, task, studyStartTime, totalStopwatchTime, dailyStudyTime = 0 }: FriendCardStatusProps) {
-    // Track live time with saved daily time when actively studying
-    const liveSeconds = useLiveStudyDuration(
-        status === 'studying' ? studyStartTime : null,
-        dailyStudyTime,
-        true // include saved daily time
+export function FriendStatusBadge({ status, task, className }: FriendStatusBadgeProps) {
+    const key: StatusKey = status ?? 'offline';
+    const currentTask = key === 'studying' || key === 'paused' ? task?.trim() : null;
+
+    return (
+        <span className={cn('flex min-w-0 items-center gap-1.5 text-xs text-ink-muted md:gap-2 md:text-[13px]', className)}>
+            <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full md:size-2', STATUS_DOT[key])} />
+            <span className="shrink-0">{STATUS_WORD[key]}</span>
+            {currentTask ? (
+                <span className="min-w-0 truncate" title={currentTask}>
+                    {currentTask}
+                </span>
+            ) : null}
+        </span>
     );
-
-    // For paused state: show daily time + current stopwatch time
-    const pausedSeconds = dailyStudyTime + (totalStopwatchTime || 0);
-
-    // Determine what time to display
-    const displaySeconds = status === 'studying' 
-        ? liveSeconds 
-        : status === 'paused' 
-            ? pausedSeconds 
-            : dailyStudyTime;
-
-    // Format elapsed time for display
-    const formatTime = (seconds: number) => {
-        if (seconds <= 0) return '';
-        return ` ${formatDurationCompact(seconds)}`;
-    };
-
-    switch (status) {
-        case 'studying':
-            return (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300">
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                    <span className="min-w-0 truncate" title={`공부 중${formatTime(displaySeconds)}${task ? ` • ${task}` : ''}`}>
-                        공부 중{formatTime(displaySeconds)}
-                        {task ? ` • ${task}` : ''}
-                    </span>
-                </span>
-            );
-        case 'paused':
-            return (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    <span className="min-w-0 truncate" title={`일시정지${formatTime(displaySeconds)}${task ? ` • ${task}` : ''}`}>
-                        일시정지{formatTime(displaySeconds)}
-                        {task ? ` • ${task}` : ''}
-                    </span>
-                </span>
-            );
-        case 'online':
-            return (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    <span className="min-w-0 truncate" title={`온라인${dailyStudyTime > 0 ? formatTime(dailyStudyTime) : ''}`}>
-                        온라인{dailyStudyTime > 0 ? formatTime(dailyStudyTime) : ''}
-                    </span>
-                </span>
-            );
-        default:
-            return (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-gray-400" />
-                    <span className="min-w-0 truncate" title={`오프라인${dailyStudyTime > 0 ? formatTime(dailyStudyTime) : ''}`}>
-                        오프라인{dailyStudyTime > 0 ? formatTime(dailyStudyTime) : ''}
-                    </span>
-                </span>
-            );
-    }
 }
-
