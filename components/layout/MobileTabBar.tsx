@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Calendar, LayoutGrid, Timer, User, Users, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import { getActiveSection, type AppSection } from './navigation';
 import { useShell } from './ShellProvider';
 
@@ -24,8 +25,11 @@ export default function MobileTabBar() {
   const { friendRequestCount, friendRequestPulse } = useShell();
   // 탭 바가 보이는 동안 새 요청이 오면 친구 탭의 점이 한 번 톡 튄다. 처음 불러올 때, 화면을 옮길 때,
   // 탭 바가 없는 화면(설정 등)에 있는 동안 온 요청은 튀지 않는다. 점이 없는 동안에는 기준을 지금 값으로 맞춘다.
+  // 튄 뒤에는(데스크톱 너비라 탭 바가 숨어 돌 것이 없으면 바로) 기준을 옮겨, 너비가 바뀌어 탭 바가 보여도 다시 튀지 않는다.
   const [quietPulse, setQuietPulse] = useState(friendRequestPulse);
   if ((!active || friendRequestCount === 0) && quietPulse !== friendRequestPulse) setQuietPulse(friendRequestPulse);
+  const dotRef = useRef<HTMLSpanElement>(null);
+  usePlayOnce(friendRequestPulse !== quietPulse ? friendRequestPulse : null, dotRef, setQuietPulse);
 
   if (!active) return null;
 
@@ -63,6 +67,7 @@ export default function MobileTabBar() {
                   <span
                     // 새 요청마다 새로 붙여 팝을 다시 재생한다.
                     key={friendRequestPulse}
+                    ref={dotRef}
                     aria-hidden="true"
                     className={cn(
                       'absolute -top-0.5 -right-1 size-[7px] rounded-full bg-pomo',

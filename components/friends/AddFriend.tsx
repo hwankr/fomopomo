@@ -1,15 +1,18 @@
 'use client';
 
-import { useId, useState, type AnimationEvent } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/ui/Avatar';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import { cn } from '@/lib/utils';
 
 interface AddFriendProps {
   session: Session;
   onFriendAdded: () => void;
+  /** 이 패널이 보이는지(찾기 탭). 숨으면 남은 피드백 표시를 바로 뗀다. */
+  active?: boolean;
 }
 
 // 줄을 보여 줄지 정하는 느슨한 검사. 실제 검증은 input[type=email]과 서버가 한다.
@@ -39,7 +42,7 @@ function getRpcErrorMessage(error: unknown) {
   return '요청을 보내지 못했어요.';
 }
 
-export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
+export default function AddFriend({ session, onFriendAdded, active = true }: AddFriendProps) {
   const [email, setEmail] = useState('');
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,10 +51,13 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
     text: string;
   } | null>(null);
   // 사용자 동작으로 나타난 결과 줄·보냄 체크·안내 문구는 한 번만 움직인다. 탭 패널은 숨겼다(hidden) 보이면
-  // CSS 애니메이션이 다시 돌므로, 애니메이션이 끝나면 클래스를 뗀다.
+  // CSS 애니메이션이 다시 돌므로, 다 돌면(usePlayOnce) 또는 패널이 숨으면 클래스를 뗀다.
   const [rowEntering, setRowEntering] = useState(false);
   const [sentPopping, setSentPopping] = useState(false);
   const [messageEntering, setMessageEntering] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  const checkRef = useRef<SVGSVGElement>(null);
+  const messageRef = useRef<HTMLParagraphElement>(null);
   const formId = useId();
   const inputId = useId();
 
@@ -60,10 +66,6 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
   const showMessage = (next: { type: 'success' | 'error'; text: string }) => {
     setMessage(next);
     setMessageEntering(true);
-  };
-
-  const settle = (event: AnimationEvent, done: () => void) => {
-    if (event.target === event.currentTarget) done();
   };
 
   const handleAddFriend = async (event: React.FormEvent) => {
@@ -108,6 +110,15 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
     setLastHasTarget(hasTarget);
     setRowEntering(hasTarget);
   }
+  // 다른 탭을 고르면 패널을 숨기는 그 렌더에서 뗀다. 숨김으로 취소된 애니메이션의 소식은 패널이 다시 보인 뒤에 올 수 있다.
+  if (!active && (rowEntering || sentPopping || messageEntering)) {
+    setRowEntering(false);
+    setSentPopping(false);
+    setMessageEntering(false);
+  }
+  usePlayOnce(rowEntering || null, rowRef, () => setRowEntering(false));
+  usePlayOnce(sentPopping || null, checkRef, () => setSentPopping(false));
+  usePlayOnce(message && messageEntering ? message : null, messageRef, () => setMessageEntering(false));
 
   return (
     <section aria-label="친구 찾기" className="flex flex-col gap-3 md:gap-4">
@@ -138,7 +149,7 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
       {target ? (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
           <li
-            onAnimationEnd={rowEntering ? (event) => settle(event, () => setRowEntering(false)) : undefined}
+            ref={rowRef}
             className={cn(
               'flex min-h-[72px] items-center gap-3 rounded-tile px-2 py-1.5 md:min-h-[82px] md:gap-4 md:rounded-2xl md:px-3 md:py-2',
               rowEntering && 'animate-fade-up',
@@ -158,7 +169,7 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
                   aria-hidden="true"
                   size={16}
                   strokeWidth={2.2}
-                  onAnimationEnd={() => setSentPopping(false)}
+                  ref={checkRef}
                   className={cn('shrink-0', sentPopping && 'animate-pop-in')}
                 />
                 요청 보냄
@@ -182,7 +193,7 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
       {/* 늘 그려 두는 알림 영역이라 결과가 바뀔 때마다 보조기기가 읽는다. */}
       <p
         role="status"
-        onAnimationEnd={messageEntering ? (event) => settle(event, () => setMessageEntering(false)) : undefined}
+        ref={messageRef}
         className={cn(
           'm-0 px-2 text-sm empty:hidden md:px-3',
           message?.type === 'error' ? 'text-pomo-deep' : 'text-ink-muted',

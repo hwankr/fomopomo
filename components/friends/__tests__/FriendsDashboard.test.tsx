@@ -23,34 +23,36 @@ vi.mock('../../Navbar', () => ({
 }));
 
 vi.mock('../FriendList', () => {
-  function FriendListStub({ refreshTrigger, onSummaryChange }: {
+  function FriendListStub({ refreshTrigger, onSummaryChange, active }: {
     refreshTrigger: number;
     onSummaryChange?: (summary: { friendCount: number; studyingCount: number } | null) => void;
+    active?: boolean;
   }) {
     useEffect(() => {
       onSummaryChange?.({ friendCount: 6, studyingCount: 2 });
     }, [onSummaryChange]);
-    return <p>friend list (refresh {refreshTrigger})</p>;
+    return <p data-active={String(active)}>friend list (refresh {refreshTrigger})</p>;
   }
   return { default: FriendListStub };
 });
 
 vi.mock('../FriendRequestList', () => {
-  function FriendRequestListStub({ incomingCount, onCountChange }: {
+  function FriendRequestListStub({ incomingCount, onCountChange, active }: {
     incomingCount?: number;
     onCountChange?: (count: number) => void;
+    active?: boolean;
   }) {
     useEffect(() => {
       onCountChange?.(2);
     }, [onCountChange]);
-    return <p>request list (incoming {incomingCount})</p>;
+    return <p data-active={String(active)}>request list (incoming {incomingCount})</p>;
   }
   return { default: FriendRequestListStub };
 });
 
 vi.mock('../AddFriend', () => ({
-  default: ({ onFriendAdded }: { onFriendAdded: () => void }) => (
-    <button type="button" onClick={onFriendAdded}>send request</button>
+  default: ({ onFriendAdded, active }: { onFriendAdded: () => void; active?: boolean }) => (
+    <button type="button" data-active={String(active)} onClick={onFriendAdded}>send request</button>
   ),
 }));
 
@@ -125,6 +127,23 @@ describe('FriendsDashboard', () => {
     fireEvent.click(getTab(/^요청/));
     expect(panel(/request list/)).toHaveClass('animate-fade-in');
     expect(panel(/friend list/)).not.toHaveClass('animate-fade-in');
+  });
+
+  it('tells each panel whether it is shown', () => {
+    window.history.replaceState(null, '', '/friends?tab=requests');
+    render(<FriendsDashboard session={session as never} />);
+    // 숨은 패널은 남은 피드백 표시를 떼고, 숨은 친구 패널에 생긴 새 친구 줄은 패널이 보일 때 한 번 떠오른다.
+    const shown = () => [
+      screen.getByText(/friend list/),
+      screen.getByText(/request list/),
+      screen.getByRole('button', { name: 'send request', hidden: true }),
+    ].map((panel) => panel.getAttribute('data-active'));
+
+    expect(shown()).toEqual(['false', 'true', 'false']);
+    fireEvent.click(getTab(/^친구/));
+    expect(shown()).toEqual(['true', 'false', 'false']);
+    fireEvent.click(getTab(/^찾기/));
+    expect(shown()).toEqual(['false', 'false', 'true']);
   });
 
   it('moves between tabs with arrow, Home and End keys', () => {

@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateCssAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const { supabaseMock, toastMock } = vi.hoisted(() => {
   const orderMock = vi.fn();
@@ -147,19 +148,65 @@ describe('FriendRequestList', () => {
     }
   });
 
-  it('fades the empty copy in only after the user handled the last request', async () => {
-    supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [pending[0]], error: null });
-    render(<FriendRequestList session={session as never} refreshTrigger={0} onUpdate={vi.fn()} />);
-    await screen.findByText('sua@example.com');
-    supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [], error: null });
+  describe('empty copy after the last request', () => {
+    let animations: ReturnType<typeof simulateCssAnimations>;
+    beforeEach(() => {
+      animations = simulateCssAnimations();
+    });
+    afterEach(() => animations.restore());
 
-    fireEvent.click(screen.getByRole('button', { name: 'sua@example.com 친구 요청 거절' }));
+    // 친구 화면의 탭 패널처럼 숨겼다(hidden) 보인다.
+    const Panel = ({ shown = true }: { shown?: boolean }) => (
+      <div hidden={!shown}>
+        <FriendRequestList session={session as never} refreshTrigger={0} onUpdate={vi.fn()} active={shown} />
+      </div>
+    );
+    const emptyCopy = '받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.';
 
-    const empty = await screen.findByText('받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.');
-    expect(empty).toHaveClass('animate-fade-in');
-    // 한 번 돌면 떼어, 탭을 다시 열어도 되풀이하지 않는다.
-    fireEvent.animationEnd(empty);
-    expect(empty).not.toHaveClass('animate-fade-in');
+    async function handleTheLastRequest() {
+      supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [pending[0]], error: null });
+      const view = render(<Panel />);
+      await screen.findByText('sua@example.com');
+      supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [], error: null });
+      fireEvent.click(screen.getByRole('button', { name: 'sua@example.com 친구 요청 거절' }));
+      // 처리한 줄이 제자리에서 사라진 뒤에 문구가 나타난다.
+      const leaving = await waitFor(() => {
+        const row = screen.getByText('sua@example.com').closest('li')!;
+        expect(row).toHaveClass('animate-fade-out');
+        return row;
+      });
+      expect(screen.queryByText(emptyCopy)).not.toBeInTheDocument();
+      await animations.finish(leaving);
+      return { ...view, empty: await screen.findByText(emptyCopy) };
+    }
+
+    it('fades the empty copy in once after the handled row has gone', async () => {
+      const { empty, rerender } = await handleTheLastRequest();
+      expect(empty).toHaveClass('animate-fade-in');
+      expect(animations.isRunning(empty)).toBe(true);
+      // 한 번 돌면 떼어, 탭을 다시 열어도 되풀이하지 않는다.
+      await animations.finish(empty);
+      expect(empty).not.toHaveClass('animate-fade-in');
+      rerender(<Panel shown={false} />);
+      rerender(<Panel />);
+      await animations.sync();
+      expect(empty).not.toHaveClass('animate-fade-in');
+      expect(animations.started(empty)).toBe(1);
+    });
+
+    it('does not replay the empty copy when the panel is hidden before it finishes and shown again', async () => {
+      const { empty, rerender } = await handleTheLastRequest();
+      expect(empty).toHaveClass('animate-fade-in');
+
+      rerender(<Panel shown={false} />);
+      expect(empty).not.toHaveClass('animate-fade-in');
+      animations.flush();
+      rerender(<Panel />);
+      await animations.sync();
+      expect(screen.getByText(emptyCopy)).toBe(empty);
+      expect(empty).not.toHaveClass('animate-fade-in');
+      expect(animations.started(empty)).toBe(1);
+    });
   });
 
   it('shows the empty copy on load without motion', async () => {

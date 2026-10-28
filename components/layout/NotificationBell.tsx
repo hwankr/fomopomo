@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import * as Popover from '@radix-ui/react-popover';
 import { Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import { useShell } from './ShellProvider';
 
 type NotificationBellProps = {
@@ -19,8 +20,12 @@ export default function NotificationBell({ variant = 'header', className }: Noti
   const { friendRequestCount, friendRequestPulse } = useShell();
   const [open, setOpen] = useState(false);
   // 이 종이 그려진 뒤 새 요청이 오면 점이 한 번 톡 튄다. 화면을 옮겨 종을 새로 그리거나 처음 불러올 때는 튀지 않는다.
-  const [mountedPulse] = useState(friendRequestPulse);
+  // 데스크톱 헤더와 모바일 상단 바의 종은 함께 그려지고 너비에 따라 한쪽만 보인다. 튄 뒤에는(숨은 쪽은 돌 것이 없어 바로)
+  // 기준을 그 요청으로 옮겨, 너비가 바뀌어 다른 쪽 종이 보여도 다시 튀지 않는다.
+  const [quietPulse, setQuietPulse] = useState(friendRequestPulse);
+  const dotRef = useRef<HTMLSpanElement>(null);
   const hasRequests = friendRequestCount > 0;
+  usePlayOnce(hasRequests && friendRequestPulse !== quietPulse ? friendRequestPulse : null, dotRef, setQuietPulse);
   const isHeader = variant === 'header';
 
   return (
@@ -39,11 +44,12 @@ export default function NotificationBell({ variant = 'header', className }: Noti
             <span
               // 새 요청마다 새로 붙여 팝을 다시 재생한다.
               key={friendRequestPulse}
+              ref={dotRef}
               aria-hidden="true"
               className={cn(
                 'absolute size-[7px] rounded-full bg-pomo',
                 isHeader ? 'top-2 right-[9px]' : 'top-[9px] right-2.5',
-                friendRequestPulse !== mountedPulse && 'animate-pop-in',
+                friendRequestPulse !== quietPulse && 'animate-pop-in',
               )}
             />
           ) : null}

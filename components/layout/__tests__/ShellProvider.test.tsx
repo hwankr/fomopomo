@@ -2,6 +2,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import type { Session } from '@supabase/supabase-js';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateCssAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const state = vi.hoisted(() => ({
   session: null as unknown,
@@ -50,21 +51,30 @@ describe('ShellProvider friend request pulse and the bell badge', () => {
     expect(badge()).not.toHaveClass('animate-pop-in');
   });
 
-  it('pops once when a new request arrives, but not when the bell is drawn again on another screen', () => {
-    state.requests = { count: 1, loaded: true };
-    const { rerender } = render(<App />);
-    expect(badge()).not.toHaveClass('animate-pop-in');
+  it('pops once when a new request arrives, but not when the bell is drawn again on another screen', async () => {
+    const animations = simulateCssAnimations();
+    try {
+      state.requests = { count: 1, loaded: true };
+      const { rerender } = render(<App />);
+      expect(badge()).not.toHaveClass('animate-pop-in');
 
-    state.requests = { count: 2, loaded: true };
-    rerender(<App />);
-    expect(probe()).toBe('2/1');
-    expect(badge()).toHaveClass('animate-pop-in');
+      state.requests = { count: 2, loaded: true };
+      rerender(<App />);
+      expect(probe()).toBe('2/1');
+      const popped = badge()!;
+      expect(popped).toHaveClass('animate-pop-in');
 
-    // 다시 그려도(같은 펄스) 그대로이고, 화면을 옮겨 종을 새로 그리면 튀지 않는다.
-    rerender(<App />);
-    expect(probe()).toBe('2/1');
-    rerender(<App bellKey="next-screen" />);
-    expect(badge()).not.toHaveClass('animate-pop-in');
+      // 다시 그려도(같은 펄스) 그대로이고, 다 튀면 뗀다. 화면을 옮겨 종을 새로 그리면 튀지 않는다.
+      rerender(<App />);
+      expect(probe()).toBe('2/1');
+      expect(badge()).toBe(popped);
+      await animations.finish(popped);
+      expect(popped).not.toHaveClass('animate-pop-in');
+      rerender(<App bellKey="next-screen" />);
+      expect(badge()).not.toHaveClass('animate-pop-in');
+    } finally {
+      animations.restore();
+    }
   });
 
   it('ignores decreases and account switches', () => {

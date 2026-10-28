@@ -157,7 +157,7 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
       {session ? (
         <div className="mx-auto box-border w-full max-w-[960px] px-3 pt-1 pb-8 md:px-10 md:pt-2 md:pb-16">
           <div role="tabpanel" id={panelId('friends')} aria-labelledby={tabId('friends')} hidden={tab !== 'friends'} className={panelClass('friends')}>
-            <FriendList session={session} refreshTrigger={refreshTrigger} onSummaryChange={setSummary} />
+            <FriendList session={session} refreshTrigger={refreshTrigger} onSummaryChange={setSummary} active={tab === 'friends'} />
           </div>
           <div role="tabpanel" id={panelId('requests')} aria-labelledby={tabId('requests')} hidden={tab !== 'requests'} className={panelClass('requests')}>
             <FriendRequestList
@@ -166,10 +166,11 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
               onUpdate={refreshData}
               incomingCount={friendRequestCount}
               onCountChange={setRequestCount}
+              active={tab === 'requests'}
             />
           </div>
           <div role="tabpanel" id={panelId('search')} aria-labelledby={tabId('search')} hidden={tab !== 'search'} className={panelClass('search')}>
-            <AddFriend session={session} onFriendAdded={refreshData} />
+            <AddFriend session={session} onFriendAdded={refreshData} active={tab === 'search'} />
           </div>
         </div>
       ) : (

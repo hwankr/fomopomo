@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type AnimationEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import Avatar from '@/components/ui/Avatar';
 import { getRunningAnimations, prefersReducedMotion, whenAnimationsFinish } from '@/components/ui/motion';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import { cn } from '@/lib/utils';
 
 interface FriendRequestListProps {
@@ -16,6 +17,8 @@ interface FriendRequestListProps {
   incomingCount?: number;
   /** 받은 요청 수가 바뀔 때마다 알린다(탭 라벨용). */
   onCountChange?: (count: number) => void;
+  /** 이 패널이 보이는지(요청 탭). 숨으면 남은 피드백 표시를 바로 뗀다. */
+  active?: boolean;
 }
 
 interface FriendRequest {
@@ -36,6 +39,7 @@ export default function FriendRequestList({
   onUpdate,
   incomingCount,
   onCountChange,
+  active = true,
 }: FriendRequestListProps) {
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +49,7 @@ export default function FriendRequestList({
   const leavingRef = useRef<HTMLLIElement>(null);
   // 사용자가 마지막 요청을 처리해 목록이 비었을 때만 빈 상태 문구가 서서히 나타난다.
   const [emptiedByUser, setEmptiedByUser] = useState(false);
+  const emptyRef = useRef<HTMLParagraphElement>(null);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -132,18 +137,20 @@ export default function FriendRequestList({
       ? '받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.'
       : null;
 
-  const settleEmpty = (event: AnimationEvent<HTMLParagraphElement>) => {
-    if (event.target === event.currentTarget) setEmptiedByUser(false);
-  };
+  // 사라지는 줄이 다 빠지고 문구가 그려진 뒤에 한 번 돌고 뗀다. 다른 탭을 골라 패널이 숨으면 그 렌더에서 떼어,
+  // 돌아와도 다시 돌지 않는다.
+  if (!active && emptiedByUser) setEmptiedByUser(false);
+  const emptyEntering = !loading && emptiedByUser && shownRequests.length === 0;
+  usePlayOnce(emptyEntering || null, emptyRef, () => setEmptiedByUser(false));
 
   return (
     <section aria-label="받은 친구 요청" className="flex flex-col gap-0.5">
       {message ? (
         <p
-          onAnimationEnd={emptiedByUser ? settleEmpty : undefined}
+          ref={emptyRef}
           className={cn(
             'm-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]',
-            !loading && emptiedByUser && 'animate-fade-in',
+            emptyEntering && 'animate-fade-in',
           )}
         >
           {message}

@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateCssAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const navigation = vi.hoisted(() => ({ pathname: '/plan' }));
 const shell = vi.hoisted(() => ({ friendRequestCount: 1, friendRequestPulse: 0 }));
@@ -15,12 +16,18 @@ const friendsTab = () => screen.getByRole('link', { name: /^친구/ });
 const requestDot = () => friendsTab().querySelector('span.relative > span');
 
 describe('MobileTabBar motion', () => {
+  let animations: ReturnType<typeof simulateCssAnimations>;
+
   beforeEach(() => {
     navigation.pathname = '/plan';
     shell.friendRequestCount = 1;
     shell.friendRequestPulse = 0;
+    animations = simulateCssAnimations();
   });
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    animations.restore();
+  });
 
   it('gives every tab press feedback and a colour crossfade', () => {
     render(<MobileTabBar />);
@@ -30,7 +37,7 @@ describe('MobileTabBar motion', () => {
     }
   });
 
-  it('pops the friend dot once for a request that arrives while the bar is shown, never on load', () => {
+  it('pops the friend dot once for a request that arrives while the bar is shown, never on load', async () => {
     shell.friendRequestPulse = 3;
     const { rerender } = render(<MobileTabBar />);
     expect(requestDot()).not.toHaveClass('animate-pop-in');
@@ -46,6 +53,10 @@ describe('MobileTabBar motion', () => {
     navigation.pathname = '/groups';
     rerender(<MobileTabBar />);
     expect(requestDot()).toBe(popped);
+    // 다 튀면 뗀다.
+    await animations.finish(popped!);
+    expect(popped).not.toHaveClass('animate-pop-in');
+    expect(animations.started(popped!)).toBe(1);
   });
 
   it('does not pop a request that came in while the bar was hidden or after the dot was gone', () => {

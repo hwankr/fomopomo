@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type AnimationEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Session } from '@supabase/supabase-js';
 import { Bell, BellOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -10,6 +10,7 @@ import { getDayStart, getStudyDayRange, getStudyWeekRange, type TimeRange } from
 import { cn } from '@/lib/utils';
 import Avatar, { getDisplayName } from '@/components/ui/Avatar';
 import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import ConfirmModal from '@/components/ConfirmModal';
 import { formatHoursMinutes, getLiveSeconds, useNow } from '@/components/common/LiveStudyDuration';
 import MemberReportModal from '../MemberReportModal';
@@ -26,6 +27,8 @@ interface FriendListProps {
   refreshTrigger: number;
   /** 친구 수와 지금 공부 중인 친구 수. 불러오는 동안은 null. */
   onSummaryChange?: (summary: FriendListSummary | null) => void;
+  /** 이 목록이 보이는지(친구 탭). 숨어 있는 동안 생긴 새 친구 줄은 보일 때 한 번 떠오르고, 숨으면 남은 피드백 표시를 뗀다. */
+  active?: boolean;
 }
 
 interface FriendProfile {
@@ -159,7 +162,7 @@ export default function FriendList(props: FriendListProps) {
   return <FriendListContent key={props.session.user.id} {...props} />;
 }
 
-function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendListProps) {
+function FriendListContent({ session, refreshTrigger, onSummaryChange, active = true }: FriendListProps) {
   const userId = session.user.id;
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [myProfile, setMyProfile] = useState<FriendProfile | null>(null);
@@ -171,9 +174,25 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
   // 리포트 창은 닫아도 남겨 두어 퇴장 애니메이션을 하고(마지막 친구를 그대로 보인다), 열 때마다 key를 바꿔 새로 그린다.
   const [report, setReport] = useState<{ id: string; name: string; open: boolean; key: number } | null>(null);
   // 다시 불러온 목록에서 처음 보이는 친구(요청 수락 등)와 방금 알림을 끈 친구. 그 줄·표시만 한 번 움직이고,
-  // 애니메이션이 끝나면 비운다(탭을 다시 열거나 순위가 바뀌어 줄이 옮겨져도 다시 돌지 않게).
+  // 다 돌면 또는 보이던 패널이 숨으면 비운다(탭을 다시 열거나 순위가 바뀌어 줄이 옮겨져도 다시 돌지 않게).
   const [newFriendIds, setNewFriendIds] = useState<string[]>([]);
   const [mutedFriendId, setMutedFriendId] = useState<string | null>(null);
+  // 요청 탭에서 수락하면 새 줄은 숨은 친구 패널에 생긴다. 패널이 보인 뒤에야 그 줄들을 표시로 넘겨, 처음 보일 때 한 번 돈다.
+  const [shownNewFriendIds, setShownNewFriendIds] = useState<string[] | null>(null);
+  if (active && newFriendIds.length > 0 && shownNewFriendIds !== newFriendIds) setShownNewFriendIds(newFriendIds);
+  // 다른 탭을 고르면 패널을 숨기는 그 렌더에서 뗀다. 숨김으로 취소된 애니메이션의 소식은 패널이 다시 보인 뒤에 올 수 있다.
+  if (!active && shownNewFriendIds) {
+    setNewFriendIds((prev) => prev.filter((id) => !shownNewFriendIds.includes(id)));
+    setShownNewFriendIds(null);
+  }
+  if (!active && mutedFriendId) setMutedFriendId(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const mutedRef = useRef<SVGSVGElement>(null);
+  usePlayOnce(shownNewFriendIds, listRef, (played) => {
+    setNewFriendIds((prev) => prev.filter((id) => !played.includes(id)));
+    setShownNewFriendIds((current) => (current === played ? null : current));
+  });
+  usePlayOnce(mutedFriendId, mutedRef, (played) => setMutedFriendId((current) => (current === played ? null : current)));
   const [todayTimes, setTodayTimes] = useState<Record<string, number>>({});
   const [weekTimes, setWeekTimes] = useState<Record<string, number>>({});
   const [myTimes, setMyTimes] = useState<StudyTotals>({ today: 0, week: 0 });
@@ -436,10 +455,6 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
   const openReport = (id: string, name: string) =>
     setReport((prev) => ({ id, name, open: true, key: (prev?.key ?? 0) + 1 }));
 
-  const settleNewFriend = (event: AnimationEvent<HTMLLIElement>, id: string) => {
-    if (event.target === event.currentTarget) setNewFriendIds((prev) => prev.filter((item) => item !== id));
-  };
-
   // 마지막 친구를 지워 빈 목록이 돼도 닫히는 창이 끝까지 퇴장하도록 창들은 어느 상태에서나 그린다.
   const dialogs = (
     <>
@@ -536,14 +551,13 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
           </div>
           <span aria-hidden="true" className="w-10 shrink-0" />
         </div>
-        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        <ul ref={listRef} className="m-0 flex list-none flex-col gap-0.5 p-0">
           {rows.map((row, index) => {
             const friend = row.friendship;
             const isNew = friend !== null && newFriendIds.includes(friend.id);
             return (
               <li
                 key={row.key}
-                onAnimationEnd={isNew ? (event) => settleNewFriend(event, row.key) : undefined}
                 className={cn(
                   'flex items-center rounded-tile transition-colors md:rounded-2xl',
                   row.isMe ? 'bg-surface' : 'hover:bg-hover',
@@ -590,7 +604,7 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
                             aria-hidden="true"
                             size={14}
                             strokeWidth={1.8}
-                            onAnimationEnd={() => setMutedFriendId(null)}
+                            ref={mutedFriendId === friend.id ? mutedRef : undefined}
                             className={cn('shrink-0 text-ink-faint', mutedFriendId === friend.id && 'animate-pop-in')}
                           />
                           <span className="sr-only">공부 시작 알림 꺼짐</span>

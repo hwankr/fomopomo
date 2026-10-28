@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { simulateCssAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const { supabaseMock, toastMock } = vi.hoisted(() => {
   const orderMock = vi.fn();
@@ -636,68 +637,202 @@ describe('FriendList', () => {
     expect(screen.getByText('Buddy')).toBeInTheDocument();
   });
 
-  it('raises only a friend that first appears after a refresh, once', async () => {
-    setupFriendshipResponse(onlineFriend);
-    const { rerender } = render(<FriendList session={session as never} refreshTrigger={0} />);
-    await waitFor(() => {
-      expect(screen.getByText('Buddy')).toBeInTheDocument();
+  describe('feedback motion', () => {
+    let animations: ReturnType<typeof simulateCssAnimations>;
+    beforeEach(() => {
+      animations = simulateCssAnimations();
     });
-    // 처음 불러온 친구는 움직이지 않는다.
-    expect(getRankingRow('Buddy').closest('li')).not.toHaveClass('animate-fade-up');
+    afterEach(() => animations.restore());
 
-    // 받은 요청을 수락해 목록을 다시 불러오면 새 친구 줄만 떠오른다.
-    setupFriendshipResponse(onlineFriend, [{
-      id: 'friendship-2',
-      friend_email: 'sua@example.com',
-      friend_id: 'friend-2',
+    // 친구 화면의 친구 탭 패널: 다른 탭을 고르면 숨는다(hidden).
+    const FriendsPanel = ({ shown = true, refreshTrigger = 0 }: { shown?: boolean; refreshTrigger?: number }) => (
+      <div hidden={!shown}>
+        <FriendList session={session as never} refreshTrigger={refreshTrigger} active={shown} />
+      </div>
+    );
+    const friendRow = (email: string, id = 'friend-2') => ({
+      id: `friendship-${id}`,
+      friend_email: email,
+      friend_id: id,
       nickname: null,
       created_at: '2026-10-28T00:00:00.000Z',
       is_notification_enabled: true,
       friend: onlineFriend,
-    }]);
-    rerender(<FriendList session={session as never} refreshTrigger={1} />);
-
-    const newRow = (await screen.findByText('sua@example.com')).closest('li')!;
-    expect(newRow).toHaveClass('animate-fade-up');
-    expect(getRankingRow('Buddy').closest('li')).not.toHaveClass('animate-fade-up');
-
-    // 한 번 돌면 표시를 떼어, 탭을 다시 열거나 다시 불러와도 되풀이하지 않는다.
-    fireEvent.animationEnd(newRow);
-    expect(newRow).not.toHaveClass('animate-fade-up');
-    rerender(<FriendList session={session as never} refreshTrigger={2} />);
-    await waitFor(() => expect(supabaseMock.__mocks.orderMock).toHaveBeenCalledTimes(3));
-    expect(screen.getByText('sua@example.com').closest('li')).not.toHaveClass('animate-fade-up');
-  });
-
-  it('pops the muted bell in once when the user turns notifications off', async () => {
-    setupFriendshipResponse(onlineFriend, [{
-      id: 'friendship-2',
-      friend_email: 'quiet@example.com',
-      friend_id: 'friend-2',
-      nickname: 'Quiet',
-      created_at: '2026-03-18T00:00:00.000Z',
-      is_notification_enabled: false,
-      friend: onlineFriend,
-    }]);
-    render(<FriendList session={session as never} refreshTrigger={0} />);
-    await waitFor(() => {
-      expect(screen.getByText('Buddy')).toBeInTheDocument();
     });
-    const bellIn = (name: string) => getRankingRow(name).querySelector('svg');
-    // 이미 꺼져 있던 친구의 표시는 처음부터 그대로 있다.
-    expect(bellIn('Quiet')).not.toHaveClass('animate-pop-in');
+    const rowOf = (email: string) => screen.getByText(email).closest('li')!;
+    // 숨은 패널 안의 순서(역할 조회는 숨은 요소를 건너뛴다).
+    const rowOrder = () => [...rowOf('Buddy').parentElement!.children].map((row) => row.querySelector('.truncate')?.textContent);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Buddy 친구 메뉴' }));
-    fireEvent.click(await screen.findByRole('button', { name: '공부 시작 알림 끄기' }));
+    it('raises only a friend that first appears after a refresh, once', async () => {
+      setupFriendshipResponse(onlineFriend);
+      const { rerender } = render(<FriendList session={session as never} refreshTrigger={0} />);
+      await waitFor(() => {
+        expect(screen.getByText('Buddy')).toBeInTheDocument();
+      });
+      // 처음 불러온 친구는 움직이지 않는다.
+      expect(getRankingRow('Buddy').closest('li')).not.toHaveClass('animate-fade-up');
 
-    await waitFor(() => {
-      expect(getRankingRow('Buddy')).toHaveAccessibleName(/공부 시작 알림 꺼짐/);
+      // 받은 요청을 수락해 목록을 다시 불러오면 새 친구 줄만 떠오른다.
+      setupFriendshipResponse(onlineFriend, [friendRow('sua@example.com')]);
+      rerender(<FriendList session={session as never} refreshTrigger={1} />);
+
+      const newRow = (await screen.findByText('sua@example.com')).closest('li')!;
+      expect(newRow).toHaveClass('animate-fade-up');
+      expect(getRankingRow('Buddy').closest('li')).not.toHaveClass('animate-fade-up');
+
+      // 한 번 돌면 표시를 떼어, 탭을 다시 열거나 다시 불러와도 되풀이하지 않는다.
+      await animations.finish(newRow);
+      expect(newRow).not.toHaveClass('animate-fade-up');
+      rerender(<FriendList session={session as never} refreshTrigger={2} />);
+      await waitFor(() => expect(supabaseMock.__mocks.orderMock).toHaveBeenCalledTimes(3));
+      expect(screen.getByText('sua@example.com').closest('li')).not.toHaveClass('animate-fade-up');
     });
-    expect(bellIn('Buddy')).toHaveClass('animate-pop-in');
-    expect(bellIn('Quiet')).not.toHaveClass('animate-pop-in');
 
-    fireEvent.animationEnd(bellIn('Buddy')!);
-    expect(bellIn('Buddy')).not.toHaveClass('animate-pop-in');
+    it('raises a friend accepted on the requests tab once, when the friends panel is first shown', async () => {
+      setupFriendshipResponse(onlineFriend);
+      const { rerender } = render(<FriendsPanel />);
+      await screen.findByText('Buddy');
+
+      // 요청 탭에서 두 요청을 수락: 새 줄들은 숨은 친구 패널에 생기고, 거기서는 돌지 않고 기다린다.
+      rerender(<FriendsPanel shown={false} />);
+      setupFriendshipResponse(onlineFriend, [friendRow('sua@example.com')]);
+      rerender(<FriendsPanel shown={false} refreshTrigger={1} />);
+      await screen.findByText('sua@example.com');
+      setupFriendshipResponse(onlineFriend, [friendRow('sua@example.com'), friendRow('min@example.com', 'friend-3')]);
+      rerender(<FriendsPanel shown={false} refreshTrigger={2} />);
+      await screen.findByText('min@example.com');
+      // 숨어 있는 동안 순위가 바뀌어 줄이 옮겨져도(공부 시간 갱신) 표시는 그대로 남는다.
+      mockStudyTimes(() => ({ data: [{ friend_id: 'friend-3', total_seconds: 900 }], error: null }), 0);
+      rerender(<FriendsPanel shown={false} refreshTrigger={3} />);
+      await waitFor(() => expect(rowOrder()[0]).toBe('min@example.com'));
+      await animations.sync();
+      const sua = rowOf('sua@example.com');
+      const min = rowOf('min@example.com');
+      expect(sua).toHaveClass('animate-fade-up');
+      expect(min).toHaveClass('animate-fade-up');
+      expect(animations.started(sua)).toBe(0);
+      expect(animations.started(min)).toBe(0);
+
+      // 친구 탭을 처음 보이면 두 줄이 한 번 떠오르고, 다 돌면 뗀다.
+      rerender(<FriendsPanel refreshTrigger={3} />);
+      expect(animations.isRunning(sua)).toBe(true);
+      expect(animations.isRunning(min)).toBe(true);
+      expect(getRankingRow('Buddy').closest('li')).not.toHaveClass('animate-fade-up');
+      await animations.finish();
+      expect(sua).not.toHaveClass('animate-fade-up');
+      expect(min).not.toHaveClass('animate-fade-up');
+
+      // 탭을 오가도 다시 돌지 않는다.
+      rerender(<FriendsPanel shown={false} refreshTrigger={3} />);
+      rerender(<FriendsPanel refreshTrigger={3} />);
+      await animations.sync();
+      expect(sua).not.toHaveClass('animate-fade-up');
+      expect(animations.started(sua)).toBe(1);
+      expect(animations.started(min)).toBe(1);
+    });
+
+    it('does not replay an accepted friend when the friends panel is hidden mid-play and shown again', async () => {
+      setupFriendshipResponse(onlineFriend);
+      const { rerender } = render(<FriendsPanel shown={false} />);
+      await screen.findByText('Buddy');
+      setupFriendshipResponse(onlineFriend, [friendRow('sua@example.com')]);
+      rerender(<FriendsPanel shown={false} refreshTrigger={1} />);
+      const sua = (await screen.findByText('sua@example.com')).closest('li')!;
+
+      rerender(<FriendsPanel refreshTrigger={1} />);
+      expect(sua).toHaveClass('animate-fade-up');
+      expect(animations.isRunning(sua)).toBe(true);
+
+      // 도는 중에 요청 탭으로 옮기면 그 렌더에서 뗀다. 숨김으로 취소된 뒤 같은 작업 안에서 돌아와도 새로 돌지 않는다.
+      rerender(<FriendsPanel shown={false} refreshTrigger={1} />);
+      expect(sua).not.toHaveClass('animate-fade-up');
+      animations.flush();
+      rerender(<FriendsPanel refreshTrigger={1} />);
+      await animations.sync();
+      expect(rowOf('sua@example.com')).toBe(sua);
+      expect(sua).not.toHaveClass('animate-fade-up');
+      expect(animations.started(sua)).toBe(1);
+    });
+
+    it('shows an accepted friend without motion under reduced motion', async () => {
+      const original = window.matchMedia;
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: (query: string) => ({ matches: query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }),
+      });
+      try {
+        setupFriendshipResponse(onlineFriend);
+        const { rerender } = render(<FriendsPanel shown={false} />);
+        await screen.findByText('Buddy');
+        setupFriendshipResponse(onlineFriend, [friendRow('sua@example.com')]);
+        rerender(<FriendsPanel shown={false} refreshTrigger={1} />);
+        await screen.findByText('sua@example.com');
+
+        rerender(<FriendsPanel refreshTrigger={1} />);
+        expect(rowOf('sua@example.com')).not.toHaveClass('animate-fade-up');
+      } finally {
+        Object.defineProperty(window, 'matchMedia', { configurable: true, value: original });
+      }
+    });
+
+    it('pops the muted bell in once when the user turns notifications off', async () => {
+      setupFriendshipResponse(onlineFriend, [{
+        id: 'friendship-2',
+        friend_email: 'quiet@example.com',
+        friend_id: 'friend-2',
+        nickname: 'Quiet',
+        created_at: '2026-03-18T00:00:00.000Z',
+        is_notification_enabled: false,
+        friend: onlineFriend,
+      }]);
+      const { rerender } = render(<FriendsPanel />);
+      await waitFor(() => {
+        expect(screen.getByText('Buddy')).toBeInTheDocument();
+      });
+      const bellIn = (name: string) => getRankingRow(name).querySelector('svg');
+      // 이미 꺼져 있던 친구의 표시는 처음부터 그대로 있다.
+      expect(bellIn('Quiet')).not.toHaveClass('animate-pop-in');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Buddy 친구 메뉴' }));
+      fireEvent.click(await screen.findByRole('button', { name: '공부 시작 알림 끄기' }));
+
+      await waitFor(() => {
+        expect(getRankingRow('Buddy')).toHaveAccessibleName(/공부 시작 알림 꺼짐/);
+      });
+      const bell = bellIn('Buddy')!;
+      expect(bell).toHaveClass('animate-pop-in');
+      expect(bellIn('Quiet')).not.toHaveClass('animate-pop-in');
+
+      await animations.finish(bell);
+      expect(bell).not.toHaveClass('animate-pop-in');
+      rerender(<FriendsPanel shown={false} />);
+      rerender(<FriendsPanel />);
+      await animations.sync();
+      expect(bell).not.toHaveClass('animate-pop-in');
+      expect(animations.started(bell)).toBe(1);
+    });
+
+    it('does not replay the muted bell when the panel is hidden before it finishes and shown again', async () => {
+      setupFriendshipResponse(onlineFriend);
+      const { rerender } = render(<FriendsPanel />);
+      await screen.findByText('Buddy');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Buddy 친구 메뉴' }));
+      fireEvent.click(await screen.findByRole('button', { name: '공부 시작 알림 끄기' }));
+      await waitFor(() => {
+        expect(getRankingRow('Buddy')).toHaveAccessibleName(/공부 시작 알림 꺼짐/);
+      });
+      const bell = getRankingRow('Buddy').querySelector('svg')!;
+      expect(bell).toHaveClass('animate-pop-in');
+
+      rerender(<FriendsPanel shown={false} />);
+      expect(bell).not.toHaveClass('animate-pop-in');
+      animations.flush();
+      rerender(<FriendsPanel />);
+      await animations.sync();
+      expect(bell).not.toHaveClass('animate-pop-in');
+      expect(animations.started(bell)).toBe(1);
+    });
   });
 
   it('reports friend and studying counts for the page heading', async () => {
