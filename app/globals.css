@@ -291,7 +291,7 @@ body[data-scroll-locked] :is(.ui-scroll-lock-fixed, .ui-dialog-overlay, [data-di
     height: var(--bead-size, 8px);
     border-radius: 9999px;
     background: var(--bead-off, var(--color-bead));
-    transition: background-color 0.4s;
+    transition: background-color var(--duration-emphasized) var(--ease-enter);
   }
 
   .ui-bead[data-state='done'],

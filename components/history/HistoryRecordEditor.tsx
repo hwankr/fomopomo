@@ -81,7 +81,8 @@ export default function HistoryRecordEditor({
       id={id}
       onSubmit={event => { event.preventDefault(); onSave(); }}
       onKeyDown={handleKeyDown}
-      className={inline ? 'flex flex-col gap-2 pb-3 pl-[98px] pt-1' : 'flex flex-col gap-3'}
+      // 펼친 인라인 편집은 행 아래에서 떠오른다. 모바일 대화상자는 ModalDialog가 움직인다.
+      className={inline ? 'flex animate-fade-up flex-col gap-2 pb-3 pl-[98px] pt-1' : 'flex flex-col gap-3'}
     >
       {inline ? (
         <div className="flex gap-2">{memoInput}{subjectSelect}</div>

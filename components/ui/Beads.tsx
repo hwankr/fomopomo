@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
 
 export type BeadState = 'done' | 'current' | 'empty' | 'planned' | 'past';
@@ -31,8 +31,15 @@ type BeadsProps = {
   /** row: 가로 줄, column: 위에서 아래, column-reverse: 아래에서 위로 쌓기(7일 기록) */
   direction?: 'row' | 'column' | 'column-reverse';
   wrap?: boolean;
+  /**
+   * 지금(current)이던 구슬이 끝냄(done)으로 바뀌면 그 구슬을 한 번 튀긴다(animate-pop).
+   * 처음 그릴 때(복원한 진행 포함)와 다른 바뀜(초기화, 일시정지, 다른 단계로 넘어감)에는 움직이지 않는다.
+   */
+  popCompleted?: boolean;
   className?: string;
 };
+
+const NO_POPS: number[] = [];
 
 export function buildBeadStates({
   done = 0,
@@ -77,9 +84,19 @@ export default function Beads({
   gap = 4,
   direction = 'row',
   wrap = false,
+  popCompleted = false,
   className,
 }: BeadsProps) {
   const items = states ?? buildBeadStates({ done, current, planned, total });
+
+  // 바로 앞에 그린 상태와 비교해 방금 끝난 구슬을 찾는다. 상태가 같으면 그대로 두어 다시 그려도 반복하지 않는다.
+  const signature = items.join(' ');
+  const [seen, setSeen] = useState({ signature, items, pops: NO_POPS });
+  if (popCompleted && seen.signature !== signature) {
+    const pops = items.flatMap((state, index) => (state === 'done' && seen.items[index] === 'current' ? [index] : []));
+    setSeen({ signature, items, pops: pops.length ? pops : NO_POPS });
+  }
+  const pops = popCompleted ? seen.pops : NO_POPS;
 
   return (
     <span
@@ -95,7 +112,12 @@ export default function Beads({
       style={{ gap: `${gap}px`, '--bead-size': `${size}px` } as CSSProperties}
     >
       {items.map((state, index) => (
-        <span key={index} aria-hidden="true" data-state={state} className="ui-bead" />
+        <span
+          key={index}
+          aria-hidden="true"
+          data-state={state}
+          className={cn('ui-bead', pops.includes(index) && 'animate-pop')}
+        />
       ))}
     </span>
   );

@@ -419,6 +419,65 @@ describe('최근 활동', () => {
       expect(screen.getAllByText('뽀모도로 0개').length).toBeGreaterThan(0);
     });
 
+    it('접기는 공통 ui-collapse로 움직이고 접히는 순간부터 본문은 inert다', async () => {
+      const { rerender } = render(<HistoryList session={session('user-a')} collapsed={false} onToggleCollapsed={vi.fn()} />);
+      await recordButton(/블록체인 9\/12 복습/);
+      const toggle = screen.getByRole('button', { name: /최근 활동.*접기/ });
+      const body = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+      expect(body).toHaveClass('ui-collapse');
+      expect(body).toHaveAttribute('data-state', 'open');
+      rerender(<HistoryList session={session('user-a')} collapsed onToggleCollapsed={vi.fn()} />);
+      expect(body).toHaveAttribute('data-state', 'closed');
+      expect(body).toHaveAttribute('inert');
+    });
+
+    describe('새 기록 행', () => {
+      const listItem = (name: RegExp) => screen.getByRole('button', { name }).closest('li')!;
+      const risingRows = () => Array.from(document.querySelectorAll('li.animate-fade-up'));
+
+      it('저장 뒤 다시 불러온 목록에서 새로 생긴 행만 한 번 떠오른다', async () => {
+        const props = { session: session('user-a'), collapsed: false, onToggleCollapsed: vi.fn() };
+        const { rerender } = render(<HistoryList {...props} updateTrigger={0} />);
+        await recordButton(/블록체인 9\/12 복습/);
+        // 처음 불러온 목록은 움직이지 않는다.
+        expect(risingRows()).toHaveLength(0);
+
+        mock.rows = [row({ id: 9, task: '새로 저장한 기록', created_at: '2026-09-20T13:00:00Z' }), row()];
+        rerender(<HistoryList {...props} updateTrigger={1} />);
+        await recordButton(/새로 저장한 기록/);
+        expect(risingRows()).toEqual([listItem(/새로 저장한 기록/)]);
+
+        // 새로고침(사용자 저장이 아닌 다시 불러오기)은 표시를 지우고 아무 행도 움직이지 않는다.
+        fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+        await waitFor(() => expect(readQueries()).toHaveLength(3));
+        await waitFor(() => expect(risingRows()).toHaveLength(0));
+      });
+
+      it('접힌 시트에서는 펼칠 때 한 번 떠오르고, 다시 접었다 펼치면 반복하지 않는다', async () => {
+        const onToggleCollapsed = vi.fn();
+        const { rerender } = render(<HistoryList session={session('user-a')} collapsed onToggleCollapsed={onToggleCollapsed} updateTrigger={0} />);
+        await recordButton(/블록체인 9\/12 복습/);
+        mock.rows = [row({ id: 9, task: '새로 저장한 기록', created_at: '2026-09-20T13:00:00Z' }), row()];
+        rerender(<HistoryList session={session('user-a')} collapsed onToggleCollapsed={onToggleCollapsed} updateTrigger={1} />);
+        await waitFor(() => expect(readQueries()).toHaveLength(2));
+        await screen.findByText('새로 저장한 기록');
+        expect(risingRows()).toHaveLength(0);
+
+        rerender(<HistoryList session={session('user-a')} collapsed={false} onToggleCollapsed={onToggleCollapsed} updateTrigger={1} />);
+        expect(risingRows()).toEqual([listItem(/새로 저장한 기록/)]);
+
+        rerender(<HistoryList session={session('user-a')} collapsed onToggleCollapsed={onToggleCollapsed} updateTrigger={1} />);
+        rerender(<HistoryList session={session('user-a')} collapsed={false} onToggleCollapsed={onToggleCollapsed} updateTrigger={1} />);
+        expect(risingRows()).toHaveLength(0);
+      });
+
+      it('펼친 인라인 편집기는 행 아래에서 떠오른다', async () => {
+        render(<HistoryList session={session('user-a')} />);
+        fireEvent.click(await recordButton(/블록체인 9\/12 복습/));
+        expect(screen.getByRole('textbox', { name: '작업 메모' }).closest('form')).toHaveClass('animate-fade-up');
+      });
+    });
+
     it('updateTrigger와 새로고침 버튼으로 다시 불러온다', async () => {
       const { rerender } = render(<HistoryList session={session('user-a')} updateTrigger={0} />);
       await recordButton(/블록체인 9\/12 복습/);

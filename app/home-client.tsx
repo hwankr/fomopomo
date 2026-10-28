@@ -85,7 +85,7 @@ export default function HomeClient() {
   return (
     <div
       className={cn(
-        'flex flex-col transition-colors duration-[600ms] ease-out',
+        'flex flex-col transition-colors duration-(--duration-emphasized) ease-enter',
         stage.tone ? TONE_TINT_BG[stage.tone] : 'bg-surface',
         // 색이 든 무대에서는 헤더 아바타 바탕을 반투명 흰색으로 둔다.
         stage.tone && '[--header-avatar-bg:rgb(255_255_255/.75)]',
@@ -100,7 +100,11 @@ export default function HomeClient() {
       {/* 무대: 헤더와 타이머. 시트가 접히면 화면 아래까지 늘어나 시트 머리만 남긴다. */}
       <div
         className={cn(
-          'flex flex-col transition-[min-height] duration-500 ease-out',
+          // 시트 몸통(ui-collapse)과 함께 움직인다. md는 펼친 무대가 min-h-0이라 보이는 구간이 접을 때 끝·펼칠 때 처음뿐이어서 가속을 바꿔 그 구간을 늘린다.
+          'flex flex-col transition-[min-height]',
+          sheetCollapsed
+            ? 'duration-(--duration-exit) ease-exit md:duration-(--duration-emphasized) md:ease-enter'
+            : 'duration-(--duration-emphasized) ease-enter md:ease-exit',
           sheetCollapsed
             ? 'min-h-[calc(100dvh-var(--tabbar-height)-56px)] md:min-h-[calc(100dvh-72px)]'
             : 'min-h-[calc(100dvh-var(--tabbar-height)-240px)] md:min-h-0',

@@ -98,6 +98,22 @@ describe('TimerSettingsDialog', () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  it('pops only the number that was just stepped, not on open', () => {
+    renderDialog();
+    const number = (label: string) => within(row(label)).getByText(/\d+(분|회)/);
+    expect(document.querySelectorAll('.animate-pop')).toHaveLength(0);
+
+    fireEvent.click(within(row('뽀모도로')).getByRole('button', { name: '뽀모도로 늘리기' }));
+    expect(number('뽀모도로')).toHaveClass('animate-pop');
+    expect(number('짧은 휴식')).not.toHaveClass('animate-pop');
+    // 숫자는 알림 영역(aria-live) 안에서 바뀐다.
+    expect(number('뽀모도로').parentElement).toHaveAttribute('aria-live', 'polite');
+
+    fireEvent.click(within(row('짧은 휴식')).getByRole('button', { name: '짧은 휴식 줄이기' }));
+    expect(number('뽀모도로')).not.toHaveClass('animate-pop');
+    expect(number('짧은 휴식')).toHaveClass('animate-pop');
+  });
+
   it('links to the full settings page', () => {
     renderDialog();
     expect(screen.getByRole('link', { name: '과목·알림·계정 설정' })).toHaveAttribute('href', '/settings');

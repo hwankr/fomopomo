@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { Check, Coffee, Pause, RefreshCw, Timer, TriangleAlert } from 'lucide-react';
 import TaskSidebar from './TaskSidebar';
 import type { BeadTone } from '@/components/ui/Beads';
+import { playMotion } from '@/components/ui/motion';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { cn } from '@/lib/utils';
 
@@ -76,7 +77,14 @@ const SPACE_INTERACTIVE_SELECTOR = [
   '[role="switch"]', '[role="checkbox"]', '[role="radio"]',
 ].join(',');
 // 열려 있는 대화상자·팝오버(ModalDialog는 aria-modal, Radix 팝오버·선택은 popper 래퍼).
-const OPEN_LAYER_SELECTOR = '[aria-modal="true"], [data-radix-popper-content-wrapper]';
+// 퇴장 애니메이션 중인 팝오버(내용이 data-state="closed")는 이미 닫혔으므로 세지 않는다.
+const hasOpenLayer = () =>
+  document.querySelector('[aria-modal="true"]') !== null ||
+  Array.from(document.querySelectorAll('[data-radix-popper-content-wrapper]'))
+    .some((wrapper) => wrapper.firstElementChild?.getAttribute('data-state') !== 'closed');
+
+// 새 패널·숫자가 나타나는 움직임(animate-fade-in과 같다). 시작 상태만 적는다(docs/design-system.md §8).
+const FADE_IN: Keyframe[] = [{ opacity: 0, offset: 0 }];
 
 const isSpaceShortcutTarget = (target: EventTarget | null) => {
   if (!(target instanceof Element)) return true;
@@ -211,10 +219,18 @@ export default function TimerApp({
 }: TimerAppProps) {
   const [tab, setTab] = useState<'timer' | 'stopwatch'>('timer');
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
+  const taskPickerId = useId();
   // 방금 끝난 단계("집중 끝"/"휴식 끝" 안내 띠와 끝난 모습). 타이머는 이미 다음 단계로
   // 넘어가 있으므로, 화면에 보여 줄 끝난 단계의 모드·길이·사이클을 따로 둔다.
   // 다음 시작·모드 변경·초기화로 사라진다.
   const [ended, setEnded] = useState<EndedPhase | null>(null);
+  // 사용자가 모드를 바꾸면 새 패널이, 시계를 처음으로 되돌리면(초기화·프리셋·저장 뒤 초기화) 숫자가 한 번 나타난다.
+  // 타이머 틱·복원·자동 전환·다른 기기 동기화에는 돌지 않는다(렌더 끝의 레이아웃 효과).
+  const panelRef = useRef<HTMLElement>(null);
+  const panelSwapFromRef = useRef<TimerModeKey | null>(null);
+  const [panelSwap, setPanelSwap] = useState(0);
+  const [digitsSwap, setDigitsSwap] = useState(0);
+  const requestDigitsSwap = () => setDigitsSwap(count => count + 1);
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
   const isSettingsOpen = settingsOpen ?? internalSettingsOpen;
   const setSettingsOpen = onSettingsOpenChange ?? setInternalSettingsOpen;
@@ -724,7 +740,7 @@ export default function TimerApp({
     playAlarm();
     // 다음 단계가 곧 자동으로 시작되면 안내 띠는 띄우지 않는다.
     const autoStartsNext = timerMode === 'focus' ? settings.autoStartBreaks : settings.autoStartPomos;
-    if (!autoStartsNext) setEnded({ mode: timerMode, duration: timerDuration, cycleCount });
+    if (!autoStartsNext) setEnded({ mode: timerMode, duration: timerDuration, cycleCount, live: true });
 
     const { nextMode, nextSeconds, nextCycle } = computeNextTimerPhase(timerMode, cycleCount, settings);
 
@@ -919,14 +935,24 @@ export default function TimerApp({
     setSettings((prev: Settings) => ({ ...prev, pomoTime: minutes }));
     setIntervals([]);
     saveState('timer', "focus", false, minutes * 60, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null, minutes * 60);
+    // 프리셋은 늘 뽀모도로로 간다. 보이던 탭이 뽀모도로가 아니었으면 패널을, 맞으면 숫자만 비춘다.
+    if ((tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode) !== 'focus') requestPanelSwap();
+    else requestDigitsSwap();
     toast.success(`${minutes === 0.1 ? '5초' : minutes + '분'}으로 설정됨`);
     return true;
+  };
+
+  // 지금 보이는 모드 탭을 기억해 두고, 바뀐 채로 그려지면 새 패널을 한 번 비춘다(거절돼 그대로면 아무것도 안 한다).
+  const requestPanelSwap = () => {
+    panelSwapFromRef.current = tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode;
+    setPanelSwap(count => count + 1);
   };
 
   // 모드 탭: 스톱워치 탭은 보기만 바꾸고(타이머는 그대로), 타이머 모드는 기존 모드 변경
   // 규칙(스톱워치 기록 확인, 집중 중간 기록 저장, 초기화)을 그대로 따른다.
   // 이미 고른 탭을 다시 눌러도 아무 일도 하지 않는다(초기화는 재설정 버튼으로).
   const handleSelectMode = (key: TimerModeKey) => {
+    requestPanelSwap();
     if (key === 'stopwatch') {
       setTab('stopwatch');
       return;
@@ -940,6 +966,7 @@ export default function TimerApp({
   // 종료 안내 띠: 주 동작은 이미 준비된 다음 단계(휴식/집중)를 시작하고,
   // 보조 동작은 방금 끝난 단계를 한 번 더 시작한다(계속 집중 / 조금 더 쉬기).
   const handleEndedPrimary = () => {
+    requestPanelSwap();
     setEnded(null);
     handleToggleTimer();
   };
@@ -948,6 +975,7 @@ export default function TimerApp({
     const repeatMode = ended?.mode;
     if (!repeatMode) return;
     setEnded(null);
+    requestDigitsSwap();
     const minutes = repeatMode === 'focus' ? settings.pomoTime
       : repeatMode === 'shortBreak' ? settings.shortBreak : settings.longBreak;
     playClickSound();
@@ -992,6 +1020,7 @@ export default function TimerApp({
         if (currentFullTime !== configuredFullTime) return;
 
         const resetTime = resetTimerManual();
+        requestDigitsSwap();
         sessionIdentityRef.current = null;
         setIntervals([]);
         saveState(tab, timerMode, false, resetTime, null, cycleCount, 0, isStopwatchRunning, stopwatchTime, null, [], null, resetTime);
@@ -1015,6 +1044,7 @@ export default function TimerApp({
       // triggerSave's guards would desync memory from the persisted snapshot
       // on an early return.
       resetStopwatch();
+      requestDigitsSwap();
       sessionIdentityRef.current = null;
       // The record froze the full session content (including the still-open
       // interval, closed at the click time above) — consume the stopwatch
@@ -1027,6 +1057,7 @@ export default function TimerApp({
 
   const handleResetStopwatch = () => {
     resetStopwatch();
+    requestDigitsSwap();
     sessionIdentityRef.current = null;
     setIntervals([]);
     currentIntervalStartRef.current = null;
@@ -1681,7 +1712,7 @@ export default function TimerApp({
     if (event.code !== 'Space' && event.key !== ' ') return;
     if (event.defaultPrevented || !isSpaceShortcutTarget(event.target)) return;
     if (taskModalOpen || isSettingsOpen || isTaskSidebarOpen) return;
-    if (document.querySelector(OPEN_LAYER_SELECTOR)) return;
+    if (hasOpenLayer()) return;
     event.preventDefault();
     if (tab === 'timer') handleToggleTimer();
     else handleToggleStopwatch();
@@ -1730,9 +1761,20 @@ export default function TimerApp({
 
   // 끝난 단계를 보여 주는 동안은 그 단계의 탭을 고른 것으로 보인다(보드와 같게).
   const selectedModeKey: TimerModeKey = tab === 'stopwatch' ? 'stopwatch' : ended?.mode ?? timerMode;
+  useLayoutEffect(() => {
+    const from = panelSwapFromRef.current;
+    panelSwapFromRef.current = null;
+    if (from !== null && from !== selectedModeKey) playMotion(panelRef.current, FADE_IN);
+  }, [panelSwap, selectedModeKey]);
+  useLayoutEffect(() => {
+    if (digitsSwap > 0) playMotion(panelRef.current?.querySelector('[role="timer"]'), FADE_IN);
+  }, [digitsSwap]);
   const selectedTaskTitle = taskHandoff?.task.title || getSelectedTaskTitle() || selectedTask;
   const selectedTaskSubject = getSubjectName(taskHandoff ? taskHandoff.task.subjectId : selectedSubjectId);
+  // 끝난 모습에서 초기화하면 준비된 다음 단계로 돌아가므로(모드 탭이 바뀐다) 패널을, 아니면 숫자만 비춘다.
   const resetTimer = () => {
+    if (ended) requestPanelSwap();
+    else requestDigitsSwap();
     setEnded(null);
     setTaskHandoff(null);
     completingTaskRef.current = false;
@@ -1783,7 +1825,7 @@ export default function TimerApp({
         pendingToggleSubtaskIds={pendingSubtaskIds} selectedTaskId={selectedTaskId}
         choosingNextTask={Boolean(taskHandoff)} selectionDisabled={Boolean(taskHandoff?.completionPending)}
         excludedTaskId={taskHandoff?.task.id ?? null}
-        subjects={subjects} anchorRef={taskTriggerRef} onOpenLogin={onOpenLogin}
+        subjects={subjects} anchorRef={taskTriggerRef} contentId={taskPickerId} onOpenLogin={onOpenLogin}
         onSelectTask={selectTimerTask}
         onToggleTask={(task) => {
           if (task.id === selectedTaskId && task.status !== 'done' && timerOwnsFocusProgress) handleCompleteTask();
@@ -1804,6 +1846,7 @@ export default function TimerApp({
       />
 
       <section
+        ref={panelRef}
         id={TIMER_PANEL_ID}
         role="tabpanel"
         aria-labelledby={getTimerTabId(selectedModeKey)}
@@ -1830,7 +1873,7 @@ export default function TimerApp({
             onSaveTimer={handleSaveTimer}
             onOpenSettings={() => setSettingsOpen(true)}
             selectedTaskId={selectedTaskId} selectedTaskTitle={selectedTaskTitle} selectedTaskSubject={selectedTaskSubject}
-            isTaskPickerOpen={isTaskSidebarOpen} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
+            isTaskPickerOpen={isTaskSidebarOpen} taskPickerId={taskPickerId} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
           />
         ) : (
           <StopwatchDisplay
@@ -1838,7 +1881,7 @@ export default function TimerApp({
             onToggleStopwatch={handleToggleStopwatch} onSaveStopwatch={handleSaveStopwatch} onResetStopwatch={handleResetStopwatch}
             onOpenSettings={() => setSettingsOpen(true)}
             selectedTaskId={selectedTaskId} selectedTaskTitle={getSelectedTaskTitle() || selectedTask} selectedTaskSubject={getSubjectName(selectedSubjectId)}
-            isTaskPickerOpen={isTaskSidebarOpen} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
+            isTaskPickerOpen={isTaskSidebarOpen} taskPickerId={taskPickerId} onToggleTaskPicker={toggleTaskSidebar} taskTriggerRef={taskTriggerRef}
           />
         )}
       </section>

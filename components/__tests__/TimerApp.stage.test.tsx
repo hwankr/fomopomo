@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   stopwatchProps: [] as Record<string, unknown>[],
   playAlarm: vi.fn(),
   playClickSound: vi.fn(),
+  playMotion: vi.fn(),
   updateStatus: vi.fn(),
   persistSettings: vi.fn(),
   currentIntervalStartRef: { current: null as number | null },
@@ -113,11 +114,16 @@ vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({ subjects: [], loading: false, error: null, createSubject: vi.fn() }),
 }));
 vi.mock('@/components/TaskSidebar', () => ({ default: () => null }));
+// 패널·숫자의 한 번 나타남은 Web Animation(playMotion)이다. 무엇을 언제 움직였는지만 본다.
+vi.mock('@/components/ui/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/ui/motion')>()),
+  playMotion: mocks.playMotion,
+}));
 vi.mock('@/components/timer/ui/TaskModal', () => ({ TaskModal: () => null }));
 vi.mock('@/components/timer/ui/TimerDisplay', () => ({
   TimerDisplay: (props: Record<string, unknown>) => {
     mocks.timerDisplayProps.push(props);
-    return null;
+    return <span role="timer" />;
   },
 }));
 vi.mock('@/components/timer/ui/StopwatchDisplay', () => ({
@@ -254,6 +260,22 @@ describe('TimerApp stage', () => {
       expect(pressSpace(document.body).defaultPrevented).toBe(false);
       expect(lastTimerProps().isRunning).toBe(false);
     });
+
+    it('works again while a closed popover is still fading out', () => {
+      renderTimer();
+      const wrapper = document.createElement('div');
+      wrapper.setAttribute('data-radix-popper-content-wrapper', '');
+      const content = document.createElement('div');
+      content.setAttribute('data-state', 'open');
+      wrapper.append(content);
+      document.body.append(wrapper);
+      expect(pressSpace(document.body).defaultPrevented).toBe(false);
+
+      // 닫혀서 퇴장 애니메이션만 남은 팝오버는 열린 층이 아니다.
+      content.setAttribute('data-state', 'closed');
+      expect(pressSpace(document.body).defaultPrevented).toBe(true);
+      expect(lastTimerProps().isRunning).toBe(true);
+    });
   });
 
   describe('mode tabs', () => {
@@ -379,6 +401,83 @@ describe('TimerApp stage', () => {
       await act(async () => { vi.advanceTimersByTime(2400); });
       fireEvent.click(screen.getByRole('tab', { name: '뽀모도로' }));
       expect(lastTimerProps()).toMatchObject({ ended: null, timerMode: 'focus' });
+    });
+  });
+
+  describe('motion', () => {
+    const fadeIn = [{ opacity: 0, offset: 0 }];
+
+    it('lets the new panel fade in once when the user switches modes', () => {
+      renderTimer();
+      expect(mocks.playMotion).not.toHaveBeenCalled();
+
+      fireEvent.click(tab('짧은 휴식'));
+      expect(mocks.playMotion).toHaveBeenCalledTimes(1);
+      expect(mocks.playMotion).toHaveBeenLastCalledWith(screen.getByRole('tabpanel'), fadeIn);
+
+      // 이미 고른 탭을 다시 누르면 아무것도 바뀌지 않으므로 움직이지 않는다.
+      fireEvent.click(tab('짧은 휴식'));
+      expect(mocks.playMotion).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(tab('스톱워치'));
+      expect(mocks.playMotion).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not move on restore, ticks or a phase that starts by itself', async () => {
+      mocks.settings.autoStartBreaks = true;
+      seedRunningFocusTimer(2);
+      renderTimer();
+      await act(async () => { vi.advanceTimersByTime(2400); });
+      await act(async () => { vi.advanceTimersByTime(1200); });
+      expect(lastTimerProps()).toMatchObject({ timerMode: 'shortBreak', isRunning: true });
+      await act(async () => { vi.advanceTimersByTime(3000); });
+      expect(mocks.playMotion).not.toHaveBeenCalled();
+    });
+
+    it('fades only the digits when the clock is reset', async () => {
+      renderTimer();
+      act(() => call('onToggleTimer'));
+      await act(async () => { vi.advanceTimersByTime(3000); });
+      act(() => call('onToggleTimer'));
+      expect(mocks.playMotion).not.toHaveBeenCalled();
+
+      act(() => call('onResetTimer'));
+      expect(mocks.playMotion).toHaveBeenCalledTimes(1);
+      expect(mocks.playMotion).toHaveBeenLastCalledWith(screen.getByRole('timer'), fadeIn);
+    });
+
+    it('fades the panel, not the digits, when reset leaves the ended phase for the staged one', async () => {
+      seedRunningFocusTimer(2);
+      renderTimer();
+      await act(async () => { vi.advanceTimersByTime(2400); });
+      expect(mocks.playMotion).not.toHaveBeenCalled();
+
+      act(() => call('onResetTimer'));
+      expect(mocks.playMotion).toHaveBeenCalledTimes(1);
+      expect(mocks.playMotion).toHaveBeenLastCalledWith(screen.getByRole('tabpanel'), fadeIn);
+    });
+
+    it('marks a phase that ended on screen as live, but not one restored after the tab was closed', async () => {
+      seedRunningFocusTimer(2);
+      const view = renderTimer();
+      await act(async () => { vi.advanceTimersByTime(2400); });
+      expect(lastTimerProps().ended).toMatchObject({ mode: 'focus', live: true });
+      view.unmount();
+
+      mocks.timerDisplayProps.length = 0;
+      const now = Date.now();
+      window.localStorage.setItem('fomopomo_full_state', JSON.stringify({
+        activeTab: 'timer',
+        timer: { mode: 'focus', isRunning: true, timeLeft: 0, targetTime: now - 60_000, cycleCount: 0, loggedSeconds: 0 },
+        stopwatch: { isRunning: false, elapsed: 0, startTime: null },
+        intervals: [],
+        currentIntervalStart: now - 120_000,
+        lastUpdated: now - 60_000,
+      }));
+      renderTimer();
+      await act(async () => {});
+      expect(lastTimerProps().ended).toMatchObject({ mode: 'focus' });
+      expect((lastTimerProps().ended as { live?: boolean }).live).toBeUndefined();
     });
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import toast from 'react-hot-toast';
 import { Check, ChevronDown, CircleDashed, Play } from 'lucide-react';
@@ -49,12 +49,30 @@ interface TaskSidebarProps {
   subjects?: StudySubject[];
   /** 데스크톱 팝오버를 붙일 "지금 하는 일" 버튼 */
   anchorRef?: RefObject<HTMLElement | null>;
+  /** 선택기 내용의 id. 여는 버튼이 열려 있는 동안 aria-controls로 가리킨다(닫을 때 포커스를 그 버튼으로 돌려준다). */
+  contentId?: string;
   /** 로그아웃 상태에서 로그인 창을 연다 */
   onOpenLogin?: () => void;
 }
 
 const EMPTY_SUBTASK_IDS: ReadonlySet<string> = new Set();
 const EMPTY_SUBJECTS: StudySubject[] = [];
+
+// 행의 등장 움직임(docs/design-system.md §8). 열 때 있던 행은 순서대로(ui-stagger), 방금 추가한 행은 바로 떠오른다.
+// 사용자가 체크한 원에만 체크 표시가 튀어나온다. 다시 불러온 행에는 아무것도 붙이지 않는다.
+type RowMotion = {
+  /** 행이 떠오를 때의 순서. 없으면 움직이지 않는다. */
+  enterIndex: (id: string) => number | undefined;
+  /** 방금 체크한 원(작업은 task:id, 챕터는 subtask:id) */
+  checkedKey: string | null;
+};
+
+const NO_ROW_MOTION: RowMotion = { enterIndex: () => undefined, checkedKey: null };
+
+const rowEnter = (index: number | undefined) => index === undefined ? {} : {
+  className: 'animate-fade-up',
+  style: { '--stagger-index': index } as CSSProperties,
+};
 
 // 미완료를 위로, 완료를 아래로. sort는 stable이라 나머지 순서는 보존된다.
 const partitionDoneLast = <T,>(items: T[], isDone: (item: T) => boolean) =>
@@ -69,12 +87,15 @@ function RoundCheck({
   onChange,
   disabled = false,
   busy = false,
+  pop = false,
 }: {
   checked: boolean;
   label: string;
   onChange: () => void;
   disabled?: boolean;
   busy?: boolean;
+  /** 방금 체크했다: 체크 표시를 한 번 튀기며 보여 준다. */
+  pop?: boolean;
 }) {
   return (
     <label className="relative -m-2.5 inline-flex size-11 shrink-0 cursor-pointer items-center justify-center has-disabled:cursor-wait md:-m-[11px]">
@@ -89,7 +110,11 @@ function RoundCheck({
           className="size-full cursor-pointer appearance-none rounded-full border-[1.5px] border-control bg-white text-ink transition-colors checked:border-pomo checked:bg-pomo disabled:cursor-wait disabled:opacity-60"
         />
         {checked ? (
-          <Check aria-hidden="true" strokeWidth={3} className="pointer-events-none absolute size-3.5 text-white md:size-[13px]" />
+          <Check
+            aria-hidden="true"
+            strokeWidth={3}
+            className={cn('pointer-events-none absolute size-3.5 text-white md:size-[13px]', pop && 'animate-pop-in')}
+          />
         ) : null}
       </span>
     </label>
@@ -115,6 +140,7 @@ function TaskSection({
   getSubjectName,
   onSelectTask,
   onToggleTask,
+  motion = NO_ROW_MOTION,
 }: {
   title: string;
   items: TaskItem[];
@@ -122,13 +148,14 @@ function TaskSection({
   getSubjectName: (id?: string | null) => string | null;
   onSelectTask: (task: TaskItem) => void;
   onToggleTask: (task: TaskItem) => void;
+  motion?: RowMotion;
 }) {
   if (items.length === 0) return null;
 
   return (
     <div className="flex flex-col">
       <SectionHeading>{title}</SectionHeading>
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+      <ul className="ui-stagger m-0 flex list-none flex-col gap-0.5 p-0">
         {partitionDoneLast(items, (task) => task.status === 'done').map((task) => {
           const isDone = task.status === 'done';
           const isSelected = selectedTaskId === task.id;
@@ -136,12 +163,22 @@ function TaskSection({
           const subjectName = getSubjectName(task.subjectId);
           const goal = task.pomodoroGoal ?? 0;
           const count = task.pomodoroCount ?? 0;
+          const enter = rowEnter(motion.enterIndex(task.id));
           return (
             <li
               key={task.id}
-              className="flex min-h-14 items-center gap-3 rounded-control px-2.5 py-[3px] transition-colors hover:bg-hover md:py-1"
+              className={cn(
+                'flex min-h-14 items-center gap-3 rounded-control px-2.5 py-[3px] transition-colors hover:bg-hover md:py-1',
+                enter.className,
+              )}
+              style={enter.style}
             >
-              <RoundCheck checked={isDone} label={`${task.title} 완료`} onChange={() => onToggleTask(task)} />
+              <RoundCheck
+                checked={isDone}
+                label={`${task.title} 완료`}
+                onChange={() => onToggleTask(task)}
+                pop={isDone && motion.checkedKey === `task:${task.id}`}
+              />
               <button
                 type="button"
                 onClick={() => onSelectTask(task)}
@@ -196,6 +233,8 @@ function LongTermTaskSection({
   onSelectLongTermTask,
   onSelectSubtask,
   onToggleSubtask,
+  onExpand,
+  motion = NO_ROW_MOTION,
 }: {
   items: LongTermTaskItem[];
   materializedSubtaskIds: Set<string>;
@@ -207,6 +246,9 @@ function LongTermTaskSection({
   onSelectLongTermTask: (task: LongTermTaskItem) => void;
   onSelectSubtask: (subtask: LongTermSubtaskItem) => void;
   onToggleSubtask: (subtask: LongTermSubtaskItem) => void;
+  /** 펼치기·접기를 누를 때(목록의 등장 움직임을 끝낸다) */
+  onExpand?: () => void;
+  motion?: RowMotion;
 }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -214,6 +256,7 @@ function LongTermTaskSection({
   if (roots.length === 0) return null;
 
   const toggleExpanded = (id: string) => {
+    onExpand?.();
     setExpandedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -235,8 +278,10 @@ function LongTermTaskSection({
     const durationLabel = task.durationSeconds === undefined
       ? '누적 시간 확인 불가'
       : `누적 ${formatDuration(task.durationSeconds) || '0m'}`;
+    // 열 때의 순서는 맨 위 과제에만 있다(안쪽 과목은 펼칠 때 함께 떠오른다).
+    const enter = rowEnter(task.parent_task_id ? undefined : motion.enterIndex(task.id));
     return (
-      <div key={task.id} className="flex flex-col gap-0.5">
+      <div key={task.id} className={cn('flex flex-col gap-0.5', enter.className)} style={enter.style}>
         <div className="rounded-control px-2.5 py-1.5 transition-colors hover:bg-hover">
           <div className="flex min-h-10 items-center gap-2">
             {hasDetails ? (
@@ -277,7 +322,7 @@ function LongTermTaskSection({
           </div>
         </div>
         {hasDetails && isExpanded && (
-          <div className="flex flex-col gap-0.5 pl-5">
+          <div className="flex animate-fade-up flex-col gap-0.5 pl-5">
             {partitionDoneLast(
               task.subtasks,
               (subtask) => subtask.completed_at !== null
@@ -296,6 +341,7 @@ function LongTermTaskSection({
                     onChange={() => onToggleSubtask(subtask)}
                     disabled={isTogglePending}
                     busy={isTogglePending}
+                    pop={isDone && motion.checkedKey === `subtask:${subtask.id}`}
                   />
                   {isDone ? (
                     <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink-muted line-through">
@@ -336,7 +382,7 @@ function LongTermTaskSection({
   return (
     <div className="flex flex-col">
       <SectionHeading>장기 과제</SectionHeading>
-      <div className="flex flex-col gap-0.5">{roots.map(renderTask)}</div>
+      <div className="ui-stagger flex flex-col gap-0.5">{roots.map(renderTask)}</div>
     </div>
   );
 }
@@ -363,6 +409,7 @@ export default function TaskSidebar({
   onCreateTask,
   subjects = EMPTY_SUBJECTS,
   anchorRef,
+  contentId,
   onOpenLogin,
 }: TaskSidebarProps) {
   const titleId = useId();
@@ -373,8 +420,31 @@ export default function TaskSidebar({
   const selectionRequestRef = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
   const interactedOutsideRef = useRef(false);
+  // 데스크톱 팝오버를 열 때 있던 행(순서대로 떠오른다), 방금 추가한 작업, 방금 체크한 원.
+  // 모두 다음 동작(체크·펼치기·추가)이나 다시 열 때 비운다. 그래서 행이 자리를 옮겨도(완료한 작업은 아래로) 다시 돌지 않는다.
+  const [openedRowIds, setOpenedRowIds] = useState<string[] | null>(null);
+  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+  const [checkedKey, setCheckedKey] = useState<string | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
 
-  if (!isOpen) return null;
+  // 열 때는 지금 고른 작업(없으면 첫 행, 그것도 없으면 내용)으로 포커스를 옮긴다.
+  const focusInitialRow = () => {
+    interactedOutsideRef.current = false;
+    const content = contentRef.current;
+    (content?.querySelector<HTMLElement>('[data-picker-autofocus]')
+      ?? content?.querySelector<HTMLElement>('[data-picker-row]')
+      ?? content)?.focus();
+  };
+
+  // 닫히는 중(퇴장 애니메이션)에 다시 열면 Radix는 내용을 새로 붙이지 않아 onOpenAutoFocus가 오지 않는다.
+  // 그때만 직접 옮긴다. 닫히는 팝오버 가드가 inert를 지운 뒤(마이크로태스크)에 옮긴다.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!isOpen || !isDesktop || !content || content.contains(document.activeElement)) return;
+    queueMicrotask(() => {
+      if (content.isConnected && content.dataset.state === 'open' && !content.contains(document.activeElement)) focusInitialRow();
+    });
+  }, [isOpen, isDesktop]);
 
   const closeSidebar = () => {
     selectionRequestRef.current += 1;
@@ -464,8 +534,52 @@ export default function TaskSidebar({
     availableTasks(monthlyPlans).length + getLongTermTaskRoots(availableLongTermTasks).length;
   const hasNextTask = nextTaskCount > 0;
 
+  // 선택기는 닫혀도 붙어 있다(퇴장 애니메이션). 열 때마다 행 움직임을 새로 정한다.
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen);
+    setLastAddedId(null);
+    setCheckedKey(null);
+    // 아래 시트는 시트 자체가 올라오므로 데스크톱 팝오버만 행을 차례로 띄운다.
+    setOpenedRowIds(isOpen && isDesktop ? [
+      ...[tasks, weeklyPlans, monthlyPlans].flatMap((items) =>
+        partitionDoneLast(availableTasks(items), (task) => task.status === 'done').map((task) => task.id)),
+      ...getLongTermTaskRoots(availableLongTermTasks).map((task) => task.id),
+    ] : null);
+  }
+  const endRowMotion = () => {
+    setOpenedRowIds(null);
+    setLastAddedId(null);
+    setCheckedKey(null);
+  };
+  const rowMotion: RowMotion = {
+    enterIndex: (id) => {
+      if (id === lastAddedId) return 0;
+      const index = openedRowIds?.indexOf(id) ?? -1;
+      return index < 0 ? undefined : index;
+    },
+    checkedKey,
+  };
+  const toggleTask = (task: TaskItem) => {
+    endRowMotion();
+    if (task.status !== 'done') setCheckedKey(`task:${task.id}`);
+    onToggleTask(task);
+  };
+  const toggleSubtask = (subtask: LongTermSubtaskItem) => {
+    endRowMotion();
+    if (subtask.completed_at === null) setCheckedKey(`subtask:${subtask.id}`);
+    onToggleSubtask(subtask);
+  };
+  const createTask = onCreateTask && (async (input: CreateTaskInput) => {
+    const created = await onCreateTask(input);
+    if (created) {
+      endRowMotion();
+      setLastAddedId(created.id);
+    }
+    return created;
+  });
+
   const title = choosingNextTask ? '다음 작업 선택' : '작업 목록';
-  const canCreate = Boolean(userId && onCreateTask);
+  const canCreate = Boolean(userId && createTask);
 
   // 고를 작업도, 해제할 선택도 없으면(로그아웃 등) 굳이 보이지 않는다.
   const clearButton = choosingNextTask || (selectedTaskId === null && nextTaskCount === 0) ? null : (
@@ -523,7 +637,8 @@ export default function TaskSidebar({
           selectedTaskId={selectedTaskId}
           getSubjectName={getSubjectName}
           onSelectTask={selectAndClose}
-          onToggleTask={onToggleTask}
+          onToggleTask={toggleTask}
+          motion={rowMotion}
         />
         <TaskSection
           title="이번 주"
@@ -531,7 +646,8 @@ export default function TaskSidebar({
           selectedTaskId={selectedTaskId}
           getSubjectName={getSubjectName}
           onSelectTask={selectAndClose}
-          onToggleTask={onToggleTask}
+          onToggleTask={toggleTask}
+          motion={rowMotion}
         />
         <TaskSection
           title="이번 달"
@@ -539,7 +655,8 @@ export default function TaskSidebar({
           selectedTaskId={selectedTaskId}
           getSubjectName={getSubjectName}
           onSelectTask={selectAndClose}
-          onToggleTask={onToggleTask}
+          onToggleTask={toggleTask}
+          motion={rowMotion}
         />
         <LongTermTaskSection
           items={availableLongTermTasks}
@@ -553,12 +670,14 @@ export default function TaskSidebar({
           onSelectSubtask={(subtask) => {
             void selectSubtaskAndClose(subtask);
           }}
-          onToggleSubtask={onToggleSubtask}
+          onToggleSubtask={toggleSubtask}
+          onExpand={endRowMotion}
+          motion={rowMotion}
         />
 
         <div className="pt-1">
-          {canCreate && userId && onCreateTask ? (
-            <TaskCreateForm key={userId} userId={userId} onCreateTask={onCreateTask} trailing={clearButton} />
+          {canCreate && userId && createTask ? (
+            <TaskCreateForm key={userId} userId={userId} onCreateTask={createTask} trailing={clearButton} />
           ) : clearButton ? (
             <div className="flex justify-end">{clearButton}</div>
           ) : null}
@@ -570,7 +689,7 @@ export default function TaskSidebar({
   if (!isDesktop) {
     return (
       <ModalDialog
-        open
+        open={isOpen}
         onClose={closeSidebar}
         aria-labelledby={titleId}
         className="max-h-[80dvh] gap-2 pt-3 pb-[calc(36px+env(safe-area-inset-bottom))]"
@@ -586,17 +705,18 @@ export default function TaskSidebar({
             닫기
           </button>
         </div>
-        <div className="flex flex-col">{body}</div>
+        <div id={contentId} className="flex flex-col">{body}</div>
       </ModalDialog>
     );
   }
 
   return (
-    <Popover.Root open onOpenChange={(open) => { if (!open) closeSidebar(); }}>
+    <Popover.Root open={isOpen} onOpenChange={(open) => { if (!open) closeSidebar(); }}>
       {anchorRef ? <Popover.Anchor virtualRef={anchorRef} /> : null}
       <Popover.Portal>
         <Popover.Content
           ref={contentRef}
+          id={contentId}
           aria-label={title}
           side="bottom"
           align="center"
@@ -606,14 +726,13 @@ export default function TaskSidebar({
           avoidCollisions={false}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
-            interactedOutsideRef.current = false;
-            const content = contentRef.current;
-            (content?.querySelector<HTMLElement>('[data-picker-autofocus]')
-              ?? content?.querySelector<HTMLElement>('[data-picker-row]')
-              ?? content)?.focus();
+            focusInitialRow();
           }}
           onCloseAutoFocus={(event) => {
             // 선택·Escape로 닫으면 버튼으로 돌아가고, 바깥을 눌러 닫으면 누른 곳에 둔다.
+            // 내용은 퇴장이 끝난 뒤 내려간다. 닫히는 팝오버 가드(components/ui/popoverExit)가 닫는 순간
+            // 이미 포커스를 정했으면(defaultPrevented) 그새 사용자가 옮긴 포커스를 빼앗지 않는다.
+            if (event.defaultPrevented) return;
             event.preventDefault();
             if (!interactedOutsideRef.current) anchorRef?.current?.focus();
           }}

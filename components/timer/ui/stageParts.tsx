@@ -24,6 +24,7 @@ export function StageBeads({ label, states, tone }: { label: string; states: Bea
         label={label}
         states={states}
         tone={tone}
+        popCompleted
         size={isDesktop ? (many ? 7 : 10) : (many ? 6 : 8)}
         gap={isDesktop ? (many ? 6 : 8) : (many ? 4 : 5)}
         wrap
@@ -39,7 +40,7 @@ export function StageIconButton({ className, children, ...props }: ButtonHTMLAtt
     <button
       type="button"
       {...props}
-      className={cn('ui-icon-button-surface ui-press size-12 bg-white/75 transition-[background-color,filter] duration-300', className)}
+      className={cn('ui-icon-button-surface ui-press size-12 bg-white/75 transition-[background-color,filter,scale]', className)}
     >
       {children}
     </button>

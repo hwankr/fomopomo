@@ -20,7 +20,7 @@ export function TimerDigits({ seconds, label, runningTone }: TimerDigitsProps) {
       role="timer"
       aria-label={label}
       className={cn(
-        'flex items-baseline justify-center font-display font-bold tracking-[-0.035em] transition-colors duration-[600ms]',
+        'flex items-baseline justify-center font-display font-bold tracking-[-0.035em] transition-colors duration-(--duration-emphasized)',
         hasHours
           ? 'text-[min(90px,22vw)] md:text-[min(150px,19vw)]'
           : 'text-[min(124px,31vw)] md:text-[min(232px,19vw)]',

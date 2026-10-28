@@ -44,6 +44,8 @@ interface TimerDisplayProps {
   selectedTaskTitle: string;
   selectedTaskSubject?: string | null;
   isTaskPickerOpen?: boolean;
+  /** 작업 선택기 내용의 id(여는 버튼의 aria-controls) */
+  taskPickerId?: string;
   onToggleTaskPicker: () => void;
   taskTriggerRef?: Ref<HTMLButtonElement>;
   onCompleteTask?: () => void;
@@ -89,6 +91,7 @@ export const TimerDisplay = ({
   selectedTaskTitle,
   selectedTaskSubject = null,
   isTaskPickerOpen = false,
+  taskPickerId,
   onToggleTaskPicker,
   taskTriggerRef,
   onCompleteTask,
@@ -132,6 +135,7 @@ export const TimerDisplay = ({
           title={selectedTaskId || isChoosingNextTask ? selectedTaskTitle : null}
           subject={selectedTaskSubject}
           open={isTaskPickerOpen}
+          controls={taskPickerId}
           onClick={onToggleTaskPicker}
         />
         {isChoosingNextTask && (
@@ -142,7 +146,12 @@ export const TimerDisplay = ({
       </div>
 
       {ended && (
-        <div className="mt-[18px] flex w-full flex-col gap-2.5 rounded-cta bg-white/75 px-4 py-3.5 md:mt-0 md:max-w-[620px] md:flex-row md:flex-wrap md:items-center md:justify-center md:gap-3.5 md:py-3 md:pr-4 md:pl-5">
+        <div
+          className={cn(
+            'mt-[18px] flex w-full flex-col gap-2.5 rounded-cta bg-white/75 px-4 py-3.5 md:mt-0 md:max-w-[620px] md:flex-row md:flex-wrap md:items-center md:justify-center md:gap-3.5 md:py-3 md:pr-4 md:pl-5',
+            ended.live && 'animate-fade-up',
+          )}
+        >
           <p className="m-0 text-sm font-medium md:flex-[1_1_240px] md:text-[15px]">
             {getEndedMessage(ended.mode, timerMode, timerDuration)}
           </p>
@@ -171,7 +180,7 @@ export const TimerDisplay = ({
           onClick={onToggleTimer}
           disabled={isCompletingTask}
           className={cn(
-            'ui-button-primary ui-press min-h-[54px] min-w-[168px] rounded-cta px-9 text-base transition-[filter,background-color] duration-300 md:min-h-14 md:min-w-[200px] md:text-[17px]',
+            'ui-button-primary ui-press min-h-[54px] min-w-[168px] rounded-cta px-9 text-base transition-[filter,background-color,scale] md:min-h-14 md:min-w-[200px] md:text-[17px]',
             TONE_FILL[tone],
           )}
         >

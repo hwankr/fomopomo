@@ -42,6 +42,8 @@ type HistoryItem = StudySession & { segmentIds: number[] };
 const getBatchId = (item: Pick<StudySession, 'session_batch_id' | 'group_id'>) =>
   item.session_batch_id ?? item.group_id ?? null;
 
+const EMPTY_IDS: ReadonlySet<number> = new Set();
+
 const HISTORY_FETCH_LIMIT = 20;
 // 디자인 보드의 최근 활동 목록 길이
 const HISTORY_DISPLAY_COUNT = 8;
@@ -95,6 +97,8 @@ export default function HistoryList({
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  // 방금 저장한 기록의 행(새로 불러온 목록에 처음 나타난 행). 시트가 보일 때 한 번 떠오른다(docs/design-system.md §8).
+  const [freshIds, setFreshIds] = useState<ReadonlySet<number>>(EMPTY_IDS);
 
   const bodyId = useId();
   const editorId = useId();
@@ -102,6 +106,9 @@ export default function HistoryList({
   const isDesktop = useIsDesktop();
   const rowRefs = useRef(new Map<number, HTMLButtonElement>());
   const memoRef = useRef<HTMLInputElement>(null);
+  // 마지막으로 불러온 목록의 행. 새 기록 표시는 같은 계정에서 한 번 불러온 뒤부터만 센다.
+  const loadedIdsRef = useRef<{ userId: string; ids: ReadonlySet<number> } | null>(null);
+  const seenTriggerRef = useRef(updateTrigger);
 
   const userId = session?.user?.id ?? null;
   const { subjects } = useStudySubjects(userId);
@@ -126,10 +133,20 @@ export default function HistoryList({
     setUpdatingTaskId(null);
     setDeletingId(null);
     setConfirmDeleteId(null);
+    setFreshIds(EMPTY_IDS);
     setLoading(userId !== null);
   }
 
-  const fetchHistory = useCallback(async () => {
+  // 시트를 접으면 새 기록 표시는 할 일을 다 했다(다시 펼칠 때 또 떠오르지 않는다).
+  const hidden = Boolean(onToggleCollapsed) && collapsed;
+  const [wasHidden, setWasHidden] = useState(hidden);
+  if (wasHidden !== hidden) {
+    setWasHidden(hidden);
+    if (hidden) setFreshIds(EMPTY_IDS);
+  }
+
+  // markNew: 기록을 저장해 다시 불러올 때. 처음 불러오기·새로고침·과목 변경으로 다시 읽을 때는 아무 행도 움직이지 않는다.
+  const fetchHistory = useCallback(async ({ markNew = false }: { markNew?: boolean } = {}) => {
     const generation = ++fetchGenerationRef.current;
     const account = accountRef.current;
     const isCurrent = () => account === accountRef.current && generation === fetchGenerationRef.current;
@@ -193,7 +210,13 @@ export default function HistoryList({
         }
       });
 
-      setHistory(groupedHistory.slice(0, HISTORY_DISPLAY_COUNT));
+      const nextHistory = groupedHistory.slice(0, HISTORY_DISPLAY_COUNT);
+      const loaded = loadedIdsRef.current;
+      setFreshIds(markNew && loaded?.userId === userId
+        ? new Set(nextHistory.filter(item => !loaded.ids.has(item.id)).map(item => item.id))
+        : EMPTY_IDS);
+      loadedIdsRef.current = { userId, ids: new Set(nextHistory.map(item => item.id)) };
+      setHistory(nextHistory);
       setRecentRows(recent);
       setLoadedAt(now);
     } catch (error) {
@@ -370,7 +393,9 @@ export default function HistoryList({
 
   // updateTrigger 또는 로그인 사용자가 변경될 때마다 다시 로드
   useEffect(() => {
-    void fetchHistory();
+    const markNew = seenTriggerRef.current !== updateTrigger;
+    seenTriggerRef.current = updateTrigger;
+    void fetchHistory({ markNew });
     const refresh = () => { void fetchHistory(); };
     window.addEventListener(STUDY_SUBJECTS_CHANGED_EVENT, refresh);
     return () => {
@@ -390,7 +415,6 @@ export default function HistoryList({
 
   const summary = session && loadedAt ? summarizeRecentActivity(recentRows, loadedAt) : null;
   const hasHeader = Boolean(onToggleCollapsed);
-  const hidden = hasHeader && collapsed;
   const editingItem = history.find(item => item.id === editingId) ?? null;
   const subjectName = (item: HistoryItem) =>
     item.subject_id ? subjects.find(subject => subject.id === item.subject_id)?.name ?? '지정된 과목' : '미분류';
@@ -430,23 +454,18 @@ export default function HistoryList({
             <ChevronDown
               aria-hidden="true"
               strokeWidth={2.2}
-              className={cn(
-                'size-4 transition-transform duration-300 motion-reduce:transition-none md:size-[18px]',
-                collapsed && 'rotate-180',
-              )}
+              className={cn('size-4 transition-transform md:size-[18px]', collapsed && 'rotate-180')}
             />
           </span>
         </button>
       ) : null}
 
-      {/* 접기: 내용 높이까지 grid 행 높이를 움직인다(디자인 보드의 max-height 전환과 같은 효과). */}
+      {/* 접기: 내용 높이까지 grid 행 높이를 움직인다(ui-collapse, 디자인 보드의 max-height 전환과 같은 효과). */}
       <div
         id={bodyId}
         inert={hidden}
-        className={cn(
-          'grid min-h-0 flex-1 transition-[grid-template-rows,visibility] duration-[600ms] ease-[ease] motion-reduce:transition-none',
-          hidden ? 'invisible grid-rows-[0fr]' : 'grid-rows-[1fr]',
-        )}
+        data-state={hidden ? 'closed' : 'open'}
+        className="ui-collapse min-h-0 flex-1"
       >
         <div className="min-h-0 overflow-y-auto md:overflow-hidden">
           <div className="mx-auto w-full max-w-[720px] px-5 pb-3 md:px-8 md:pb-16">
@@ -472,7 +491,7 @@ export default function HistoryList({
                     const time = loadedAt ? formatRecordTime(new Date(item.created_at), loadedAt) : '';
                     const pomodoro = isPomodoroMode(item.mode);
                     return (
-                      <li key={item.id} className="flex flex-col">
+                      <li key={item.id} className={cn('flex flex-col', !hidden && freshIds.has(item.id) && 'animate-fade-up')}>
                         <button
                           type="button"
                           ref={(element) => {

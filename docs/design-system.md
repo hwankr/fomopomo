@@ -141,8 +141,9 @@
 
 ### 구슬 `components/ui/Beads.tsx`
 
-- `<Beads label done? current? planned? total? states? tone? size? gap? direction? wrap? className? />` — `role="img"` + `aria-label={label}` 하나로 읽히고 구슬 하나하나는 숨긴다. 상태는 `states`로 직접 주거나 개수로 준다(끝낸 → 지금 → 계획 → 빈 구슬 순, `total`이 칸 수를 정한다).
+- `<Beads label done? current? planned? total? states? tone? size? gap? direction? wrap? popCompleted? className? />` — `role="img"` + `aria-label={label}` 하나로 읽히고 구슬 하나하나는 숨긴다. 상태는 `states`로 직접 주거나 개수로 준다(끝낸 → 지금 → 계획 → 빈 구슬 순, `total`이 칸 수를 정한다).
 - `<Bead state tone size />` 한 알(범례 점 등). `buildBeadStates()`는 개수 → 상태 배열.
+- `popCompleted` — 지금 구슬이 끝냄으로 바뀌면 그 구슬만 `animate-pop`(처음 그릴 때·초기화·일시정지는 제외). 타이머 무대가 쓴다.
 - 상태 색: `done` 모드 색 · `current` 모드 색 + 박동 · `empty` `bead` · `planned` `pomo-soft` · `past` `bead-past`. `tone`은 `pomo`(기본)·`rest`·`watch`.
 - 색 바꾸기: 상위 요소에 `--bead-on`(끝낸·지금), `--bead-off`(빈), `--bead-planned`, `--bead-past`를 준다. 모드 기본색은 별도 변수 `--bead-tone`(`data-bead-tone`이 정한다)에 있으므로 상위의 `--bead-*`가 `pomo`·`rest`·`watch` 모두에서 이긴다. `--bead-tone`은 직접 바꾸지 않는다. 예) 실행 중 틴트 무대의 빈 구슬은 흰색 `[--bead-off:var(--color-white)]`, 완료된 계획 블록 안은 `[--bead-on:var(--color-white)] [--bead-planned:rgb(255_255_255/.5)]`.
 

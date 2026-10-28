@@ -30,6 +30,8 @@ interface StopwatchDisplayProps {
   selectedTaskTitle: string;
   selectedTaskSubject?: string | null;
   isTaskPickerOpen?: boolean;
+  /** 작업 선택기 내용의 id(여는 버튼의 aria-controls) */
+  taskPickerId?: string;
   onToggleTaskPicker: () => void;
   taskTriggerRef?: Ref<HTMLButtonElement>;
 }
@@ -46,6 +48,7 @@ export const StopwatchDisplay = ({
   selectedTaskTitle,
   selectedTaskSubject = null,
   isTaskPickerOpen = false,
+  taskPickerId,
   onToggleTaskPicker,
   taskTriggerRef,
 }: StopwatchDisplayProps) => {
@@ -74,6 +77,7 @@ export const StopwatchDisplay = ({
           title={selectedTaskId ? selectedTaskTitle : null}
           subject={selectedTaskSubject}
           open={isTaskPickerOpen}
+          controls={taskPickerId}
           onClick={onToggleTaskPicker}
         />
       </div>

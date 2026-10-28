@@ -153,6 +153,53 @@ describe('TimerDisplay ended banner', () => {
   });
 });
 
+describe('TimerDisplay motion', () => {
+  it('lets the banner rise only for a phase that just ended on screen', () => {
+    const ended = { mode: 'focus' as const, duration: 25 * 60, cycleCount: 0 };
+    const view = renderTimerDisplay({ timerMode: 'shortBreak', timeLeft: 5 * 60, timerDuration: 5 * 60, ended: { ...ended, live: true } });
+    const banner = () => screen.getByText('집중 시간이 끝났어요. 5분 쉬어 가요.').parentElement!;
+    expect(banner()).toHaveClass('animate-fade-up');
+    view.unmount();
+
+    // 다시 열며 복원한 끝남은 화면과 함께 나타나므로 따로 움직이지 않는다.
+    renderTimerDisplay({ timerMode: 'shortBreak', timeLeft: 5 * 60, timerDuration: 5 * 60, ended });
+    expect(banner()).not.toHaveClass('animate-fade-up');
+  });
+
+  it('pops the minute bead that just finished, not the ones restored on mount', () => {
+    const view = renderTimerDisplay({ isRunning: true, timeLeft: 23 * 60 + 5 });
+    const beads = () => Array.from(screen.getByRole('img').querySelectorAll('.ui-bead'));
+    expect(beads().filter((bead) => bead.classList.contains('animate-pop'))).toHaveLength(0);
+
+    view.rerender(
+      <TimerDisplay
+        timerMode="focus" timeLeft={22 * 60 + 59} timerDuration={25 * 60} isRunning isSaving={false} cycleCount={0}
+        longBreakInterval={4} showSaveButton={false} showResetButton={false} onToggleTimer={vi.fn()} onResetTimer={vi.fn()}
+        onSaveTimer={vi.fn()} selectedTaskId={null} selectedTaskTitle="" onToggleTaskPicker={vi.fn()}
+      />,
+    );
+    // 1분 55초 → 2분 1초: 지금이던 두 번째 구슬이 끝났다.
+    expect(beads().map((bead) => bead.classList.contains('animate-pop'))).toEqual([false, true, ...Array(23).fill(false)]);
+  });
+
+  it('keeps the press (scale) in the transitions the stage controls override', () => {
+    renderTimerDisplay({ timeLeft: 20 * 60, showResetButton: true });
+    expect(screen.getByRole('button', { name: '시작' }).className).toContain('transition-[filter,background-color,scale]');
+    expect(screen.getByRole('button', { name: '타이머 초기화' }).className).toContain('transition-[background-color,filter,scale]');
+    expect(screen.getByRole('button', { name: /지금 하는 일/ })).toHaveClass('ui-press');
+    expect(screen.getByRole('button', { name: /지금 하는 일/ }).className).toContain('transition-[color,background-color,scale]');
+  });
+
+  it('points the task button at the open picker', () => {
+    const view = renderTimerDisplay({ taskPickerId: 'picker' });
+    const trigger = screen.getByRole('button', { name: /지금 하는 일/ });
+    expect(trigger).not.toHaveAttribute('aria-controls');
+    view.unmount();
+    renderTimerDisplay({ taskPickerId: 'picker', isTaskPickerOpen: true });
+    expect(screen.getByRole('button', { name: /지금 하는 일/ })).toHaveAttribute('aria-controls', 'picker');
+  });
+});
+
 describe('TimerDisplay task handoff', () => {
   it('completes the selected task without also toggling the timer', () => {
     const onCompleteTask = vi.fn();

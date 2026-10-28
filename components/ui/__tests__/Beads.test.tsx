@@ -7,6 +7,52 @@ import Beads, { Bead, buildBeadStates } from '../Beads';
 const states = (element: HTMLElement) =>
   Array.from(element.querySelectorAll('.ui-bead')).map((bead) => bead.getAttribute('data-state'));
 
+const popped = (element: HTMLElement) =>
+  Array.from(element.querySelectorAll('.ui-bead')).flatMap((bead, index) => (bead.classList.contains('animate-pop') ? [index] : []));
+
+describe('Beads popCompleted', () => {
+  afterEach(cleanup);
+
+  const row = (beads: Parameters<typeof Beads>[0]['states'], popCompleted = true) => (
+    <Beads label="진행" states={beads} popCompleted={popCompleted} />
+  );
+
+  it('does not pop on the first render, even with restored progress', () => {
+    const { container } = render(row(['done', 'done', 'current', 'empty']));
+    expect(popped(container)).toEqual([]);
+  });
+
+  it('pops only the bead that turned from current to done, once', () => {
+    const view = render(row(['done', 'current', 'empty']));
+    view.rerender(row(['done', 'done', 'current']));
+    expect(popped(view.container)).toEqual([1]);
+    // 같은 상태로 다시 그려도(타이머 틱) 표시는 그대로라 애니메이션이 다시 돌지 않는다.
+    const bead = view.container.querySelectorAll('.ui-bead')[1];
+    view.rerender(row(['done', 'done', 'current']));
+    expect(view.container.querySelectorAll('.ui-bead')[1]).toBe(bead);
+    expect(popped(view.container)).toEqual([1]);
+    // 다음 구슬이 끝나면 표시가 옮겨 간다.
+    view.rerender(row(['done', 'done', 'done']));
+    expect(popped(view.container)).toEqual([2]);
+  });
+
+  it('does not pop on reset, pause or a jump from empty to done', () => {
+    const view = render(row(['done', 'current', 'empty']));
+    view.rerender(row(['done', 'empty', 'empty']));
+    expect(popped(view.container)).toEqual([]);
+    view.rerender(row(['empty', 'empty', 'empty']));
+    expect(popped(view.container)).toEqual([]);
+    view.rerender(row(['done', 'done', 'current']));
+    expect(popped(view.container)).toEqual([]);
+  });
+
+  it('never pops without the option (plan and profile beads)', () => {
+    const view = render(row(['done', 'current'], false));
+    view.rerender(row(['done', 'done'], false));
+    expect(popped(view.container)).toEqual([]);
+  });
+});
+
 describe('buildBeadStates', () => {
   it('orders done, current and planned beads before empty ones', () => {
     expect(buildBeadStates({ done: 2, current: true, planned: 1, total: 6 }))

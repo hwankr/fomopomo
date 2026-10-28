@@ -9,6 +9,8 @@ export type EndedPhase = {
   duration: number;
   /** 끝나기 전의 누적 집중 횟수(그 단계가 속한 사이클을 정한다) */
   cycleCount: number;
+  /** 이 화면에서 지켜보는 동안 끝났다(다시 열며 복원한 끝남이 아니다). 안내 띠가 한 번 떠오른다. */
+  live?: boolean;
 };
 
 export const getDisplayCycleCount = (

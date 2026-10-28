@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import ModalDialog from '@/components/ui/ModalDialog';
+import { cn } from '@/lib/utils';
 import type { Preset, Settings } from '../hooks/useSettings';
 
 export type TimerDurationSettings = Pick<Settings, 'pomoTime' | 'shortBreak' | 'longBreak' | 'longBreakInterval'>;
@@ -66,8 +67,11 @@ function TimerSettingsBody({
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
+  // 방금 바꾼 칸. 그 숫자만 바뀔 때마다 한 번 튄다(창을 열 때는 움직이지 않는다).
+  const [stepped, setStepped] = useState<StepperDefinition['key'] | null>(null);
 
   const step = (definition: StepperDefinition, delta: number) => {
+    setStepped(definition.key);
     const max = Math.max(definition.max, initial[definition.key]);
     setDraft((current) => ({
       ...current,
@@ -115,8 +119,10 @@ function TimerSettingsBody({
                   −
                 </button>
                 <span aria-live="polite" className="min-w-[58px] text-center text-[15px] font-bold md:min-w-16 md:text-base">
-                  {value}
-                  {definition.unit}
+                  <span key={value} className={cn('inline-block', stepped === definition.key && 'animate-pop')}>
+                    {value}
+                    {definition.unit}
+                  </span>
                 </span>
                 <button
                   type="button"
