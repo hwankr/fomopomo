@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getDayStart, getDayEnd } from '@/lib/dateUtils';
 import { X } from 'lucide-react';
+import ModalDialog from '@/components/ui/ModalDialog';
+import { formatHourMinute, formatHoursText } from '@/components/groups/groupUtils';
 
 interface MemberReportModalProps {
     isOpen: boolean;
@@ -18,16 +20,11 @@ type TaskData = {
 };
 
 export default function MemberReportModal({ isOpen, onClose, userId, userName }: MemberReportModalProps) {
+    const titleId = useId();
+    const tasksTitleId = useId();
     const [loading, setLoading] = useState(true);
     const [totalFocusTime, setTotalFocusTime] = useState(0);
     const [tasks, setTasks] = useState<TaskData[]>([]);
-
-    const formatDuration = (seconds: number) => {
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        if (h > 0) return `${h}h ${m}m`;
-        return `${m}m`;
-    };
 
     const fetchReportData = useCallback(async () => {
         console.log('Fetching report data for:', userId);
@@ -58,7 +55,7 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
 
                 const taskMap: Record<string, number> = {};
                 sessions.forEach(session => {
-                    const taskName = session.task?.trim() || 'No Task';
+                    const taskName = session.task?.trim() || '작업 이름 없음';
                     taskMap[taskName] = (taskMap[taskName] || 0) + session.duration;
                 });
 
@@ -84,62 +81,61 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
         }
     }, [fetchReportData, isOpen, userId]);
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4" onClick={onClose}>
-            <div
-                className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col transition-colors duration-300"
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="flex shrink-0 justify-between items-center gap-3 p-4 border-b border-gray-100 dark:border-slate-700">
-                    <h2 className="min-w-0 break-words text-lg font-bold text-gray-800 dark:text-white">
-                        {userName}님의 리포트
-                    </h2>
-                    <button
-                        onClick={onClose}
-                        className="shrink-0 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
-                        aria-label="리포트 닫기"
-                    >
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
-                    {loading ? (
-                        <div className="flex justify-center py-8">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-500"></div>
-                        </div>
-                    ) : (
-                        <div className="space-y-6">
-                            <div className="text-center">
-                                <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">오늘 집중 시간</div>
-                                <div className="text-4xl font-mono font-bold text-rose-500 dark:text-rose-400">
-                                    {formatDuration(totalFocusTime)}
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">태스크별 상세</h3>
-                                {tasks.length > 0 ? (
-                                    <div className="space-y-2">
-                                        {tasks.map((task) => (
-                                            <div key={task.name} className="flex justify-between items-center gap-2 text-sm p-2 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
-                                                <span className="min-w-0 text-gray-700 dark:text-gray-200 truncate" title={task.name}>{task.name}</span>
-                                                <span className="shrink-0 font-mono text-gray-500 dark:text-gray-400">{formatDuration(task.duration)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="text-center text-gray-400 text-sm py-4 bg-gray-50 dark:bg-slate-700/30 rounded-lg border border-dashed border-gray-200 dark:border-slate-700">
-                                        오늘 기록된 태스크가 없습니다
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
+        <ModalDialog
+            open={isOpen}
+            onClose={onClose}
+            aria-labelledby={titleId}
+            overlayClassName="animate-fade-in"
+            className="animate-scale-in"
+        >
+            <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
+            <div className="flex items-start justify-between gap-3">
+                <h2 id={titleId} className="ui-dialog-title min-w-0 pt-1.5 break-words">
+                    {userName}님의 리포트
+                </h2>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="ui-icon-button -mt-0.5 -mr-2 text-ink-muted"
+                    aria-label="리포트 닫기"
+                >
+                    <X aria-hidden="true" size={20} strokeWidth={1.8} />
+                </button>
             </div>
-        </div>
+
+            {loading ? (
+                <p role="status" className="m-0 py-8 text-center text-sm text-ink-muted">
+                    불러오는 중이에요…
+                </p>
+            ) : (
+                <>
+                    <div className="flex flex-col gap-0.5">
+                        <span className="font-display text-[34px] leading-[1.1] font-bold tracking-[-0.02em] text-pomo">
+                            {formatHoursText(totalFocusTime)}
+                        </span>
+                        <span className="text-[13px] text-ink-muted">오늘 집중 시간</span>
+                    </div>
+
+                    <section aria-labelledby={tasksTitleId} className="flex flex-col gap-1">
+                        <h3 id={tasksTitleId} className="m-0 text-[13px] font-semibold text-ink-muted">
+                            작업별 시간
+                        </h3>
+                        {tasks.length > 0 ? (
+                            <ul className="m-0 flex list-none flex-col p-0">
+                                {tasks.map((task) => (
+                                    <li key={task.name} className="flex min-h-11 items-center justify-between gap-3">
+                                        <span className="min-w-0 truncate" title={task.name}>{task.name}</span>
+                                        <span className="shrink-0 font-semibold">{formatHourMinute(task.duration)}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="m-0 py-2 text-sm text-ink-muted">오늘 기록된 작업이 없어요.</p>
+                        )}
+                    </section>
+                </>
+            )}
+        </ModalDialog>
     );
 }
