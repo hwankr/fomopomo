@@ -1,15 +1,12 @@
 'use client';
 
-import { useState, type KeyboardEvent } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import * as Popover from '@radix-ui/react-popover';
 import { Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { stopActivationKeys, stopAllKeys } from '@/components/ui/keyBoundary';
 import { useShell } from './ShellProvider';
-
-// 종과 팝오버의 키 입력이 window의 전역 단축키(타이머의 Space 등)로 새지 않게 막는다.
-// 버튼의 기본 Space/Enter 동작과 Radix의 Escape(document 캡처 단계)는 그대로 동작한다.
-const isolateKeys = (event: KeyboardEvent<HTMLElement>) => event.stopPropagation();
 
 type NotificationBellProps = {
   /** header: 데스크톱 헤더(아이콘 21px), topbar: 모바일 상단 바(아이콘 20px) */
@@ -31,7 +28,8 @@ export default function NotificationBell({ variant = 'header', className }: Noti
           type="button"
           aria-label={hasRequests ? `알림 ${friendRequestCount}개` : '알림'}
           aria-haspopup={undefined}
-          onKeyDown={isolateKeys}
+          // 종을 여는 Enter·Space가 window 전역 단축키(타이머 Space)로 새지 않게 막는다.
+          onKeyDown={stopActivationKeys}
           className={cn('ui-icon-button', className)}
         >
           <Bell aria-hidden="true" size={isHeader ? 21 : 20} strokeWidth={1.8} />
@@ -53,12 +51,14 @@ export default function NotificationBell({ variant = 'header', className }: Noti
           align="end"
           sideOffset={8}
           collisionPadding={12}
-          onKeyDown={isolateKeys}
-          className="ui-popover ui-popover-surface z-50 w-[300px] max-w-[calc(100vw-24px)] outline-none md:w-80"
+          onKeyDown={stopAllKeys}
+          // 보드는 content-box(너비 300/320 + 안쪽 8px)이므로 바깥 너비 316/336px로 맞춘다.
+          className="ui-popover ui-popover-surface z-50 w-[316px] max-w-[calc(100vw-24px)] outline-none md:w-[336px]"
         >
           {hasRequests ? (
             <Link
-              href="/friends"
+              // 친구 화면의 받은 요청 탭으로 바로 간다.
+              href="/friends?tab=requests"
               onClick={() => setOpen(false)}
               className="block rounded-control px-3 py-2.5 text-sm text-ink transition-colors hover:bg-hover"
             >

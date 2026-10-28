@@ -48,6 +48,12 @@ let lastDialogId = 0;
 
 const isTopDialog = (id: number) => openDialogs[openDialogs.length - 1] === id;
 
+// 대화상자가 이미 처리한 Escape. 같은 이벤트를 다른 경로에서 두 번 처리하지 않게 한다.
+const handledEscapes = new WeakSet<Event>();
+
+const isFromInertContent = (event: Event) =>
+  event.target instanceof Element && event.target.closest('[inert]') !== null;
+
 function isRendered(element: HTMLElement, root: HTMLElement) {
   for (let node: HTMLElement | null = element; node && node !== root; node = node.parentElement) {
     if (node.hidden || node.hasAttribute('inert')) return false;
@@ -61,6 +67,32 @@ export function getTabbableElements(root: HTMLElement) {
   return Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter(
     (element) => element.tabIndex >= 0 && isRendered(element, root),
   );
+}
+
+// Tab/Shift+Tab을 패널 안에서 돌린다. 패널 밖 다른 층(포털된 팝오버 내용 등)의 Tab은 그 층에 맡긴다.
+function containTab(panel: HTMLElement, event: globalThis.KeyboardEvent) {
+  const target = event.target;
+  const fromPanel = target instanceof Node && panel.contains(target);
+  const fromNowhere = target === document.body || target === document.documentElement;
+  if (!fromPanel && !fromNowhere) return;
+
+  const tabbables = getTabbableElements(panel);
+  if (tabbables.length === 0) {
+    event.preventDefault();
+    panel.focus();
+    return;
+  }
+  const first = tabbables[0];
+  const last = tabbables[tabbables.length - 1];
+  const active = document.activeElement;
+  const outside = !tabbables.includes(active as HTMLElement);
+  if (event.shiftKey && (active === first || outside)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || outside)) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 // 대화상자 밖의 body 자식을 inert로 만들어 포인터·키보드·보조기기에서 뺀다.
@@ -122,19 +154,45 @@ function OpenModalDialog({
     const target = initialFocusRef?.current ?? getTabbableElements(panel)[0] ?? panel;
     target.focus();
 
-    // 포커스가 대화상자 밖(body 등)에 있을 때 누른 Escape도 맨 위 대화상자가 받는다.
+    let closed = false;
+
+    // 캡처 단계: 안쪽 컨트롤이 전파를 막아도 맨 위 대화상자가 키를 놓치지 않게 한다.
+    // - Tab은 여기서 바로 가둔다.
+    // - Escape는 안쪽 층(열린 팝오버, 입력을 닫는 폼 등)이 먼저 쓸 수 있도록 여기서 정하지 않는다.
+    //   패널·문서 단계에서 처리되지 못한 채(전파만 막히고 preventDefault 없이) 끝났으면
+    //   이벤트 처리가 끝난 뒤 닫는다.
     // inert 배경에서 온 키 입력은 사용자가 낼 수 없는 것이므로 무시한다.
-    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || !isTopDialog(id)) return;
-      if (event.target instanceof Element && event.target.closest('[inert]')) return;
+    const handleCapture = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || !isTopDialog(id) || isFromInertContent(event)) return;
+      if (event.key === 'Tab') {
+        containTab(panel, event);
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      window.setTimeout(() => {
+        if (closed || handledEscapes.has(event) || event.defaultPrevented || !isTopDialog(id)) return;
+        handledEscapes.add(event);
+        onCloseRef.current();
+      }, 0);
+    };
+
+    // 포커스가 대화상자 밖(body 등)에 있을 때 누른 Escape도 맨 위 대화상자가 바로 받는다.
+    const handleBubble = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || handledEscapes.has(event)) return;
+      if (!isTopDialog(id) || isFromInertContent(event)) return;
+      handledEscapes.add(event);
       event.preventDefault();
       event.stopPropagation();
       onCloseRef.current();
     };
-    document.addEventListener('keydown', handleDocumentKeyDown);
+
+    document.addEventListener('keydown', handleCapture, true);
+    document.addEventListener('keydown', handleBubble);
 
     return () => {
-      document.removeEventListener('keydown', handleDocumentKeyDown);
+      closed = true;
+      document.removeEventListener('keydown', handleCapture, true);
+      document.removeEventListener('keydown', handleBubble);
       const index = openDialogs.indexOf(id);
       if (index >= 0) openDialogs.splice(index, 1);
       restoreBackground();
@@ -145,36 +203,15 @@ function OpenModalDialog({
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const panel = event.currentTarget;
     // 안쪽 키 입력이 부모 대화상자나 window 단축키(타이머 Space 등)로 새지 않게 한다.
+    // (Tab은 문서 캡처 단계에서 이미 가뒀다.)
     event.stopPropagation();
-
-    if (event.key === 'Escape') {
-      // Radix 팝오버 등 안쪽 층이 먼저 처리했다면(preventDefault) 그 층만 닫힌다.
-      if (event.defaultPrevented || event.nativeEvent.isComposing || !isTopDialog(idRef.current)) return;
-      event.preventDefault();
-      onCloseRef.current();
-      return;
-    }
-
-    if (event.key !== 'Tab' || !panel.contains(event.target as Node)) return;
-    const tabbables = getTabbableElements(panel);
-    if (tabbables.length === 0) {
-      event.preventDefault();
-      panel.focus();
-      return;
-    }
-    const first = tabbables[0];
-    const last = tabbables[tabbables.length - 1];
-    const active = document.activeElement;
-    const outside = !tabbables.includes(active as HTMLElement);
-    if (event.shiftKey && (active === first || outside)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || outside)) {
-      event.preventDefault();
-      first.focus();
-    }
+    if (event.key !== 'Escape') return;
+    // 안쪽 층(Radix 팝오버, 입력만 닫는 폼 등)이 먼저 처리했다면(preventDefault) 그 층만 닫힌다.
+    if (event.defaultPrevented || event.nativeEvent.isComposing || !isTopDialog(idRef.current)) return;
+    handledEscapes.add(event.nativeEvent);
+    event.preventDefault();
+    onCloseRef.current();
   };
 
   // 덮개를 눌러도 포커스가 body로 빠지지 않게 한다(배경 클릭으로 닫지는 않는다).

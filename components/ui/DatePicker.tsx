@@ -8,6 +8,7 @@ import {
   isSameDay, isSameMonth, isValid, parse, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { stopActivationKeys, stopAllKeys } from './keyBoundary';
 
 type DatePickerProps = {
   value: string;
@@ -132,7 +133,7 @@ export default function DatePicker({
             type="button" id={triggerId} aria-labelledby={labelId} aria-describedby={valueId}
             disabled={disabled || invalidRange}
             onClick={event => event.stopPropagation()}
-            onKeyDown={event => event.stopPropagation()}
+            onKeyDown={stopActivationKeys}
             className="flex h-11 w-full min-w-0 items-center justify-between gap-3 rounded-control border-0 bg-surface px-3.5 text-left text-[15px] text-ink transition-[filter] hover:brightness-97 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span id={valueId} className={`truncate tabular-nums ${selectedDate ? '' : 'text-ink-faint'}`}>
@@ -152,7 +153,7 @@ export default function DatePicker({
             onEscapeKeyDown={event => event.stopPropagation()}
             onClick={event => event.stopPropagation()}
             onMouseDown={event => event.stopPropagation()}
-            onKeyDown={event => event.stopPropagation()}
+            onKeyDown={stopAllKeys}
             className="ui-popover ui-popover-surface z-80 max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-24px)] origin-(--radix-popover-content-transform-origin) overflow-y-auto p-3 outline-none"
           >
             <div className="mb-3 flex items-center justify-between gap-2">

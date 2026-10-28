@@ -137,3 +137,24 @@ describe('AppSelect', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 });
+
+describe('AppSelect key boundary', () => {
+  it('keeps the keys it uses from parent handlers and passes Escape and Tab on', async () => {
+    const parentKeyDown = vi.fn();
+    render(<div onKeyDown={event => parentKeyDown(event.key)}><ControlledSelect /></div>);
+    const trigger = screen.getByRole('combobox', { name: '과목' });
+
+    for (const key of ['Enter', ' ', 'ArrowUp', 'a']) fireEvent.keyDown(trigger, { key });
+    expect(parentKeyDown).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+    expect(parentKeyDown.mock.calls.map(([key]) => key)).toEqual(['Escape', 'Tab']);
+
+    // 열린 목록은 키보드를 가지므로 아무 키도 위로 보내지 않는다.
+    await openSelect();
+    parentKeyDown.mockClear();
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Tab' });
+    expect(parentKeyDown).not.toHaveBeenCalled();
+  });
+});

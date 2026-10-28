@@ -84,7 +84,7 @@ describe('Navbar', () => {
     const popover = await screen.findByRole('region', { name: '알림' });
     expect(bell).toHaveAttribute('aria-expanded', 'true');
     const item = within(popover).getByRole('link', { name: '받은 친구 요청이 2개 있어요.' });
-    expect(item).toHaveAttribute('href', '/friends');
+    expect(item).toHaveAttribute('href', '/friends?tab=requests');
   });
 
   it('opens the bell with Space without leaking keys to window shortcuts', async () => {

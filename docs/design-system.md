@@ -100,7 +100,7 @@
 | `ui-scrollbar-none` | 스크롤 막대 숨김(모바일 가로 탭 줄) | |
 | `animate-fade-in`, `animate-scale-in`, `ui-panel-enter` | 160ms 등장 | |
 
-대화상자 버튼 줄: 데스크톱 `flex justify-end gap-2`, 모바일 `flex gap-2` + 각 버튼 `min-h-[50px] flex-1`(`ConfirmModal` 참고). 되돌릴 수 없는 확인은 `bg-pomo-deep`, 일반 확인은 `bg-ink`, 모드 동작(그룹 나가기 등)은 `bg-pomo`.
+대화상자 버튼 줄: 데스크톱 `flex justify-end gap-2`, 모바일 `flex gap-2` + 각 버튼 `min-h-[50px] flex-1`(`ConfirmModal` 참고). 되돌릴 수 없는 확인은 `bg-pomo-deep`, 일반 확인은 `bg-ink`, 모드 동작(그룹 나가기 등)은 `bg-pomo` — `ConfirmModal`에서는 `confirmTone="danger" | "ink" | "pomo"`로 고른다.
 
 ## 4. 공통 컴포넌트
 
@@ -124,7 +124,7 @@
   | 그룹 | 친구와 같고 `end`에 그룹 만들기(`ui-icon-button ui-focus-ink bg-pomo text-white`, + 18px)를 종 앞에 둔다(`gap-2`로 감싼다) |
   | 프로필 | `start={<TopBarTitle title="프로필" titleClassName="text-xl" />}` · `end`에 `/settings`로 가는 `ui-icon-button-surface`(`aria-label="설정"`) |
   | 설정 | `start` 뒤로(`ui-icon-button`, ChevronLeft 22px, `/profile`) · `center` 제목(h1 17px 700) · `end` 저장(`ui-button-ghost min-h-10 text-pomo font-bold`) · `sticky` |
-- **`NotificationBell`** `{ variant?: 'header' | 'topbar' }` — 받은 친구 요청이 있으면 로즈 점과 `aria-label="알림 N개"`, 팝오버(`role="region"`, 데스크톱 320px / 모바일 300px)에 `받은 친구 요청이 N개 있어요.`(`/friends` 링크)를, 없으면 `새 알림이 없어요.`를 보여 준다. 앱에 없는 알림은 만들지 않는다.
+- **`NotificationBell`** `{ variant?: 'header' | 'topbar' }` — 받은 친구 요청이 있으면 로즈 점과 `aria-label="알림 N개"`, 팝오버(`role="region"`, 바깥 너비 데스크톱 336px / 모바일 316px)에 `받은 친구 요청이 N개 있어요.`(`/friends?tab=requests` 링크 — 친구 화면의 받은 요청 탭)를, 없으면 `새 알림이 없어요.`를 보여 준다. 앱에 없는 알림은 만들지 않는다.
 - **`MobileTabBar`** — 레이아웃이 그리므로 페이지에서 렌더링하지 않는다. `/`, `/plan`, `/friends`, `/groups`(+`/groups/[id]`), `/profile`에서만 보이고 설정·약관·관리자 화면에는 없다. 흰 바탕 고정, 5탭(Timer·Calendar·Users·LayoutGrid·User 22px, 선택 굵기 2.2 / 나머지 1.8, 11px 라벨, 선택 `ink` 700 + `aria-current`, 나머지 `ink-faint` 500). 흰 페이지에서는 위에 `line-soft` 선, 타이머에서는 선 없음. 친구 탭에 받은 친구 요청 점. 바로 앞에 같은 높이의 빈 칸을 두어 푸터와 본문이 가려지지 않는다.
 - **`ShellProvider` / `useShell()`** → `{ session, friendRequestCount }`. 받은 친구 요청 구독(`useFriendRequestCount`)은 여기서 한 번만 연다. 같은 사용자로 훅을 또 부르면 같은 Realtime 채널을 두 번 구독하려다 오류가 나므로, 화면에서는 `useShell().friendRequestCount`를 쓴다.
 - **`Footer`** — 흰 바탕, 최대 960px. 워드마크 + ©, 회색 14px 링크(타이머·계획·친구·그룹·문의하기·후원하기·이용약관·개인정보처리방침), 문의 이메일 복사 버튼.
@@ -163,13 +163,17 @@
 
 - `document.body`로 포털해 띄우고, 패널에 `role`·`aria-modal="true"`를 붙인다. 모바일은 아래 시트, `md`부터 가운데 패널(`.ui-dialog`).
 - 열 때: 연 요소를 기억하고 포커스를 안으로 옮긴다. 되돌릴 수 없는 확인은 안전한 취소에, 일반 확인은 확인 버튼에, 입력 대화상자는 첫 실제 컨트롤에 `initialFocusRef`를 준다.
-- 열린 동안: Tab/Shift+Tab을 패널 안에서 돈다. body의 다른 자식은 `inert`가 된다(포인터·키보드·보조기기 모두 차단). 계속 보여야 하는 영역은 `data-dialog-keep`으로 남긴다(토스트). 패널 안 키 입력은 부모 대화상자나 window 단축키(타이머 Space)로 전달되지 않는다.
-- Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 안쪽 Radix 선택·팝오버가 먼저 처리한 Escape(`preventDefault`)는 그 층만 닫는다. 덮개를 눌러도 닫히지 않는다.
+- 열린 동안: Tab/Shift+Tab을 패널 안에서 돈다(문서 캡처 단계에서 처리하므로 안쪽 컨트롤이 전파를 막아도 빠져나가지 않는다. 포털된 팝오버 내용 안의 Tab은 그 팝오버가 다룬다). body의 다른 자식은 `inert`가 된다(포인터·키보드·보조기기 모두 차단). 계속 보여야 하는 영역은 `data-dialog-keep`으로 남긴다(토스트). 패널 안 키 입력은 부모 대화상자나 window 단축키(타이머 Space)로 전달되지 않는다.
+- Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 덮개를 눌러도 닫히지 않는다. 겹친 층은 안쪽부터 하나씩 닫힌다.
+  - 열린 선택 목록·달력·팝오버가 있으면 첫 Escape는 그 층만 닫고(Radix가 `preventDefault`), 다음 Escape가 대화상자를 닫는다.
+  - 안쪽 요소가 Escape를 직접 쓰려면(예: 입력만 닫는 폼) `event.preventDefault()`를 부른다. 그러면 대화상자는 닫히지 않는다.
+  - 안쪽 요소가 전파만 막고 `preventDefault`를 하지 않은 Escape도 이벤트 처리가 끝난 뒤 대화상자가 닫는다(그래서 닫힌 선택·날짜 트리거에 포커스가 있어도 Escape로 닫힌다).
+  - `ConfirmModal`처럼 다른 대화상자 위에 뜬 것은 자기만 닫힌다.
 - 닫을 때(`open=false`): `inert`를 되돌리고 연 요소로 포커스를 돌려준다. 다른 대화상자 위에 띄워도(예: 설정 창 위의 `ConfirmModal`) 아래 대화상자는 그대로다.
 
 ### 확인·로그인·선택
 
-- `ConfirmModal` `{ isOpen, onClose, onConfirm, title, message, confirmText?, cancelText?, isDangerous? }` — `ModalDialog` `role="alertdialog"`, z-70. `isDangerous`면 확인이 `bg-pomo-deep`이고 처음 포커스는 취소, 아니면 `bg-ink`이고 처음 포커스는 확인.
+- `ConfirmModal` `{ isOpen, onClose, onConfirm, title, message, confirmText?, cancelText?, confirmTone?, isDangerous? }` — `ModalDialog` `role="alertdialog"`, z-70. `confirmTone`: `'ink'`(일반 확인, 기본 · `bg-ink`) · `'pomo'`(모드 동작, 예: 그룹 나가기 · `bg-pomo`) · `'danger'`(되돌릴 수 없음, 예: 계정 초기화 · `bg-pomo-deep`). `danger`는 처음 포커스가 취소, 나머지는 확인. 예전 `isDangerous`는 `confirmTone`이 없을 때 `'danger'`와 같다(새 코드는 `confirmTone`을 쓴다).
 - `LoginModal` `{ isOpen, onClose, onGoogleLogin }` — `ModalDialog`(데스크톱 400px), 처음 포커스는 `Google로 계속하기`, 닫기 `ui-icon-button`.
 - `AppSelect` `{ value, onValueChange, options, label?, placeholder?, displayValue?, compact?, disabled?, … }` — 트리거는 `ui-input`과 같은 모양(compact 36px·13px), 목록은 `ui-popover-surface`, 항목 40px·`hover` 강조·선택 600 + 로즈 체크. 화면에서는 기본 `<select>` 대신 이것을 쓴다.
 - `DatePicker` `{ value, onChange, label, min?, max?, … }` — 같은 입력 모양, 달력 팝오버. 선택한 날 `bg-ink` 흰 글자, 오늘 로즈 글자.
@@ -208,7 +212,9 @@
 | 탭 라벨 | — | 11px |
 | 타이머 숫자 | `font-display` 700, 232px(시:분:초면 150px), `min(…, 19vw)` | 124px(시:분:초면 90px) |
 
-목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 최소 높이 48–56px(친구 순위 66–72px). 행 사이 간격 2px, 선 없음.
+목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 행 사이 간격 2px, 선 없음. 최소 높이는 아래 **바깥 높이**로 준다: 타이머 작업 선택 56px(모바일 56px), 최근 활동 행 52px(버튼), 설정 과목 행 60px, 친구 순위 82px, 받은 요청 92px — 화면마다 보드에서 아래 규칙으로 다시 계산한다.
+
+**보드 치수 옮기기(content-box 주의)**: 보드의 `div`·`li`·`a`·`span`·`p`는 인라인 스타일에 `box-sizing: border-box`가 없으면 CSS 기본값 content-box라서 `width`/`min-height`/`height`에 padding이 **더해진다**(예: `min-height: 66px; padding: 8px 12px` → 바깥 82px). Tailwind는 모두 border-box이므로 `min-h-[82px] py-2`처럼 바깥 크기를 쓴다. `button`·`input`·`select`는 브라우저 기본이 border-box라 보드 값을 그대로 쓴다(예: 시작 버튼 `height: 56px; min-width: 200px; padding: 0 36px` → 바깥 200×56). 같은 개수의 항목으로 PNG와 행 간격을 비교해 확인한다.
 
 ## 6. 구슬 규칙
 
@@ -226,4 +232,5 @@
 - 할 것: 색·모서리·그림자는 토큰 유틸리티로, 굵기·크기는 이 문서의 글자 표대로 쓴다. 동작 줄이기 설정을 지킨다.
 - 하지 말 것: 카드(테두리·그림자 상자), 구분선, 그라데이션, 이모지 장식, `bg-slate-*`/`text-gray-*` 같은 기본 팔레트, hex 직접 입력, `dark:` 클래스.
 - 하지 말 것: 페이지마다 헤더·탭 바·알림 구독·대화상자 포커스 처리를 새로 만들기. `Navbar`·`MobileTopBar`·`useShell`·`ModalDialog`를 쓴다.
-- 하지 말 것: 헤더·상단 바처럼 페이지 위에 늘 떠 있는 컨트롤에서 키 입력을 window로 흘리기. 팝오버 트리거와 내용은 `onKeyDown={(e) => e.stopPropagation()}`로 경계를 막는다(`NotificationBell`, `AppSelect`, `DatePicker` 참고).
+- 팝오버·선택 컨트롤의 키 경계는 `components/ui/keyBoundary.ts`를 쓴다. **트리거는 자기가 쓰는 키만 막고 Escape·Tab은 올려 보낸다**: 버튼형 트리거 `onKeyDown={stopActivationKeys}`(Enter·Space), 선택 트리거 `stopSelectTriggerKeys`(Enter·Space·위아래 화살표·글자 검색). **열린 팝오버 내용**은 `onKeyDown={stopAllKeys}`(열려 있는 동안은 팝오버가 키보드를 가진다). 그래야 Space가 타이머 전역 단축키로 새지 않으면서 대화상자·폼의 Escape와 Tab이 동작한다(`NotificationBell`, `AppSelect`, `DatePicker` 참고).
+- 하지 말 것: 트리거에서 모든 키의 전파를 막기(`onKeyDown={(e) => e.stopPropagation()}`). 대화상자·폼이 Escape와 Tab을 받지 못한다.

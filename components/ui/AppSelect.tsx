@@ -4,6 +4,7 @@ import { useId } from 'react';
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { stopAllKeys, stopSelectTriggerKeys } from './keyBoundary';
 
 export type AppSelectOption = {
   value: string;
@@ -62,7 +63,7 @@ export default function AppSelect({
           id={triggerId}
           type="button"
           aria-label={ariaLabel ?? (label ? undefined : placeholder)}
-          onKeyDown={event => event.stopPropagation()}
+          onKeyDown={stopSelectTriggerKeys}
           className={cn(
             'group flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-control border-0 bg-surface px-3.5 text-left text-[15px] text-ink transition-[filter] hover:brightness-97 data-[placeholder]:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50',
             compact && 'h-9 rounded-chip px-3 text-[13px]',
@@ -79,7 +80,7 @@ export default function AppSelect({
             align="start"
             sideOffset={6}
             collisionPadding={12}
-            onKeyDown={event => event.stopPropagation()}
+            onKeyDown={stopAllKeys}
             onClick={event => event.stopPropagation()}
             onMouseDown={event => event.stopPropagation()}
             className="ui-popover ui-popover-surface z-[80] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden p-1.5 text-[15px] outline-none"

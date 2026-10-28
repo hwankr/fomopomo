@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,6 +11,8 @@ vi.mock('next/image', () => ({
 
 import ConfirmModal from '@/components/ConfirmModal';
 import LoginModal from '@/components/LoginModal';
+import AppSelect from '../AppSelect';
+import DatePicker from '../DatePicker';
 import ModalDialog from '../ModalDialog';
 
 // 브라우저처럼: keydown이 막히지 않았을 때만 Space가 버튼을 누른다.
@@ -121,6 +123,41 @@ describe('ModalDialog via ConfirmModal', () => {
     } finally {
       window.removeEventListener('keydown', windowKeyDown);
     }
+  });
+});
+
+describe('ConfirmModal tone', () => {
+  afterEach(() => cleanup());
+
+  const renderTone = (props: Partial<Parameters<typeof ConfirmModal>[0]>) =>
+    render(
+      <ConfirmModal
+        isOpen
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+        title="그룹 나가기"
+        message="다시 참여할 수 있어요."
+        confirmText="나가기"
+        {...props}
+      />,
+    );
+
+  it.each([
+    [{}, 'bg-ink', '나가기'],
+    [{ confirmTone: 'ink' as const }, 'bg-ink', '나가기'],
+    [{ confirmTone: 'pomo' as const }, 'bg-pomo', '나가기'],
+    [{ confirmTone: 'danger' as const }, 'bg-pomo-deep', '취소'],
+    [{ isDangerous: true }, 'bg-pomo-deep', '취소'],
+    [{ isDangerous: true, confirmTone: 'pomo' as const }, 'bg-pomo', '나가기'],
+  ])('maps %o to %s and focuses %s first', (props, fillClass, focused) => {
+    renderTone(props);
+
+    const confirm = screen.getByRole('button', { name: '나가기' });
+    expect(confirm).toHaveClass(fillClass);
+    for (const other of ['bg-ink', 'bg-pomo', 'bg-pomo-deep'].filter((name) => name !== fillClass)) {
+      expect(confirm).not.toHaveClass(other);
+    }
+    expect(screen.getByRole('button', { name: focused })).toHaveFocus();
   });
 });
 
@@ -236,5 +273,129 @@ describe('ModalDialog via LoginModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Google로 계속하기/ }));
     expect(onGoogleLogin).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 공통 선택 컨트롤이 대화상자의 처음·마지막 Tab 위치에 올 때(F5 회귀).
+describe('ModalDialog with shared select and date controls', () => {
+  afterEach(() => cleanup());
+
+  const afterEventDispatch = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+
+  function Fields({ onClose, onlySelect = false }: { onClose: () => void; onlySelect?: boolean }) {
+    const [subject, setSubject] = useState('a');
+    const [date, setDate] = useState('2026-10-20');
+    return (
+      <ModalDialog open onClose={onClose} aria-label="기록 편집">
+        <AppSelect
+          aria-label="과목"
+          value={subject}
+          onValueChange={setSubject}
+          options={[{ value: 'a', label: '영어' }, { value: 'b', label: '통계' }]}
+        />
+        {onlySelect ? null : (
+          <>
+            <button type="button">가운데</button>
+            <DatePicker label="공부 날짜" value={date} onChange={setDate} />
+          </>
+        )}
+      </ModalDialog>
+    );
+  }
+
+  const selectTrigger = () => screen.getByRole('combobox', { name: '과목' });
+  const dateTrigger = () => screen.getByRole('button', { name: '공부 날짜' });
+
+  it('keeps Tab and Shift+Tab inside when the select and date triggers are the first and last stops', () => {
+    render(<Fields onClose={vi.fn()} />);
+    expect(selectTrigger()).toHaveFocus();
+
+    fireEvent.keyDown(selectTrigger(), { key: 'Tab', shiftKey: true });
+    expect(dateTrigger()).toHaveFocus();
+    fireEvent.keyDown(dateTrigger(), { key: 'Tab' });
+    expect(selectTrigger()).toHaveFocus();
+  });
+
+  it('keeps focus on a select that is the only stop', () => {
+    render(<Fields onClose={vi.fn()} onlySelect />);
+
+    // fireEvent가 false를 돌려주면 대화상자가 브라우저의 기본 포커스 이동(밖으로 나가기)을 막은 것이다.
+    expect(fireEvent.keyDown(selectTrigger(), { key: 'Tab' })).toBe(false);
+    expect(selectTrigger()).toHaveFocus();
+    expect(fireEvent.keyDown(selectTrigger(), { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(selectTrigger()).toHaveFocus();
+  });
+
+  it('closes on Escape from a closed select trigger or date trigger', () => {
+    const onClose = vi.fn();
+    const { unmount } = render(<Fields onClose={onClose} />);
+    fireEvent.keyDown(selectTrigger(), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount();
+
+    const onDateClose = vi.fn();
+    render(<Fields onClose={onDateClose} />);
+    act(() => dateTrigger().focus());
+    fireEvent.keyDown(dateTrigger(), { key: 'Escape' });
+    expect(onDateClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes only the open select list on the first Escape and the dialog on the next', async () => {
+    const onClose = vi.fn();
+    render(<Fields onClose={onClose} />);
+
+    fireEvent.keyDown(selectTrigger(), { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.keyDown(within(listbox).getByRole('option', { name: '통계' }), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await afterEventDispatch();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '기록 편집' })).toBeInTheDocument();
+
+    fireEvent.keyDown(selectTrigger(), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes only the open calendar on the first Escape and the dialog on the next', async () => {
+    const onClose = vi.fn();
+    render(<Fields onClose={onClose} />);
+
+    fireEvent.click(dateTrigger());
+    const calendar = await screen.findByRole('dialog', { name: '공부 날짜 달력' });
+    const day = within(calendar).getByRole('button', { name: /^2026년 10월 20일 / });
+    await waitFor(() => expect(day).toHaveFocus());
+    fireEvent.keyDown(day, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '공부 날짜 달력' })).not.toBeInTheDocument());
+    await afterEventDispatch();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dateTrigger()).toHaveFocus();
+
+    fireEvent.keyDown(dateTrigger(), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('still closes when a descendant stops Escape without using it, but not when it uses it', async () => {
+    const onClose = vi.fn();
+    const { unmount } = render(
+      <ModalDialog open onClose={onClose} aria-label="막는 자식">
+        <button type="button" onKeyDown={(event) => event.stopPropagation()}>전파만 막음</button>
+      </ModalDialog>,
+    );
+    fireEvent.keyDown(screen.getByRole('button', { name: '전파만 막음' }), { key: 'Escape' });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    unmount();
+
+    const onKeepOpen = vi.fn();
+    render(
+      <ModalDialog open onClose={onKeepOpen} aria-label="쓰는 자식">
+        <input
+          aria-label="메모"
+          onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') event.preventDefault(); }}
+        />
+      </ModalDialog>,
+    );
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '메모' }), { key: 'Escape' });
+    await afterEventDispatch();
+    expect(onKeepOpen).not.toHaveBeenCalled();
   });
 });
