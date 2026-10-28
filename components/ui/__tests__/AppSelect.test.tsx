@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -156,5 +158,31 @@ describe('AppSelect key boundary', () => {
     parentKeyDown.mockClear();
     fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Tab' });
     expect(parentKeyDown).not.toHaveBeenCalled();
+  });
+});
+
+// 열린 목록은 페이지 스크롤을 잠근다(react-remove-scroll). globals.css의 스크롤 잠금 보정은 그 잠금이 쓰는
+// body 속성과 스크롤바 폭 변수에 기대므로, 이름이 바뀌면 고정 요소가 다시 흔들린다(실제 이동량은 브라우저에서 측정).
+describe('AppSelect scroll lock', () => {
+  const css = readFileSync(path.resolve(process.cwd(), 'app/globals.css'), 'utf8');
+  const block = css.slice(css.indexOf('/* 스크롤 잠금 보정 */'), css.indexOf('/* 스크롤 잠금 보정 끝 */'));
+
+  it('locks with the attribute and variable that keep fixed full-width elements in place', async () => {
+    render(<ControlledSelect />);
+    await openSelect();
+
+    expect(document.body).toHaveAttribute('data-scroll-locked');
+    const lockStyle = Array.from(document.head.querySelectorAll('style'))
+      .map(style => style.textContent ?? '')
+      .find(text => text.includes('body[data-scroll-locked]'));
+    expect(lockStyle).toContain('--removed-body-scroll-bar-size:');
+
+    expect(block).toMatch(
+      /body\[data-scroll-locked\] :is\([^)]*\.ui-scroll-lock-fixed[^)]*\) \{\s*margin-right: var\(--removed-body-scroll-bar-size, 0px\);/,
+    );
+    for (const selector of ['.ui-dialog-overlay', '[data-dialog-keep] > div']) expect(block).toContain(selector);
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(document.body).not.toHaveAttribute('data-scroll-locked'));
   });
 });

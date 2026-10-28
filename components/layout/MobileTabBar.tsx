@@ -30,7 +30,8 @@ export default function MobileTabBar() {
       <nav
         aria-label="주요 메뉴"
         className={cn(
-          'fixed inset-x-0 bottom-0 z-40 flex bg-white px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom),10px)] md:hidden',
+          // ui-scroll-lock-fixed: 선택 상자가 페이지 스크롤바를 숨기는 동안에도 넓어지지 않는다.
+          'ui-scroll-lock-fixed fixed inset-x-0 bottom-0 z-40 flex bg-white px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom),10px)] md:hidden',
           // 흰 페이지에서는 아주 옅은 선으로 내용과 나눈다(타이머는 흰 시트와 이어진다).
           active !== 'timer' && 'shadow-[inset_0_1px_0_var(--color-line-soft)]',
         )}

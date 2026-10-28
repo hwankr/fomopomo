@@ -96,6 +96,27 @@
   }
 }
 
+/* 스크롤 잠금 보정 */
+/* 선택 상자(Radix Select)처럼 페이지 스크롤을 잠그는 층이 열리면 react-remove-scroll이 body[data-scroll-locked]로
+   페이지 스크롤바를 숨기고, 본문은 그 폭만큼의 body 오른쪽 여백으로 제자리를 지킨다.
+   화면에 고정된 전체 너비 요소(대화상자 덮개, 하단 탭 바, 토스트 영역)는 그 여백을 받지 못해 스크롤바 폭만큼 넓어지고
+   가운데 정렬된 대화상자·토스트가 옆으로 흔들리므로, 잠긴 동안 같은 폭의 오른쪽 여백을 준다.
+   --removed-body-scroll-bar-size는 잠긴 동안에만 있고, 스크롤바가 없거나 내용 위에 겹쳐 그려지면 0이다.
+   새로 만드는 고정 전체 너비 요소에는 ui-scroll-lock-fixed를 붙인다. */
+body[data-scroll-locked] :is(.ui-scroll-lock-fixed, .ui-dialog-overlay, [data-dialog-keep] > div) {
+  margin-right: var(--removed-body-scroll-bar-size, 0px);
+}
+
+/* 동작 줄이기에서는 아래 전역 규칙이 모든 요소의 전환 시간을 0.01ms로 두므로(transition-property 기본값은 all)
+   이 여백들과 body 여백의 변화도 전환이 되어 첫 프레임이 바뀌기 전 여백으로 그려지고 한 번 흔들린다. 곧바로 바뀌게 한다. */
+@media (prefers-reduced-motion: reduce) {
+  body,
+  :is(.ui-scroll-lock-fixed, .ui-dialog-overlay, [data-dialog-keep] > div) {
+    transition-duration: 0s !important;
+  }
+}
+/* 스크롤 잠금 보정 끝 */
+
 @layer components {
   /* 입력 */
   .ui-input {

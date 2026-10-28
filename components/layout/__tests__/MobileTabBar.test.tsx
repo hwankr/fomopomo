@@ -68,6 +68,12 @@ describe('MobileTabBar', () => {
     expect(screen.getByRole('link', { name: '친구, 받은 친구 요청 3개' })).toHaveAttribute('href', '/friends');
   });
 
+  it('keeps its width while a select locks page scroll', () => {
+    render(<MobileTabBar />);
+
+    expect(screen.getByRole('navigation', { name: '주요 메뉴' })).toHaveClass('ui-scroll-lock-fixed');
+  });
+
   it('reserves space so page content and the footer stay above the bar', () => {
     const { container } = render(<MobileTabBar />);
 

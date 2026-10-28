@@ -71,6 +71,7 @@
 - 버튼은 기본 `cursor: pointer`.
 - `prefers-reduced-motion`이면 애니메이션·전환을 끄고 지금 구슬은 박동 대신 옅은 테두리로 표시된다.
 - `--tabbar-height`: 모바일 탭 바 높이(56px + 아래 안전 영역, 최소 10px). 탭 바 위에 떠야 하는 고정 요소(예: 타이머 시트의 펼친 높이)는 `bottom-(--tabbar-height)`처럼 이 값을 쓴다.
+- 스크롤 잠금: 선택 상자(`AppSelect`, Radix Select)가 열려 있는 동안 페이지 스크롤이 잠겨(`body[data-scroll-locked]`) 페이지 스크롤바가 사라지고, 본문은 그 폭만큼의 body 오른쪽 여백으로 제자리를 지킨다. 화면 너비를 채우는 고정 요소(`fixed inset-0`/`inset-x-0`)는 그 여백을 받지 못해 넓어지므로 `ui-scroll-lock-fixed`를 붙인다. 잠긴 동안만 오른쪽 여백 `var(--removed-body-scroll-bar-size)`(스크롤바가 없거나 겹쳐 그려지면 0)를 받아 크기와 내용 위치가 그대로다. 대화상자 덮개(`ui-dialog-overlay`)와 토스트 영역(`[data-dialog-keep]`의 자식)은 `globals.css`의 같은 규칙(「스크롤 잠금 보정」)에 들어 있어 따로 붙이지 않는다. 잠긴 동안 스크롤바가 있던 띠에는 페이지 바탕이 보인다. 늘 자리를 비워 두는 `scrollbar-gutter: stable`이나 잠금을 풀어 스크롤바를 남기는 방식은 쓰지 않는다.
 
 ## 3. `.ui-*` 프리미티브
 
