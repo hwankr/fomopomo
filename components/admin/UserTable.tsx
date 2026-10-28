@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Profile } from '@/lib/types';
 import { Search, Shield } from 'lucide-react';
 import AppSelect from '@/components/ui/AppSelect';
+import Avatar from '@/components/ui/Avatar';
 
 interface UserTableProps {
   users: Profile[];
@@ -44,6 +45,14 @@ function StudyDuration({ startTime }: { startTime: string }) {
 
   return <span>{duration}</span>;
 }
+
+// 친구 화면과 같은 상태 점 색
+const STATUS_DOT_CLASS: Record<NonNullable<Profile['status']>, string> = {
+  studying: 'bg-pomo',
+  online: 'bg-rest',
+  paused: 'bg-away',
+  offline: 'bg-bead-past',
+};
 
 function getStatusLabel(user: Profile) {
   if (user.status === 'studying') return '공부 중';
@@ -92,13 +101,13 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
   });
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <div className="flex flex-col justify-between gap-4 border-b border-gray-100 p-4 dark:border-gray-700 sm:flex-row sm:items-center">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+    <div>
+      <div className="mb-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h2 className="ui-h2">
           사용자 ({filteredUsers.length})
         </h2>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-2 text-sm text-ink-muted">
             <span id="user-sort-label">정렬</span>
             <AppSelect
               aria-label="정렬"
@@ -109,82 +118,73 @@ export default function UserTable({ users, onUserClick }: UserTableProps) {
             />
           </div>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
             <input
               type="text"
+              aria-label="사용자 검색"
               placeholder="이메일 또는 닉네임으로 검색"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700/50 sm:w-72"
+              className="ui-input w-full pl-10 sm:w-72"
             />
           </div>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* 카드·구분선 없이 행 호버로만 구분한다. */}
+      <div className="-mx-3 overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+          <thead className="text-[13px] text-ink-muted">
             <tr>
-              <th className="px-6 py-3 font-medium">사용자</th>
-              <th className="px-6 py-3 font-medium">상태</th>
-              <th className="px-6 py-3 font-medium">현재 작업</th>
-              <th className="px-6 py-3 font-medium">최근 활동</th>
-              <th className="px-6 py-3 font-medium">가입일</th>
+              <th className="px-3 py-3 font-semibold">사용자</th>
+              <th className="px-3 py-3 font-semibold">상태</th>
+              <th className="px-3 py-3 font-semibold">현재 작업</th>
+              <th className="px-3 py-3 font-semibold">최근 활동</th>
+              <th className="px-3 py-3 font-semibold">가입일</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+          <tbody>
             {sortedUsers.map((user) => (
               <tr
                 key={user.id}
                 onClick={() => onUserClick(user.id)}
-                className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                className="cursor-pointer transition-colors hover:bg-hover"
               >
-                <td className="px-6 py-4">
+                <td className="rounded-l-tile px-3 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400">
-                      {(user.nickname || user.email || '?')[0].toUpperCase()}
-                    </div>
+                    <Avatar name={user.nickname || user.email} />
                     <div>
-                      <div className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+                      <div className="flex items-center gap-1.5 font-semibold">
                         {user.nickname || '닉네임 없음'}
                         {user.role === 'admin' && (
-                          <Shield className="h-3 w-3 fill-current text-indigo-500" />
+                          <Shield role="img" aria-label="관리자" className="size-3 fill-current text-pomo" />
                         )}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <div className="text-xs text-ink-subtle">
                         {user.email}
                       </div>
                     </div>
                   </div>
                 </td>
-                <td className="px-6 py-4">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      user.status === 'online'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
-                        : user.status === 'studying'
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300'
-                          : user.status === 'paused'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-                    }`}
-                  >
+                <td className="px-3 py-3">
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap text-[13px] text-ink-muted">
+                    <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[user.status ?? 'offline']}`} />
                     {getStatusLabel(user)}
                     {user.status === 'studying' && user.study_start_time && (
                       <>
-                        <span className="mx-1">-</span>
+                        <span>-</span>
                         <StudyDuration startTime={user.study_start_time} />
                       </>
                     )}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                <td className="px-3 py-3 text-ink-muted">
                   {user.current_task || '-'}
                 </td>
-                <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
+                <td className="px-3 py-3 text-ink-muted">
                   {formatDateTime(user.last_active_at)}
                 </td>
-                <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
+                <td className="rounded-r-tile px-3 py-3 text-ink-muted">
                   {user.created_at
                     ? new Date(user.created_at).toLocaleDateString()
                     : '-'}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Download, Share, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -146,101 +146,98 @@ function BrowserInstallPrompt() {
 
   if (isIOSPromptVisible) {
     return (
-      <>
-        <div
-          className={cn(
-            'fixed inset-0 z-50 bg-black/20',
-            isClosing
-              ? 'animate-out fade-out duration-300'
-              : 'animate-in fade-in duration-300'
-          )}
-          onClick={handleClose}
-        />
-        <div
-          className={cn(
-            'fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/90 p-4 pb-8 shadow-lg backdrop-blur-md',
-            isClosing
-              ? 'animate-out fade-out slide-out-to-bottom duration-300'
-              : 'animate-in slide-in-from-bottom duration-500'
-          )}
-        >
+      <PromptSurface isClosing={isClosing} onClose={handleClose}>
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-ink-muted">
+          <span>공유 버튼을 누른 뒤</span>
+          <Share aria-hidden="true" className="size-[18px] text-ink" strokeWidth={1.8} />
+          <span>홈 화면에 추가를 선택하세요.</span>
+        </p>
+        <div className="flex justify-end">
           <button
-            onClick={handleClose}
-            aria-label="설치 안내 닫기"
-            className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
+            type="button"
+            onClick={handlePermanentDismiss}
+            className="ui-button-secondary flex-1 md:flex-none"
           >
-            <X className="h-5 w-5" />
+            다시 보지 않기
           </button>
-          <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
-            <p className="text-sm font-medium text-gray-800">
-              더 빠르게 이용하려면 앱을 설치하세요.
-            </p>
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span>공유 버튼을 누른 뒤</span>
-              <Share className="h-5 w-5 text-blue-500" />
-              <span>홈 화면에 추가를 선택하세요.</span>
-            </div>
-            <button
-              onClick={handlePermanentDismiss}
-              className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
-            >
-              다시 보지 않기
-            </button>
-          </div>
         </div>
-      </>
+      </PromptSurface>
     );
   }
 
   if (showAndroidPrompt) {
     return (
-      <>
-        <div
-          className={cn(
-            'fixed inset-0 z-50 bg-black/20',
-            isClosing
-              ? 'animate-out fade-out duration-300'
-              : 'animate-in fade-in duration-300'
-          )}
-          onClick={handleClose}
-        />
-        <div
-          className={cn(
-            'fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/90 p-4 pb-8 shadow-lg backdrop-blur-md',
-            isClosing
-              ? 'animate-out fade-out slide-out-to-bottom duration-300'
-              : 'animate-in slide-in-from-bottom duration-500'
-          )}
-        >
+      <PromptSurface isClosing={isClosing} onClose={handleClose}>
+        <div className="flex gap-2 md:justify-end">
           <button
-            onClick={handleClose}
-            aria-label="설치 안내 닫기"
-            className="absolute right-4 top-4 p-1 text-gray-400 transition-colors hover:text-gray-600"
+            type="button"
+            onClick={handlePermanentDismiss}
+            className="ui-button-secondary flex-1 md:flex-none"
           >
-            <X className="h-5 w-5" />
+            다시 보지 않기
           </button>
-          <div className="mx-auto flex max-w-md flex-col items-center space-y-3 text-center">
-            <p className="text-sm font-medium text-gray-800">
-              더 빠르게 이용하려면 앱을 설치하세요.
-            </p>
-            <button
-              onClick={handleInstallClick}
-              className="flex items-center gap-2 rounded-full bg-rose-500 px-4 py-2 font-medium text-white transition-colors hover:bg-rose-600"
-            >
-              <Download className="h-4 w-4" />
-              앱 설치하기
-            </button>
-            <button
-              onClick={handlePermanentDismiss}
-              className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
-            >
-              다시 보지 않기
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleInstallClick}
+            className="ui-button-primary flex-1 md:flex-none"
+          >
+            <Download aria-hidden="true" className="size-[18px]" strokeWidth={1.8} />
+            앱 설치하기
+          </button>
         </div>
-      </>
+      </PromptSurface>
     );
   }
 
   return null;
+}
+
+// 설치 안내 면: 덮개(누르면 닫힘) + 아래쪽에 뜨는 팝오버. 데스크톱은 오른쪽 아래 360px.
+function PromptSurface({
+  isClosing,
+  onClose,
+  children,
+}: {
+  isClosing: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const titleId = useId();
+
+  return (
+    <>
+      <div
+        className={cn(
+          'fixed inset-0 z-50 bg-scrim',
+          isClosing ? 'opacity-0 transition-opacity duration-300' : 'animate-fade-in'
+        )}
+        onClick={onClose}
+      />
+      <div
+        role="region"
+        aria-labelledby={titleId}
+        className={cn(
+          'ui-popover-surface fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-50 flex flex-col gap-3 rounded-panel p-5 md:inset-x-auto md:right-6 md:bottom-6 md:w-[360px]',
+          isClosing
+            ? 'translate-y-1 opacity-0 transition-[opacity,translate] duration-300'
+            : 'ui-panel-enter'
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <p id={titleId} className="flex-1 pt-2 text-[15px] font-bold">
+            더 빠르게 이용하려면 앱을 설치하세요.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="설치 안내 닫기"
+            className="ui-icon-button -mt-1 -mr-2 text-ink-muted"
+          >
+            <X aria-hidden="true" className="size-5" strokeWidth={1.8} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </>
+  );
 }

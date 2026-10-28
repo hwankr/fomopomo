@@ -118,30 +118,30 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-indigo-600"></div>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-pomo"></div>
       </div>
     );
   }
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900 md:p-12">
+      <div className="min-h-screen px-4 py-6 md:px-10 md:py-12">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-8 flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="mb-10 flex flex-wrap items-center justify-between gap-4">
+            <h1 className="ui-h1">
               관리자 대시보드
             </h1>
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <button
                 onClick={() => router.push('/admin/changelog')}
-                className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600"
+                className="ui-button-primary min-h-10 px-4 text-sm"
               >
                 변경 내역
               </button>
               <button
                 onClick={() => router.push('/')}
-                className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                className="ui-button-secondary min-h-10 px-4 text-sm"
               >
                 홈으로 돌아가기
               </button>
@@ -150,7 +150,7 @@ export default function AdminPage() {
 
           <DashboardStats {...stats} />
 
-          <div className="mt-8">
+          <div className="mt-12">
             <UserTable
               users={users}
               onUserClick={(userId) => router.push(`/admin/users/${userId}`)}

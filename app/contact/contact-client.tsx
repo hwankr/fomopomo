@@ -1,13 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Mail, Copy } from 'lucide-react';
+import { ChevronLeft, Mail, Copy } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { supabase } from '@/lib/supabase';
 import { useState } from 'react';
 import LoginModal from '@/components/LoginModal';
-import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
 
@@ -15,7 +14,6 @@ export default function ContactClient() {
   const { session } = useAuthSession();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   const handleGoogleLogin = async () => {
     if (isInAppBrowser()) {
@@ -36,17 +34,11 @@ export default function ContactClient() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
+    <div className="flex flex-col">
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onGoogleLogin={handleGoogleLogin}
-      />
-
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        onSave={() => {}}
       />
 
       <Navbar
@@ -54,52 +46,53 @@ export default function ContactClient() {
         onOpenLogin={() => setIsLoginModalOpen(true)}
       />
 
-      <div className="container max-w-lg mx-auto py-6 px-4 pb-24 mt-4 animate-fade-in">
-        {/* 뒤로가기 */}
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          홈으로
-        </Link>
-
-        {/* 헤더 */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
-            Contact
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 max-w-sm mx-auto leading-relaxed">
-            궁금한 점이나 문의사항이 있으시면 아래 방법으로 연락해주세요.
-          </p>
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-9 px-4 pt-4 pb-20 animate-fade-in md:gap-12 md:px-10">
+        {/* 헤더: 모바일은 뒤로가기를 제목 위에, 데스크톱은 오른쪽에 둔다. */}
+        <div className="flex flex-col-reverse gap-3 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-6">
+          <div className="flex flex-col gap-1">
+            <h1 className="ui-h1">Contact</h1>
+            <p className="m-0 text-ink-muted">
+              궁금한 점이나 문의사항이 있으시면 아래 방법으로 연락해주세요.
+            </p>
+          </div>
+          <Link
+            href="/"
+            className="ui-button-ghost -ml-3 min-h-10 w-fit gap-1.5 text-ink-muted md:ml-0"
+          >
+            <ChevronLeft aria-hidden="true" className="size-4" strokeWidth={2.2} />
+            홈으로
+          </Link>
         </div>
 
-        {/* 연락처 카드 */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
-          {/* 이메일 */}
+        {/* 연락처: 카드 없이 행 하나 */}
+        <div className="flex flex-col gap-3">
           <button
+            type="button"
             onClick={() => {
               navigator.clipboard.writeText('fabronjeon@naver.com');
               toast.success('이메일이 복사되었습니다');
             }}
-            className="group w-full flex items-center gap-3 p-4 sm:gap-4 sm:p-5 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors text-left cursor-pointer"
+            className="group -mx-3 flex min-h-16 items-center gap-3 rounded-tile px-3 py-2 text-left transition-colors hover:bg-hover"
           >
-            <div className="flex shrink-0 items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-rose-100 dark:bg-rose-900/30 rounded-full">
-              <Mail className="w-5 h-5 text-rose-500" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-900 dark:text-white">이메일</p>
-              <p className="break-all text-sm text-gray-500 dark:text-gray-400">fabronjeon@naver.com</p>
-            </div>
-            <Copy className="w-4 h-4 shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-rose-500 dark:group-hover:text-rose-400 transition-colors" />
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-pomo-tint text-pomo">
+              <Mail aria-hidden="true" className="size-[18px]" strokeWidth={1.8} />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="font-semibold">이메일</span>
+              <span className="break-all text-sm text-ink-muted">fabronjeon@naver.com</span>
+            </span>
+            <Copy
+              aria-hidden="true"
+              className="size-[18px] shrink-0 text-ink-faint transition-colors group-hover:text-ink"
+              strokeWidth={1.8}
+            />
           </button>
+          {/* 부가 안내 */}
+          <p className="m-0 text-[13px] text-ink-subtle">
+            가능한 빠르게 답변 드리겠습니다
+          </p>
         </div>
-
-        {/* 부가 안내 */}
-        <p className="text-center text-xs text-gray-500 dark:text-gray-500 mt-8">
-          가능한 빠르게 답변 드리겠습니다
-        </p>
       </div>
-    </main>
+    </div>
   );
 }

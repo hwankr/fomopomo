@@ -6,17 +6,15 @@ import Navbar from '@/components/Navbar';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { supabase } from '@/lib/supabase';
 import LoginModal from '@/components/LoginModal';
-import SettingsModal from '@/components/SettingsModal';
 import { toast } from 'react-hot-toast';
 import { isInAppBrowser, handleInAppBrowser } from '@/lib/userAgent';
-import { ArrowLeft } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SupportClient() {
   const { session } = useAuthSession();
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   const handleGoogleLogin = async () => {
     if (isInAppBrowser()) {
@@ -37,17 +35,11 @@ export default function SupportClient() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-[#f8f9fa] dark:bg-[#0f172a] transition-colors duration-300 font-sans text-gray-900 dark:text-gray-100">
+    <div className="flex flex-col">
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onGoogleLogin={handleGoogleLogin}
-      />
-
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        onSave={() => {}}
       />
 
       <Navbar
@@ -55,24 +47,24 @@ export default function SupportClient() {
         onOpenLogin={() => setIsLoginModalOpen(true)}
       />
 
-      <div className="container max-w-lg mx-auto py-6 px-4 pb-24 mt-4 animate-fade-in">
-        {/* 뒤로가기 */}
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 mb-10 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          홈으로
-        </Link>
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-9 px-4 pt-4 pb-20 animate-fade-in md:gap-12 md:px-10">
+        {/* 헤더: 모바일은 뒤로가기를 제목 위에, 데스크톱은 오른쪽에 둔다. */}
+        <div className="flex flex-col-reverse gap-3 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-6">
+          <h1 className="ui-h1">Fomopomo 후원하기</h1>
+          <Link
+            href="/"
+            className="ui-button-ghost -ml-3 min-h-10 w-fit gap-1.5 text-ink-muted md:ml-0"
+          >
+            <ChevronLeft aria-hidden="true" className="size-4" strokeWidth={2.2} />
+            홈으로
+          </Link>
+        </div>
 
-        {/* 헤더 */}
-        <h1 className="text-center text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-8">
-          Fomopomo 후원하기
-        </h1>
-
-        {/* 후원 카드 */}
-        <DonationSection variant="card" />
+        {/* 후원: 제목과 같은 왼쪽 줄에 맞춘다. */}
+        <div className="w-full max-w-sm">
+          <DonationSection variant="card" />
+        </div>
       </div>
-    </main>
+    </div>
   );
 }

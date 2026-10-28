@@ -140,15 +140,11 @@ export default function FriendNotificationListener() {
                     if (newProfile.status === 'studying' && friendConfig.is_notification_enabled) {
                         if (!wasStudying) {
                             const name = friendConfig.nickname || friendConfig.friend_email || newProfile.username || '친구';
-                            toast(`${name} 님이 공부를 시작했습니다! 🔥`, {
-                                icon: '✏️',
+                            // 모양은 레이아웃 Toaster의 공통 토스트를 따르고, 아이콘은 '공부 중' 상태 점이다.
+                            toast(`${name} 님이 공부를 시작했어요.`, {
+                                icon: <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-pomo" />,
                                 duration: 4000,
                                 position: 'top-right',
-                                style: {
-                                    background: '#fff',
-                                    color: '#333',
-                                    border: '1px solid #e5e7eb',
-                                },
                             });
                         }
                     }

@@ -145,6 +145,27 @@ describe('InstallPrompt', () => {
     ).toBeNull();
   });
 
+  it('shows the prompt as a labelled region and closes it from the backdrop with a cooldown', () => {
+    render(<InstallPrompt />);
+
+    const region = screen.getByRole('region', {
+      name: '더 빠르게 이용하려면 앱을 설치하세요.',
+    });
+    const backdrop = region.previousElementSibling as HTMLElement;
+    expect(backdrop).not.toBeNull();
+
+    act(() => {
+      fireEvent.click(backdrop);
+      vi.runAllTimers();
+    });
+
+    expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();
+    expect(
+      window.localStorage.getItem('pwa_prompt_permanently_dismissed')
+    ).toBeNull();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+  });
+
   it('stores a permanent dismissal and hides the prompt', () => {
     render(<InstallPrompt />);
 

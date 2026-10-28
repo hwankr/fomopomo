@@ -155,6 +155,13 @@ describe('FriendNotificationListener 로그아웃 후 알림 잔존 방지', () 
     });
 
     expect(toastMock).toHaveBeenCalledTimes(1);
+    // 공통 토스트 모양을 덮어쓰지 않고, 친구 이름을 해요체 문구로 알린다.
+    const [message, options] = toastMock.mock.calls[0];
+    expect(message).toBe('철수 님이 공부를 시작했어요.');
+    expect(options).toEqual(
+      expect.objectContaining({ duration: 4000, position: 'top-right' })
+    );
+    expect(options).not.toHaveProperty('style');
   });
 
   it('로그아웃하면 채널을 정리하고 이전 계정 친구의 상태 변경에 더 이상 알림을 띄우지 않는다', async () => {

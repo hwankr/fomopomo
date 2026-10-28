@@ -59,6 +59,21 @@ describe('UserTable', () => {
     ]);
   });
 
+  it('filters users by email or nickname from the search box', () => {
+    const onUserClick = vi.fn();
+    render(<UserTable users={users} onUserClick={onUserClick} />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '사용자 검색' }), {
+      target: { value: 'charlie@' },
+    });
+
+    expect(getRenderedNames()).toEqual([expect.stringContaining('Charlie')]);
+    expect(screen.getByRole('heading', { name: '사용자 (1)' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('row')[1]);
+    expect(onUserClick).toHaveBeenCalledWith('user-c');
+  });
+
   it('switches to joined date sorting', () => {
     render(<UserTable users={users} onUserClick={vi.fn()} />);
 
