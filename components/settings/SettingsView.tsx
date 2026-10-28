@@ -12,6 +12,7 @@ import NotificationManager from '@/components/NotificationManager';
 import DonationSection from '@/components/DonationSection';
 import SubjectManager from '@/components/subjects/SubjectManager';
 import { getRunningAnimations, prefersReducedMotion, whenAnimationsFinish } from '@/components/ui/motion';
+import { releaseFocus } from '@/components/ui/popoverExit';
 import { cn } from '@/lib/utils';
 import AccountSection from './AccountSection';
 import { deleteAccount, resetAccount } from './accountActions';
@@ -53,6 +54,8 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
   const [addedPresetId, setAddedPresetId] = useState<string | null>(null);
   const [removedPreset, setRemovedPreset] = useState<{ preset: PresetFormEntry; index: number } | null>(null);
   const leavingPresetRef = useRef<HTMLLIElement>(null);
+  const presetListRef = useRef<HTMLUListElement>(null);
+  const addPresetRef = useRef<HTMLButtonElement>(null);
 
   useLayoutEffect(() => {
     pendingEditsRef.current = { persist: form.persistPendingEdits, stash: form.stashPendingEdits };
@@ -151,7 +154,13 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
     setAddedPresetId(id);
   };
 
-  const removePreset = (preset: PresetFormEntry, index: number) => {
+  const removePreset = (preset: PresetFormEntry, index: number, row: HTMLElement | null) => {
+    // 지운 줄은 사라지는 동안 inert가 되어 안의 포커스가 body로 떨어진다. 그 전에 다음 프리셋의 삭제 버튼(없으면 앞의 것,
+    // 그것도 없으면 프리셋 추가)으로 옮긴다.
+    const deletes = [...(presetListRef.current?.querySelectorAll<HTMLElement>(':scope > li:not([inert]) [data-preset-delete]') ?? [])];
+    const own = row?.querySelector<HTMLElement>('[data-preset-delete]');
+    const at = own ? deletes.indexOf(own) : -1;
+    if (row) releaseFocus(row, deletes[at + 1] ?? deletes[at - 1] ?? addPresetRef.current);
     form.removePreset(preset.id);
     setAddedPresetId(null);
     setRemovedPreset({ preset, index });
@@ -242,7 +251,7 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
               title="집중 프리셋"
               description="타이머에서 바로 고를 수 있는 집중 시간이에요. 최대 3개까지 둘 수 있어요."
             />
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0 md:col-span-2">
+            <ul ref={presetListRef} className="m-0 flex list-none flex-col gap-1.5 p-0 md:col-span-2">
               {presetRows.map(({ preset, index, leaving }) => {
                 const name = `프리셋 ${index + 1}`;
                 return (
@@ -278,8 +287,9 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
                     />
                     <button
                       type="button"
-                      onClick={() => removePreset(preset, index)}
+                      onClick={(event) => removePreset(preset, index, event.currentTarget.closest('li'))}
                       aria-label={`${name} 삭제`}
+                      data-preset-delete
                       // 보이는 원은 36px(모바일)·40px, 누르는 영역은 44px(왼쪽 +버튼과 겹치지 않게 오른쪽으로 더 늘린다)
                       className="ui-icon-button size-9 text-ink-muted before:absolute before:-inset-y-1 before:-right-[5px] before:-left-[3px] before:content-[''] md:size-10 md:before:-inset-0.5"
                     >
@@ -291,6 +301,7 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
             </ul>
             {presets.length < MAX_PRESETS && (
               <button
+                ref={addPresetRef}
                 type="button"
                 onClick={addPreset}
                 className="ui-button-ghost -ml-2.5 min-h-10 gap-1.5 justify-self-start px-2.5 text-sm md:col-start-2 md:row-start-1 md:ml-0 md:self-end md:px-3 md:text-[15px]"

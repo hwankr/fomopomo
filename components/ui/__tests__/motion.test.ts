@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getRunningAnimations,
   motionDuration,
   motionEasing,
   playMotion,
+  playPop,
   prefersReducedMotion,
   whenAnimationsFinish,
 } from '../motion';
@@ -89,6 +92,48 @@ describe('playMotion', () => {
       easing: 'cubic-bezier(0.3, 0, 0.2, 1)',
       composite: 'add',
     });
+  });
+});
+
+describe('playPop', () => {
+  // app/globals.css의 @keyframes ui-pop과 --animate-pop을 읽어 Web Animation이 같은 움직임인지 본다.
+  const css = readFileSync(path.resolve(import.meta.dirname, '../../../app/globals.css'), 'utf8');
+  const cssPop = () => {
+    const body = css.match(/@keyframes ui-pop \{([\s\S]*?)\n\}/)![1];
+    const frames = [...body.matchAll(/([\d%, ]+)\{ transform: ([^;]+); \}/g)].flatMap(([, offsets, transform]) =>
+      offsets.split(',').map((offset) => ({ offset: Number.parseFloat(offset) / 100, transform: transform.trim() })));
+    return frames.sort((a, b) => a.offset - b.offset);
+  };
+
+  it('replays the CSS ui-pop: same keyframes, --ease-pop on every segment, --duration-emphasized', () => {
+    expect(css).toMatch(/--animate-pop: ui-pop var\(--duration-emphasized\) var\(--ease-pop\);/);
+    const cancel = vi.fn();
+    const animate = vi.fn(() => ({ cancel }) as unknown as Animation);
+    Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+    const element = document.createElement('span');
+
+    playPop(element);
+
+    const [keyframes, options] = animate.mock.calls[0] as unknown as [Keyframe[], KeyframeAnimationOptions];
+    expect(keyframes.map(({ offset, transform }) => ({ offset, transform }))).toEqual(cssPop());
+    // CSS의 animation-timing-function은 키프레임 구간마다 적용된다. 마지막 키프레임 뒤에는 구간이 없다.
+    expect(keyframes.slice(0, -1).map((frame) => frame.easing)).toEqual(['cubic-bezier(0.3, 0, 0.2, 1)', 'cubic-bezier(0.3, 0, 0.2, 1)']);
+    expect(options).toEqual({ duration: 240, easing: 'linear' });
+
+    // 다시 부르면 앞의 팝을 지우고 처음부터 튄다.
+    playPop(element);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(animate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does nothing with reduced motion, without an element or without Web Animations', () => {
+    expect(playPop(document.createElement('span'))).toBeNull();
+    const animate = vi.fn(() => ({}) as Animation);
+    Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+    expect(playPop(null)).toBeNull();
+    setReducedMotion(true);
+    expect(playPop(document.createElement('span'))).toBeNull();
+    expect(animate).not.toHaveBeenCalled();
   });
 });
 

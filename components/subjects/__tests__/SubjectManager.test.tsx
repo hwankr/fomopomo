@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudySubject } from '@/lib/studySubjects';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const db = vi.hoisted(() => ({
   subjects: [] as StudySubject[],
@@ -169,19 +170,39 @@ describe('SubjectManager', () => {
     rerender(<SubjectManager userId="user-a" compact />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
-  it('marks only the subject just added and fades the inline editor and result line in', async () => {
-    db.subjects = [{ id: 'existing', user_id: 'user-a', name: 'SQL' }];
-    render(<SubjectManager userId="user-a" />);
-    fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '블록체인' } });
-    fireEvent.click(screen.getByRole('button', { name: '추가' }));
-    const added = (await screen.findByText('블록체인')).closest('li');
-    const existing = screen.getByText('SQL').closest('li');
-    expect(added).toHaveClass('animate-fade-up');
-    expect(existing).not.toHaveClass('animate-fade-up');
-    expect(screen.getByText('블록체인 과목을 추가했어요.')).toHaveClass('animate-fade-in');
+  it('marks only the subject just added and fades the inline editor and result line in, each once', async () => {
+    // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다(usePlayOnce).
+    const animations = simulateRunningAnimations();
+    try {
+      db.subjects = [{ id: 'existing', user_id: 'user-a', name: 'SQL' }];
+      const view = render(<SubjectManager userId="user-a" />);
+      fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '블록체인' } });
+      fireEvent.click(screen.getByRole('button', { name: '추가' }));
+      const added = (await screen.findByText('블록체인')).closest('li')!;
+      const existing = screen.getByText('SQL').closest('li')!;
+      expect(added).toHaveClass('animate-fade-up');
+      expect(existing).not.toHaveClass('animate-fade-up');
+      expect(screen.getByText('블록체인 과목을 추가했어요.')).toHaveClass('animate-fade-in');
+      await animations.finish();
+      expect(added).not.toHaveClass('animate-fade-up');
 
-    fireEvent.click(screen.getByRole('button', { name: 'SQL 이름 변경' }));
-    expect(screen.getByLabelText('과목 이름 수정').closest('li')).toHaveClass('animate-fade-in');
-    expect(added).not.toHaveClass('animate-fade-up');
+      // 다시 읽어 순서가 바뀌어도(서버는 코드 순서) 옮겨진 줄이 다시 떠오르지 않는다.
+      db.subjects = [db.subjects[1], db.subjects[0]];
+      view.rerender(<SubjectManager userId="user-a" />);
+      expect(screen.getAllByRole('listitem').map((item) => item.textContent?.slice(0, 4))).toEqual(['블록체인', 'SQL']);
+      expect(screen.getByText('블록체인').closest('li')).toBe(added);
+      expect(added).not.toHaveClass('animate-fade-up');
+
+      fireEvent.click(screen.getByRole('button', { name: 'SQL 이름 변경' }));
+      const editor = screen.getByLabelText('과목 이름 수정').closest('li')!;
+      expect(editor).toHaveClass('animate-fade-in');
+      await animations.finish();
+      expect(editor).not.toHaveClass('animate-fade-in');
+      db.subjects = [db.subjects[1], db.subjects[0]];
+      view.rerender(<SubjectManager userId="user-a" />);
+      expect(screen.getByLabelText('과목 이름 수정').closest('li')).not.toHaveClass('animate-fade-in');
+    } finally {
+      animations.restore();
+    }
   });
 });

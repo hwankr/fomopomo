@@ -34,6 +34,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import SubjectSelect from '@/components/subjects/SubjectSelect';
 import Beads, { type BeadState } from '@/components/ui/Beads';
 import ModalDialog from '@/components/ui/ModalDialog';
+import { playPop } from '@/components/ui/motion';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { useSuggestedSubject } from '@/hooks/useSuggestedSubject';
 import {
@@ -49,7 +50,7 @@ import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { formatDayLabel, formatStudyTime, sortableTransition } from './planUi';
-import { useEntrance, usePlayOnce } from './usePlayOnce';
+import { useEntrance, usePlayOnce } from '@/components/ui/usePlayOnce';
 
 interface Task {
   id: string;
@@ -487,10 +488,9 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
   const sheetTitleId = useId();
   const goalLabelId = useId();
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const goalNumberRef = useRef<HTMLSpanElement>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [rowMotion, setRowMotion] = useState<RowMotion | null>(null);
-  // 추가 양식에서 사용자가 목표를 바꿨을 때만 숫자가 튄다(양식을 열 때는 그대로).
-  const [goalChanged, setGoalChanged] = useState(false);
   const scopeRef = useRef<ReturnType<typeof createRequestScope> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -926,7 +926,6 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
       if (createdTask.subject_id) notifyStudySubjectsChanged();
       setNewTaskTitle('');
       setNewGoal(DEFAULT_POMODORO_GOAL);
-      setGoalChanged(false);
       resetSubject();
       setIsAdding(false);
     } catch (error) {
@@ -1025,12 +1024,12 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
     setIsAdding(false);
     setNewTaskTitle('');
     setNewGoal(DEFAULT_POMODORO_GOAL);
-    setGoalChanged(false);
     resetSubject();
   };
 
+  // 사용자가 목표를 바꿀 때만 숫자가 한 번 튄다(양식을 열 때는 그대로). 숫자를 새로 그리지 않고 playPop으로 재생한다.
   const changeGoal = (delta: number) => {
-    setGoalChanged(true);
+    playPop(goalNumberRef.current);
     setNewGoal((goal) => clampPomodoroGoal(goal + delta));
   };
 
@@ -1117,8 +1116,7 @@ function ScopedTaskList({ selectedDateKey, userId, dayPomodoros }: {
               −
             </button>
             <output aria-live="polite" className="min-w-10 text-center text-base font-bold">
-              {/* 값마다 새로 붙어 바뀔 때마다 한 번 튄다. output은 그대로라 읽어 주기는 전과 같다. */}
-              <span key={newGoal} className={cn('inline-block', goalChanged && 'animate-pop')}>{newGoal}</span>
+              <span ref={goalNumberRef} className="inline-block">{newGoal}</span>
             </output>
             <button
               type="button"

@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+const motion = vi.hoisted(() => ({ playPop: vi.fn() }));
+vi.mock('@/components/ui/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/ui/motion')>()),
+  playPop: motion.playPop,
+}));
+
 import { DEFAULT_FOMOPOMO_SETTINGS } from '../../hooks/settingsStore';
 import { TimerSettingsDialog } from '../TimerSettingsDialog';
 
@@ -98,20 +104,24 @@ describe('TimerSettingsDialog', () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
-  it('pops only the number that was just stepped, not on open', () => {
+  it('pops only the number that was just stepped, not on open, without replacing it', () => {
+    motion.playPop.mockClear();
     renderDialog();
     const number = (label: string) => within(row(label)).getByText(/\d+(분|회)/);
-    expect(document.querySelectorAll('.animate-pop')).toHaveLength(0);
+    expect(motion.playPop).not.toHaveBeenCalled();
 
+    const pomodoro = number('뽀모도로');
     fireEvent.click(within(row('뽀모도로')).getByRole('button', { name: '뽀모도로 늘리기' }));
-    expect(number('뽀모도로')).toHaveClass('animate-pop');
-    expect(number('짧은 휴식')).not.toHaveClass('animate-pop');
-    // 숫자는 알림 영역(aria-live) 안에서 바뀐다.
-    expect(number('뽀모도로').parentElement).toHaveAttribute('aria-live', 'polite');
+    expect(motion.playPop).toHaveBeenCalledTimes(1);
+    expect(motion.playPop).toHaveBeenLastCalledWith(pomodoro);
+    // 같은 숫자 칸이 그대로 바뀐다(알림 영역 aria-live 안).
+    expect(number('뽀모도로')).toBe(pomodoro);
+    expect(pomodoro).toHaveTextContent('26분');
+    expect(pomodoro.parentElement).toHaveAttribute('aria-live', 'polite');
 
     fireEvent.click(within(row('짧은 휴식')).getByRole('button', { name: '짧은 휴식 줄이기' }));
-    expect(number('뽀모도로')).not.toHaveClass('animate-pop');
-    expect(number('짧은 휴식')).toHaveClass('animate-pop');
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
+    expect(motion.playPop).toHaveBeenLastCalledWith(number('짧은 휴식'));
   });
 
   it('links to the full settings page', () => {

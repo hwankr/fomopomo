@@ -226,10 +226,12 @@ export default function ContributionGraph({ data, earliestYear, loading = false 
                     }}
                     onKeyDown={event => moveFocus(event, cell.key)}
                     className={cn(
-                      'ui-focus-ink block rounded-full p-0 transition-[scale,box-shadow] hover:scale-130 motion-reduce:transition-none motion-reduce:hover:scale-100',
+                      'ui-focus-ink relative block rounded-full p-0 transition-[scale] hover:scale-130 motion-reduce:transition-none motion-reduce:hover:scale-100',
+                      // 고른 날의 고리: 칸에서 2px 떨어진 2px 먹색 고리(흰 바탕이라 ring-offset-white와 같다). 늘 그려 두고 투명도만 바꾼다.
+                      "after:pointer-events-none after:absolute after:-inset-1 after:rounded-full after:border-2 after:border-ink after:opacity-0 after:transition-opacity after:content-['']",
                       cellSize,
                       HEAT_CLASSES[getHeatLevel(secondsByDay.get(cell.key) ?? 0)],
-                      isPicked && 'ring-2 ring-ink ring-offset-2 ring-offset-white',
+                      isPicked && 'after:opacity-100',
                     )}
                   />
                 );

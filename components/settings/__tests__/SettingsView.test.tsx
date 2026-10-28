@@ -1046,8 +1046,13 @@ describe('SettingsView (/settings)', () => {
       renderPage();
       await screen.findByRole('spinbutton', { name: '프리셋 3 시간 (분)' });
       const removed = screen.getByRole('textbox', { name: '프리셋 2 이름' }).closest('li')!;
+      const nextDelete = screen.getByRole('button', { name: '프리셋 3 삭제' });
 
+      // 삭제 버튼에 포커스가 있던 채로 지우면, 줄이 inert가 되기 전에 다음 프리셋의 삭제 버튼으로 옮긴다(body로 떨어지지 않는다).
+      screen.getByRole('button', { name: '프리셋 2 삭제' }).focus();
       fireEvent.click(screen.getByRole('button', { name: '프리셋 2 삭제' }));
+      expect(document.activeElement).toBe(nextDelete);
+      expect(nextDelete).toHaveAccessibleName('프리셋 2 삭제');
       // 값은 바로 지워지고 남은 줄은 번호가 다시 매겨진다. 지운 줄은 사라지는 동안만 클릭·포커스 없이 남는다.
       expect(removed).toBeInTheDocument();
       expect(removed).toHaveAttribute('inert');
@@ -1059,10 +1064,22 @@ describe('SettingsView (/settings)', () => {
 
       await act(async () => { running.splice(0).forEach((finish) => finish()); });
       expect(removed).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(nextDelete);
+
+      // 마지막 줄을 지우면 앞의 줄로, 하나 남은 줄을 지우면 프리셋 추가로 옮긴다.
+      const firstDelete = screen.getByRole('button', { name: '프리셋 1 삭제' });
+      nextDelete.focus();
+      fireEvent.click(nextDelete);
+      expect(document.activeElement).toBe(firstDelete);
+      await act(async () => { running.splice(0).forEach((finish) => finish()); });
+      fireEvent.click(firstDelete);
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: '프리셋 추가' }));
+      await act(async () => { running.splice(0).forEach((finish) => finish()); });
 
       fireEvent.click(screen.getByRole('button', { name: '프리셋 추가' }));
+      fireEvent.click(screen.getByRole('button', { name: '프리셋 추가' }));
       const rows = screen.getAllByRole('textbox', { name: /^프리셋 \d 이름$/ }).map((input) => input.closest('li'));
-      expect(rows.map((row) => row?.classList.contains('animate-fade-up'))).toEqual([false, false, true]);
+      expect(rows.map((row) => row?.classList.contains('animate-fade-up'))).toEqual([false, true]);
     } finally {
       delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
     }
@@ -1075,6 +1092,8 @@ describe('SettingsView (/settings)', () => {
     upsertMock.mockImplementationOnce(async () => ({ error: { message: 'offline' } }));
     const first = renderPage();
     await waitFor(() => expect(pomoInput()).toHaveValue(25));
+    // 25는 불러오기 전의 기본값이기도 하다. 설정을 다 불러온 뒤(저장 버튼이 켜진 뒤)에 고쳐야 '고친 뒤 바뀐 문구'가 된다.
+    await waitFor(() => expect(saveButton()).toBeEnabled());
     fireEvent.change(pomoInput(), { target: { value: '45' } });
     expect(screen.getByText('변경 사항은 나갈 때 자동으로 저장돼요.')).toHaveClass('animate-fade-in');
     first.unmount();

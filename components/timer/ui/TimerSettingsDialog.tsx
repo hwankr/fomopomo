@@ -3,7 +3,7 @@
 import { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import ModalDialog from '@/components/ui/ModalDialog';
-import { cn } from '@/lib/utils';
+import { playPop } from '@/components/ui/motion';
 import type { Preset, Settings } from '../hooks/useSettings';
 
 export type TimerDurationSettings = Pick<Settings, 'pomoTime' | 'shortBreak' | 'longBreak' | 'longBreakInterval'>;
@@ -67,11 +67,11 @@ function TimerSettingsBody({
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
-  // 방금 바꾼 칸. 그 숫자만 바뀔 때마다 한 번 튄다(창을 열 때는 움직이지 않는다).
-  const [stepped, setStepped] = useState<StepperDefinition['key'] | null>(null);
+  // 칸마다 숫자. 바꾼 숫자만 바뀔 때마다 한 번 튄다(창을 열 때는 움직이지 않는다). 숫자를 새로 그리지 않고 playPop으로 재생한다.
+  const numberRefs = useRef(new Map<StepperDefinition['key'], HTMLSpanElement>());
 
   const step = (definition: StepperDefinition, delta: number) => {
-    setStepped(definition.key);
+    playPop(numberRefs.current.get(definition.key));
     const max = Math.max(definition.max, initial[definition.key]);
     setDraft((current) => ({
       ...current,
@@ -119,7 +119,13 @@ function TimerSettingsBody({
                   −
                 </button>
                 <span aria-live="polite" className="min-w-[58px] text-center text-[15px] font-bold md:min-w-16 md:text-base">
-                  <span key={value} className={cn('inline-block', stepped === definition.key && 'animate-pop')}>
+                  <span
+                    ref={(element) => {
+                      if (element) numberRefs.current.set(definition.key, element);
+                      else numberRefs.current.delete(definition.key);
+                    }}
+                    className="inline-block"
+                  >
                     {value}
                     {definition.unit}
                   </span>

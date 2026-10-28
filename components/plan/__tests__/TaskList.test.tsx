@@ -2,7 +2,13 @@ import { StrictMode } from 'react';
 import toast from 'react-hot-toast';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { simulateRunningAnimations } from './motionTestUtils';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
+
+const motion = vi.hoisted(() => ({ playPop: vi.fn() }));
+vi.mock('@/components/ui/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/ui/motion')>()),
+  playPop: motion.playPop,
+}));
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });
@@ -1060,29 +1066,31 @@ describe('TaskList motion', () => {
     expect(checkOf('9월 6일 작업')).not.toHaveClass('animate-pop-in');
   });
 
-  it('pops the goal number only after the user changes it', async () => {
+  it('pops the goal number only after the user changes it, without replacing it', async () => {
     setViewport(true);
+    motion.playPop.mockClear();
     mount();
     await screen.findByText('9월 6일 작업');
     fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
     const goal = within(screen.getByRole('group', { name: '뽀모도로' }));
-    const number = () => goal.getByRole('status').firstElementChild!;
-    expect(number()).toHaveTextContent('2');
-    expect(number()).not.toHaveClass('animate-pop');
+    const number = goal.getByRole('status').firstElementChild!;
+    expect(number).toHaveTextContent('2');
+    expect(motion.playPop).not.toHaveBeenCalled();
 
     fireEvent.click(goal.getByRole('button', { name: '뽀모도로 늘리기' }));
     expect(goal.getByRole('status')).toHaveAttribute('aria-live', 'polite');
-    expect(number()).toHaveTextContent('3');
-    expect(number()).toHaveClass('animate-pop');
-    const three = number();
+    // 같은 숫자 칸이 바뀌고(새로 붙이지 않는다) 공용 팝이 한 번 돈다.
+    expect(goal.getByRole('status').firstElementChild).toBe(number);
+    expect(number).toHaveTextContent('3');
+    expect(motion.playPop).toHaveBeenCalledTimes(1);
+    expect(motion.playPop).toHaveBeenLastCalledWith(number);
     fireEvent.click(goal.getByRole('button', { name: '뽀모도로 줄이기' }));
-    // 값마다 새로 붙어 바뀔 때마다 다시 튄다.
-    expect(number()).not.toBe(three);
-    expect(number()).toHaveClass('animate-pop');
+    expect(number).toHaveTextContent('2');
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
 
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
     fireEvent.click(screen.getByRole('button', { name: '계획 추가' }));
-    expect(within(screen.getByRole('group', { name: '뽀모도로' })).getByRole('status').firstElementChild).not.toHaveClass('animate-pop');
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
   });
 
   it('pops the pin once when the user pins a task, and opens the mobile actions with an entrance each time', async () => {

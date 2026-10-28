@@ -21,6 +21,7 @@ import type { StudySubject } from '@/lib/studySubjects';
 import { cn } from '@/lib/utils';
 import Beads from '@/components/ui/Beads';
 import ModalDialog from '@/components/ui/ModalDialog';
+import { usePlayOnce } from '@/components/ui/usePlayOnce';
 import TaskCreateForm from '@/components/timer/TaskCreateForm';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 
@@ -421,10 +422,15 @@ export default function TaskSidebar({
   const contentRef = useRef<HTMLDivElement>(null);
   const interactedOutsideRef = useRef(false);
   // 데스크톱 팝오버를 열 때 있던 행(순서대로 떠오른다), 방금 추가한 작업, 방금 체크한 원.
-  // 모두 다음 동작(체크·펼치기·추가)이나 다시 열 때 비운다. 그래서 행이 자리를 옮겨도(완료한 작업은 아래로) 다시 돌지 않는다.
+  // 한 번 돈 뒤 떼고(usePlayOnce), 다음 동작(체크·펼치기·추가)이나 다시 열 때도 비운다.
+  // 그래서 행이 자리를 옮겨도(완료한 작업은 아래로, 창이 다시 포커스를 받아 다시 읽을 때) 다시 돌지 않는다.
   const [openedRowIds, setOpenedRowIds] = useState<string[] | null>(null);
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [checkedKey, setCheckedKey] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLFieldSetElement>(null);
+  usePlayOnce(openedRowIds, bodyRef, (played) => setOpenedRowIds((current) => (current === played ? null : current)));
+  usePlayOnce(lastAddedId, bodyRef, (played) => setLastAddedId((current) => (current === played ? null : current)));
+  usePlayOnce(checkedKey, bodyRef, (played) => setCheckedKey((current) => (current === played ? null : current)));
   const [wasOpen, setWasOpen] = useState(false);
 
   // 열 때는 지금 고른 작업(없으면 첫 행, 그것도 없으면 내용)으로 포커스를 옮긴다.
@@ -606,7 +612,7 @@ export default function TaskSidebar({
             : '타이머가 잠시 멈췄어요. 다음 작업을 고르면 남은 시간부터 자동으로 시작해요.'}
         </p>
       )}
-      <fieldset disabled={selectionDisabled} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0 disabled:opacity-60">
+      <fieldset ref={bodyRef} disabled={selectionDisabled} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0 disabled:opacity-60">
         {choosingNextTask && !hasNextTask && (
           <p className="m-0 px-2.5 py-2 text-sm leading-relaxed text-ink-muted">
             이어서 할 작업이 없어요. 일정을 추가한 뒤 다음 작업으로 선택해주세요. 남은 시간은 유지돼요.

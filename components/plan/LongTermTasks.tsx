@@ -39,7 +39,7 @@ import {
 } from '@/lib/longTermTasks';
 import { cn } from '@/lib/utils';
 import { formatStudyTime, sortableTransition } from './planUi';
-import { useEntrance, usePlayOnce } from './usePlayOnce';
+import { useEntrance, usePlayOnce } from '@/components/ui/usePlayOnce';
 
 interface LongTermTasksProps {
   userId: string;

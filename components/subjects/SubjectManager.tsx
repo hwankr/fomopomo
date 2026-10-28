@@ -5,6 +5,7 @@ import { ChevronDown, Pencil } from 'lucide-react';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { validateSubjectName } from '@/lib/studySubjects';
 import { cn } from '@/lib/utils';
+import { useEntrance, usePlayOnce } from '@/components/ui/usePlayOnce';
 
 type SubjectManagerProps = {
   userId: string | null;
@@ -47,6 +48,11 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
   const [selectedLegacy, setSelectedLegacy] = useState<Set<string>>(() => new Set());
   const [legacyDrafts, setLegacyDrafts] = useState<Map<string, string>>(() => new Map());
   const scopeRef = useRef<{ active: boolean; pending: boolean }>({ active: false, pending: false });
+  const listRef = useRef<HTMLUListElement>(null);
+  // 방금 추가한 줄의 등장과 이름 편집기의 나타남은 한 번 돈 뒤 뗀다(docs §8). 남겨 두면 다시 읽어 순서가 바뀔 때
+  // (화면은 한국어 순서로 넣고 서버는 코드 순서로 돌려준다) 옮겨진 줄에서 다시 돈다.
+  usePlayOnce(addedId, listRef, (played) => setAddedId((current) => (current === played ? null : current)));
+  const editEntering = useEntrance(editingId, listRef);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
 
@@ -150,9 +156,9 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
         <p className="m-0 text-[13px] text-ink-muted">할 일, 타이머, 공부 기록에서 같은 과목을 사용해요. 이름을 바꿔도 기록은 유지돼요.</p>
       </div>}
       {loading && subjects.length === 0 ? <p role="status" className="m-0 text-sm text-ink-muted">과목을 불러오는 중…</p> : (
-        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        <ul ref={listRef} className="m-0 flex list-none flex-col gap-0.5 p-0">
           {/* 이름을 고치기 시작하면 줄 내용이 편집기로 살짝 바뀐다. */}
-          {subjects.map((subject) => <li key={subject.id} className={cn('-mx-2.5 flex min-h-[52px] min-w-0 items-center gap-2 rounded-control px-2.5 py-0.5', wide && 'md:-mx-3 md:min-h-[60px] md:gap-3 md:rounded-tile md:px-3 md:py-1', editingId === subject.id ? 'animate-fade-in' : subject.id === addedId && 'animate-fade-up')}>
+          {subjects.map((subject) => <li key={subject.id} className={cn('-mx-2.5 flex min-h-[52px] min-w-0 items-center gap-2 rounded-control px-2.5 py-0.5', wide && 'md:-mx-3 md:min-h-[60px] md:gap-3 md:rounded-tile md:px-3 md:py-1', editingId === subject.id ? editEntering && 'animate-fade-in' : subject.id === addedId && 'animate-fade-up')}>
             {editingId === subject.id ? <>
               <input aria-label="과목 이름 수정" value={editName} maxLength={80} disabled={busy} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void saveName(); } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); } }} className={cn('ui-input flex-1 px-3 font-semibold', rowControl, wide && 'md:px-3.5')} autoFocus />
               <button type="button" aria-label="과목 이름 저장" disabled={busy} onClick={() => { void saveName(); }} className={cn('ui-button-primary ui-press shrink-0 px-3.5', rowControl, wide && 'md:px-4')}>저장</button>

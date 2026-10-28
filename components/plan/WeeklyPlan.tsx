@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { formatStudyTime } from './planUi';
 import { usePlanRequestScope } from './usePlanRequestScope';
-import { useEntrance, usePlayOnce } from './usePlayOnce';
+import { useEntrance, usePlayOnce } from '@/components/ui/usePlayOnce';
 
 interface WeeklyPlan {
   id: string;

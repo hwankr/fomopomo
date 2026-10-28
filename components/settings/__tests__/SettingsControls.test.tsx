@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const motion = vi.hoisted(() => ({ playMotion: vi.fn() }));
+const motion = vi.hoisted(() => ({ playPop: vi.fn() }));
 
 vi.mock('@/components/ui/motion', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/components/ui/motion')>()),
-  playMotion: motion.playMotion,
+  playPop: motion.playPop,
 }));
 
 import { Stepper } from '../SettingsControls';
@@ -31,7 +31,7 @@ function FocusStepper() {
 }
 
 describe('Stepper', () => {
-  beforeEach(() => motion.playMotion.mockClear());
+  beforeEach(() => motion.playPop.mockClear());
   afterEach(cleanup);
 
   it('pops the value it stepped to without replacing the input, and stays still while typing', () => {
@@ -40,15 +40,16 @@ describe('Stepper', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '집중 늘리기' }));
     expect(input).toHaveValue(30);
-    expect(motion.playMotion).toHaveBeenCalledTimes(1);
-    expect(motion.playMotion).toHaveBeenCalledWith(input.parentElement, [{ transform: 'scale(1.08)', offset: 0.45 }], { duration: 'emphasized', easing: 'pop' });
+    // CSS ui-pop과 같은 공용 팝(playPop)을 값 칸에 재생한다.
+    expect(motion.playPop).toHaveBeenCalledTimes(1);
+    expect(motion.playPop).toHaveBeenCalledWith(input.parentElement);
 
     fireEvent.change(input, { target: { value: '42' } });
-    expect(motion.playMotion).toHaveBeenCalledTimes(1);
+    expect(motion.playPop).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '집중 줄이기' }));
     expect(screen.getByRole('spinbutton', { name: '집중 시간 (분)' })).toBe(input);
     expect(input).toHaveValue(40);
-    expect(motion.playMotion).toHaveBeenCalledTimes(2);
+    expect(motion.playPop).toHaveBeenCalledTimes(2);
   });
 });

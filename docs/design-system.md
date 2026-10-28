@@ -198,6 +198,11 @@
 - `DatePicker` `{ value, onChange, label, min?, max?, … }` — 같은 입력 모양, 달력 팝오버. 선택한 날 `bg-ink` 흰 글자, 오늘 로즈 글자.
 - `SubjectSelect` — `AppSelect` + `+ 새 과목`(로즈 고스트 버튼) + 새 과목 입력 줄(`ui-input` + `ui-button-primary`). 디자인의 `제목에 맞춰 선택 / 미분류 / 과목 / + 새 과목` 순서는 `onAutoSelect`를 주면 맞춰진다.
 
+### 움직임 도구 `components/ui/motion.ts`, `components/ui/usePlayOnce.ts`
+
+- `playPop(element)` — 바뀐 값(숫자·입력칸)을 새로 그리지 않고 `animate-pop`과 같은 팝을 다시 재생한다(§8 JS 움직임).
+- `usePlayOnce(marker, ref, onPlayed)` · `useEntrance(openKey, ref)` — 동작 피드백 클래스를 동작마다 한 번만 재생하고 떼게 한다(§8 새 항목 vs 새로 고친 목록).
+
 ## 5. 페이지 레이아웃 (보드 실측)
 
 ### 데스크톱(`md` 이상)
@@ -301,7 +306,7 @@ CSS 전환에 시간을 따로 줄 때는 `duration-(--duration-enter) ease-ente
 | `animate-scale-in` | 투명 + `scale(.96)` → 제자리, 200ms | 직접 만든 팝오버·메뉴·작은 패널(Radix 내용은 `ui-popover`) |
 | `animate-sheet-in` / `animate-sheet-out` | 자기 높이만큼 아래 → 제자리(280ms, `ease-sheet`) / 반대로(200ms) | 아래 가장자리에 붙은 시트(md 미만) |
 | `animate-fade-out`, `animate-scale-out` | 사라짐(140ms, 끝 상태 유지) | `usePresence`로 남겨 둔 요소의 `data-state="closed"` |
-| `animate-pop` | `1 → 1.08 → 1`, 240ms | 이미 있는 것의 완료·변화 강조: 구슬이 채워짐, 배지 숫자 바뀜 |
+| `animate-pop` | `1 → 1.08 → 1`, 240ms | 이미 있는 것의 완료·변화 강조: 구슬이 채워짐, 배지 숫자 바뀜. 같은 요소에서 여러 번 다시 튀겨야 하면(−/+ 숫자) `key`를 바꿔 새로 그리지 말고 `playPop`(JS 움직임) |
 | `animate-pop-in` | 투명 + `.96` → `1.08` → `1`, 240ms | 새로 나타나는 작은 표시: 체크 표시, 새 알림 점 |
 | `ui-popover` | Radix 팝오버·메뉴 등장·퇴장(트리거 쪽 기준 `scale`). 닫히는 동안 `pointer-events: none` + `inert`(`guardClosingPopovers`), 포커스는 닫히는 순간 한 번만 움직인다(아래 닫히는 팝오버의 포커스). 선택 목록(`role="listbox"`)은 등장만 있고 바로 닫혀 Radix의 페이지 클릭·스크롤 잠금이 곧바로 풀린다 | Radix `Content`에 `ui-popover ui-popover-surface`. 보통은 따로 할 일 없음. 포커스로 열리는 트리거나 직접 만든 `onCloseAutoFocus`가 있으면 아래 규칙 |
 | `ui-stagger` | 자식의 등장을 `--stagger-step`씩 늦춘다. 앞 8개만(0–168ms), 그 뒤는 8번째와 함께 | 짧은 목록을 한꺼번에 열 때(작업 선택 팝오버, 펼친 목록). 목록에 `ui-stagger`, 항목에 `animate-fade-up`. 순서를 직접 주려면 항목에 `style={{ '--stagger-index': i }}` |
@@ -351,7 +356,11 @@ const toggle = () => {
 
 ### 새 항목 vs 새로 고친 목록
 
-- **사용자가 추가한 항목**: 만든 항목의 id를 상태로 기억해(예: `lastAddedId`) 그 항목에만 `animate-fade-up`(완료 표시는 `animate-pop-in`)을 붙인다. CSS 애니메이션은 요소가 붙을 때 한 번만 돌므로, 같은 `key`로 다시 그려져도 반복되지 않는다. 다음 동작에서 id를 비운다.
+**규칙: 동작의 피드백은 사용자 동작 한 번에 한 번 재생하고 소비한다. 다시 불러오기·실시간 갱신, 옮겨진 노드, 다시 보이는 패널에서는 다시 돌지 않는다.**
+
+- **사용자가 추가한 항목**: 만든 항목의 id를 상태로 기억해(예: `lastAddedId`) 그 항목에만 `animate-fade-up`(완료 표시는 `animate-pop-in`)을 붙인다. 같은 `key`로 다시 그리는 것만으로는 다시 돌지 않지만, **요소가 옮겨지거나(실시간·다시 읽은 목록의 순서가 바뀜, React가 노드를 옮김) 숨겨 둔 패널(`hidden`)이 다시 보이면 붙어 있는 CSS 애니메이션은 처음부터 다시 돈다.** 그래서 표시는 한 번 돈 뒤 뗀다: `usePlayOnce(lastAdded, listRef, (played) => setLastAdded((current) => current === played ? null : current))`(`components/ui/usePlayOnce.ts`). 목록을 감싼 요소를 `ref`로 주면 그 안에서 도는 애니메이션이 끝날 때(취소돼도) 지운다. 동작 줄이기·애니메이션이 없으면 바로 지운다. 도는 중에 노드가 옮겨져 다시 시작하면 그것까지 기다린다. 다음 동작에서도 비운다(끌어서 순서를 바꾸면 그 커밋에서 함께 비운다).
+- **열고 닫는 것**(인라인 편집기, 더보기 패널, 추가 양식, 펼친 상세): `const entering = useEntrance(openKey, ref)`를 쓰고 `entering`일 때만 등장 클래스를 붙인다. 닫혀 있다가 열릴 때(또는 다른 항목을 열 때)만 한 번 돈다. 열린 채로 옮겨지거나 다시 보여도 돌지 않고, A를 연 직후 B를 열어도 B의 등장은 B가 끝날 때까지 남는다.
+- 표시가 무엇을 가리키는지 다시 확인한다: 실시간 갱신이 그 상태를 풀었다면(완료 취소, 삭제) 표시를 지워, 같은 상태가 다시 와도 튀지 않게 한다.
 - **새로 고친 목록**(실시간 구독, 주기 갱신, 다시 불러오기, 처음 불러오기): 등장 클래스를 붙이지 않는다. 안정된 `key`(서버 id)를 써서 DOM을 유지하면 아무것도 움직이지 않는다. 배열 인덱스를 `key`로 쓰거나 목록을 통째로 다시 마운트하면 붙어 있는 등장 클래스가 다시 돈다.
 - **사용자가 연 목록**(팝오버를 열 때, 섹션을 펼칠 때): 목록 전체에 `ui-stagger` + 항목 `animate-fade-up`을 써도 된다. 열 때 한 번만 돈다.
 - 실시간으로 들어온 알림처럼 사용자가 알아야 하는 새 소식은 내용 대신 표시(점·배지)를 `animate-pop-in`으로 한 번 강조한다(`NotificationBell`의 `friendRequestPulse`처럼, 처음 불러온 값은 세지 않는다).
@@ -376,8 +385,10 @@ return (
 ### JS 움직임 (`components/ui/motion.ts`)
 
 - `playMotion(element, keyframes, { duration?, easing?, composite? })`: 토큰으로 Web Animation을 한 번 재생한다. 동작 줄이기거나 지원하지 않으면 아무것도 하지 않는다. 끝 상태를 남기지 않는다(`fill` 없음). 시작 상태만 적는다(`[{ opacity: 0, offset: 0 }]`).
+- `playPop(element)`: CSS `ui-pop`과 같은 팝(1 → 1.08(45%) → 1, 구간마다 `--ease-pop`, `--duration-emphasized`)을 한 번 재생한다. 다시 부르면 앞의 팝을 지우고 처음부터 튄다. 입력칸이나 `aria-live` 숫자를 새로 그리지 않고 바뀐 값을 강조할 때 쓴다(설정·타이머 설정 창의 −/+, 계획 추가의 뽀모도로 목표). 동작 줄이기·요소 없음이면 아무것도 하지 않는다.
 - `prefersReducedMotion()`, `motionDuration(name)`, `motionEasing(name)`, `readCssToken('--color-ink')`.
 - `getRunningAnimations(elements, { subtree })` + `whenAnimationsFinish(animations, onDone)`: 애니메이션을 기다릴 때는 이 둘을 쓴다(없으면 바로, 멈추면 시간 제한).
+- `components/ui/usePlayOnce.ts`: `usePlayOnce(marker, ref, onPlayed)`(표시가 있는 동안 `ref` 안의 유한한 애니메이션이 끝나면 `onPlayed(marker)`. 표시가 바뀌면 앞의 기다림은 버리고 새로 모은다. `ref`가 아직 붙지 않은 포털 내용은 같은 작업 끝에 다시 본다), `useEntrance(openKey, ref)`(열릴 때마다 새 번호를 표시로 써서 한 번만 `true`). 위 새 항목 vs 새로 고친 목록.
 - CSS 애니메이션은 동작 줄이기에서 `globals.css`가 시간·지연을 0으로 만들지만, Web Animation은 그 규칙을 받지 않으므로 반드시 `playMotion`을 거친다.
 - `components/ui/popoverExit.ts`: `releaseFocus(container, target?)`(안에 있는 포커스를 target으로, 없으면 놓기 — 직접 만든 사라지는 요소에 쓴다), `guardClosingPopovers()`(`ShellProvider`가 앱 전체에 한 번 설치한다. 화면에서 다시 부르지 않는다. 돌려준 정리 함수는 관찰·리스너와 함께 닫히는 내용에 붙인 `inert`·취소 처리기도 되돌리므로 StrictMode·HMR로 다시 설치해도 하나만 동작한다), `CLOSE_AUTOFOCUS_ATTRIBUTE`(위 복귀 끄기).
 

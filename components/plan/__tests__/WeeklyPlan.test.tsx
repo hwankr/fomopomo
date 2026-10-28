@@ -8,7 +8,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { simulateRunningAnimations } from './motionTestUtils';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 async function chooseSubject(name: string) {
   fireEvent.keyDown(screen.getByRole('combobox', { name: '과목' }), { key: 'ArrowDown' });

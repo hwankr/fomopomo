@@ -12,6 +12,7 @@ vi.mock('@/hooks/useStudySubjects', () => ({
 
 import TaskSidebar from '../TaskSidebar';
 import { guardClosingPopovers } from '@/components/ui/popoverExit';
+import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 import type { LongTermTaskItem, TaskItem } from '../timer/hooks/useTasks';
 
 // 작업 선택기는 닫혀도 붙어 있어 공통 퇴장 애니메이션이 돈다(docs/design-system.md §8).
@@ -197,7 +198,11 @@ describe('TaskSidebar desktop popover exit', () => {
 });
 
 describe('TaskSidebar row motion', () => {
+  // 애니메이션이 도는 동안을 흉내 내 클래스가 붙어 있는 동안과 한 번 돈 뒤를 본다(usePlayOnce).
+  let animations: ReturnType<typeof simulateRunningAnimations>;
+  beforeEach(() => { animations = simulateRunningAnimations(); });
   afterEach(() => {
+    animations.restore();
     cleanup();
     vi.restoreAllMocks();
   });
@@ -234,6 +239,38 @@ describe('TaskSidebar row motion', () => {
     view.rerender(<TaskSidebar {...props} tasks={[{ ...tasks[0], status: 'done' }, tasks[1]]} />);
     expect(checkMark('작업 A 완료')).toHaveClass('animate-pop-in');
     expect(checkMark('끝낸 작업 완료')).not.toHaveClass('animate-pop-in');
+  });
+
+  it('plays the opening rows and the check once: a refetch that moves rows does not re-arm them', async () => {
+    const tasks = [makeTask({ id: 'a', title: '작업 A' }), makeTask({ id: 'b', title: '작업 B' }), makeTask({ id: 'c', title: '작업 C' })];
+    const props = {
+      onClose: () => {}, selectedTaskId: null, onSelectTask: () => {}, onToggleTask: () => {},
+      onSelectSubtask: async () => null, onSelectLongTermTask: async () => null, onToggleSubtask: () => {},
+    };
+    const view = render(<TaskSidebar {...props} isOpen={false} tasks={tasks} />);
+    view.rerender(<TaskSidebar {...props} isOpen tasks={tasks} />);
+    await flushTimers();
+    const titles = () => screen.getAllByRole('listitem').map((row) => row.textContent?.slice(0, 4));
+    const animated = () => Array.from(document.querySelectorAll('[class*="animate-"]'));
+    // 열 때 있던 행이 차례로 떠오른다.
+    expect(animated()).toHaveLength(3);
+    await animations.finish();
+    expect(animated()).toHaveLength(0);
+
+    // 다른 곳에서 A를 끝내 창이 다시 포커스를 받을 때 다시 읽는다 → A가 아래로 옮겨져도 다시 떠오르지 않는다.
+    view.rerender(<TaskSidebar {...props} isOpen tasks={[{ ...tasks[0], status: 'done' }, tasks[1], tasks[2]]} />);
+    expect(titles()).toEqual(['작업 B', '작업 C', '작업 A']);
+    expect(animated()).toHaveLength(0);
+
+    // 사용자가 B를 체크하면 그 체크만 한 번 튀고, 그 뒤 다시 읽어 옮겨져도 다시 튀지 않는다.
+    fireEvent.click(screen.getByRole('checkbox', { name: '작업 B 완료' }));
+    view.rerender(<TaskSidebar {...props} isOpen tasks={[{ ...tasks[0], status: 'done' }, { ...tasks[1], status: 'done' }, tasks[2]]} />);
+    const checkMark = () => screen.getByRole('checkbox', { name: '작업 B 완료' }).parentElement!.querySelector('svg');
+    expect(checkMark()).toHaveClass('animate-pop-in');
+    await animations.finish();
+    expect(checkMark()).not.toHaveClass('animate-pop-in');
+    view.rerender(<TaskSidebar {...props} isOpen tasks={[{ ...tasks[0], status: 'done' }, { ...tasks[1], status: 'done' }, { ...tasks[2], status: 'done' }]} />);
+    expect(animated()).toHaveLength(0);
   });
 
   it('lets the expanded chapters rise when a project is opened', async () => {

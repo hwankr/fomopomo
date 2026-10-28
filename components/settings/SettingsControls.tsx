@@ -3,7 +3,7 @@
 import { useRef, type ReactNode } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { playMotion } from '@/components/ui/motion';
+import { playPop } from '@/components/ui/motion';
 import type { NumberField } from './useSettingsForm';
 
 type SettingsSectionProps = {
@@ -136,10 +136,10 @@ export function Stepper({
   const remainder = current % step;
   const decreased = Math.max(min, remainder === 0 ? current - step : current - remainder);
   const increased = Math.min(max, current - remainder + step);
-  // −/+로 바꾼 값은 한 번 톡 튄다(animate-pop과 같은 1.08배). 입력칸을 새로 그리지 않도록 Web Animation으로 재생한다.
+  // −/+로 바꾼 값은 한 번 톡 튄다(animate-pop과 같다). 입력칸을 새로 그리지 않도록 Web Animation(playPop)으로 재생한다.
   const stepTo = (next: number) => {
     onChange(next);
-    playMotion(valueRef.current, [{ transform: 'scale(1.08)', offset: 0.45 }], { duration: 'emphasized', easing: 'pop' });
+    playPop(valueRef.current);
   };
 
   return (

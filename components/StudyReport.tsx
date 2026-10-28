@@ -281,7 +281,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
                   aria-pressed={isSelected}
                   aria-label={bucketAriaLabel(bucket)}
                   onClick={() => selectBucket(bucket.bucketKey)}
-                  className="ui-press relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-[5px] rounded-[6px] p-0 transition-[filter,scale] hover:brightness-92 md:gap-1.5"
+                  className="ui-press relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-[5px] rounded-[6px] p-0 transition-[scale] hover:brightness-92 md:gap-1.5"
                 >
                   {viewMode !== 'month' ? (
                     <span aria-hidden="true" className={cn('text-[10px] font-semibold whitespace-nowrap transition-colors md:text-[11px]', isSelected ? 'text-ink' : 'text-ink-muted')}>

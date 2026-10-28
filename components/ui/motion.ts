@@ -77,6 +77,31 @@ export function playMotion(
   });
 }
 
+// 요소마다 마지막으로 재생한 팝. 다시 누르면 앞의 것을 지우고 처음부터 튄다.
+const pops = new WeakMap<Element, Animation>();
+
+/**
+ * CSS `ui-pop`(`animate-pop`)과 같은 팝을 Web Animation으로 한 번 재생한다: 1 → 1.08(45%) → 1,
+ * 구간마다 `--ease-pop`, `--duration-emphasized`. 요소를 새로 붙이지 않고(입력칸·숫자를 다시 그리지 않고)
+ * 바뀐 값을 강조할 때 쓴다. 다시 부르면 처음부터 다시 튄다. 동작 줄이기거나 요소가 없으면 아무것도 하지 않는다.
+ */
+export function playPop(element: Element | null | undefined) {
+  if (!element || typeof element.animate !== 'function' || prefersReducedMotion()) return null;
+  const easing = motionEasing('pop');
+  pops.get(element)?.cancel();
+  const animation = element.animate(
+    [
+      { transform: 'scale(1)', offset: 0, easing },
+      { transform: 'scale(1.08)', offset: 0.45, easing },
+      { transform: 'scale(1)', offset: 1 },
+    ],
+    // CSS 애니메이션처럼 가속은 구간마다 따로 적용한다(전체는 linear).
+    { duration: motionDuration('emphasized'), easing: 'linear' },
+  );
+  pops.set(element, animation);
+  return animation;
+}
+
 /** 요소들에서 지금 돌고 있는 유한한 애니메이션(CSS 애니메이션·전환 포함). 무한 반복(로딩 등)은 뺀다. */
 export function getRunningAnimations(elements: (Element | null | undefined)[], { subtree = false } = {}) {
   return elements.flatMap((element) => {
