@@ -154,4 +154,20 @@ describe('MemberRow', () => {
         fireEvent.click(screen.getByRole('listitem'));
         expect(props.onSelectForReport).not.toHaveBeenCalled();
     });
+
+    it('닉네임 수정 폼은 살짝 떠오르며 나타나고, 실시간 상태 점은 색만 바뀐다', () => {
+        renderRow({ isCurrentUser: true, editingNickname: true, tempNickname: '지훈' });
+        const form = (screen.getByLabelText('내 닉네임') as HTMLInputElement).form!;
+        expect(form).toHaveClass('animate-fade-up');
+        // 한 번 돌면 떼어, 순위가 바뀌어 줄이 옮겨져도 다시 돌지 않는다.
+        fireEvent.animationEnd(form);
+        expect(form).not.toHaveClass('animate-fade-up');
+        cleanup();
+
+        renderRow();
+        const dot = screen.getByText('공부 중 · 수학 기출').previousElementSibling as HTMLElement;
+        expect(dot).toHaveClass('bg-pomo', 'transition-colors');
+        expect(dot.className).not.toMatch(/animate-/);
+        expect(screen.getByRole('listitem').className).not.toMatch(/animate-/);
+    });
 });

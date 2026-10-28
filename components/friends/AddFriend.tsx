@@ -1,7 +1,8 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useState, type AnimationEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/ui/Avatar';
 import { cn } from '@/lib/utils';
@@ -46,10 +47,24 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  // 사용자 동작으로 나타난 결과 줄·보냄 체크·안내 문구는 한 번만 움직인다. 탭 패널은 숨겼다(hidden) 보이면
+  // CSS 애니메이션이 다시 돌므로, 애니메이션이 끝나면 클래스를 뗀다.
+  const [rowEntering, setRowEntering] = useState(false);
+  const [sentPopping, setSentPopping] = useState(false);
+  const [messageEntering, setMessageEntering] = useState(false);
   const formId = useId();
   const inputId = useId();
 
   void session;
+
+  const showMessage = (next: { type: 'success' | 'error'; text: string }) => {
+    setMessage(next);
+    setMessageEntering(true);
+  };
+
+  const settle = (event: AnimationEvent, done: () => void) => {
+    if (event.target === event.currentTarget) done();
+  };
 
   const handleAddFriend = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -65,13 +80,14 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
 
       if (error) throw error;
 
-      setMessage({ type: 'success', text: '친구 요청을 보냈어요. 상대가 수락하면 순위에 함께 보여요.' });
+      showMessage({ type: 'success', text: '친구 요청을 보냈어요. 상대가 수락하면 순위에 함께 보여요.' });
       setSentTo(email);
+      setSentPopping(true);
       setEmail('');
       onFriendAdded();
     } catch (error: unknown) {
       console.error('Error adding friend:', JSON.stringify(error, null, 2));
-      setMessage({ type: 'error', text: getRpcErrorMessage(error) });
+      showMessage({ type: 'error', text: getRpcErrorMessage(error) });
     } finally {
       setLoading(false);
     }
@@ -84,6 +100,14 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
   const hint = typed
     ? '이메일 주소를 끝까지 입력해 주세요.'
     : '친구가 가입한 이메일을 입력하면 여기에서 친구 요청을 보낼 수 있어요.';
+
+  // 입력한 주소가 이메일 모양이 되어 결과 줄이 새로 생길 때 한 번 떠오른다.
+  const hasTarget = target !== null;
+  const [lastHasTarget, setLastHasTarget] = useState(hasTarget);
+  if (hasTarget !== lastHasTarget) {
+    setLastHasTarget(hasTarget);
+    setRowEntering(hasTarget);
+  }
 
   return (
     <section aria-label="친구 찾기" className="flex flex-col gap-3 md:gap-4">
@@ -102,6 +126,7 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
           onChange={(event) => {
             setEmail(event.target.value);
             setMessage(null);
+            setSentPopping(false);
           }}
           placeholder="친구의 가입 이메일"
           autoComplete="off"
@@ -112,7 +137,13 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
 
       {target ? (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-          <li className="flex min-h-[72px] items-center gap-3 rounded-tile px-2 py-1.5 md:min-h-[82px] md:gap-4 md:rounded-2xl md:px-3 md:py-2">
+          <li
+            onAnimationEnd={rowEntering ? (event) => settle(event, () => setRowEntering(false)) : undefined}
+            className={cn(
+              'flex min-h-[72px] items-center gap-3 rounded-tile px-2 py-1.5 md:min-h-[82px] md:gap-4 md:rounded-2xl md:px-3 md:py-2',
+              rowEntering && 'animate-fade-up',
+            )}
+          >
             <Avatar name={target} className="bg-surface text-ink md:size-10 md:text-[15px]" />
             <span className="min-w-0 flex-1 truncate text-[15px] font-semibold md:text-base" title={target}>
               {target}
@@ -121,8 +152,15 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
               <button
                 type="button"
                 disabled
-                className="ui-button-secondary min-h-10 shrink-0 rounded-control px-3 text-sm md:min-h-11 md:rounded-tile md:px-4 md:text-[15px]"
+                className="ui-button-secondary min-h-10 shrink-0 gap-1.5 rounded-control px-3 text-sm md:min-h-11 md:rounded-tile md:px-4 md:text-[15px]"
               >
+                <Check
+                  aria-hidden="true"
+                  size={16}
+                  strokeWidth={2.2}
+                  onAnimationEnd={() => setSentPopping(false)}
+                  className={cn('shrink-0', sentPopping && 'animate-pop-in')}
+                />
                 요청 보냄
               </button>
             ) : (
@@ -144,9 +182,11 @@ export default function AddFriend({ session, onFriendAdded }: AddFriendProps) {
       {/* 늘 그려 두는 알림 영역이라 결과가 바뀔 때마다 보조기기가 읽는다. */}
       <p
         role="status"
+        onAnimationEnd={messageEntering ? (event) => settle(event, () => setMessageEntering(false)) : undefined}
         className={cn(
           'm-0 px-2 text-sm empty:hidden md:px-3',
           message?.type === 'error' ? 'text-pomo-deep' : 'text-ink-muted',
+          message && messageEntering && 'animate-fade-in',
         )}
       >
         {message?.text}

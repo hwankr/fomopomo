@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type AnimationEvent } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Session } from '@supabase/supabase-js';
 import { Bell, BellOff, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -168,7 +168,12 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
   const [editName, setEditName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [deletingFriend, setDeletingFriend] = useState<{ id: string; name: string; friendId: string } | null>(null);
-  const [selectedFriendForReport, setSelectedFriendForReport] = useState<{ id: string; name: string } | null>(null);
+  // 리포트 창은 닫아도 남겨 두어 퇴장 애니메이션을 하고(마지막 친구를 그대로 보인다), 열 때마다 key를 바꿔 새로 그린다.
+  const [report, setReport] = useState<{ id: string; name: string; open: boolean; key: number } | null>(null);
+  // 다시 불러온 목록에서 처음 보이는 친구(요청 수락 등)와 방금 알림을 끈 친구. 그 줄·표시만 한 번 움직이고,
+  // 애니메이션이 끝나면 비운다(탭을 다시 열거나 순위가 바뀌어 줄이 옮겨져도 다시 돌지 않게).
+  const [newFriendIds, setNewFriendIds] = useState<string[]>([]);
+  const [mutedFriendId, setMutedFriendId] = useState<string | null>(null);
   const [todayTimes, setTodayTimes] = useState<Record<string, number>>({});
   const [weekTimes, setWeekTimes] = useState<Record<string, number>>({});
   const [myTimes, setMyTimes] = useState<StudyTotals>({ today: 0, week: 0 });
@@ -236,6 +241,12 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
       if (error) throw error;
 
       const friendshipRows = (data ?? []) as FriendshipRow[];
+      // 처음 불러온 목록은 세지 않는다.
+      const previousIds = friendIdsRef.current;
+      if (previousIds) {
+        const added = friendshipRows.filter((row) => !previousIds.has(row.friend_id)).map((row) => row.id);
+        if (added.length > 0) setNewFriendIds((prev) => [...prev, ...added]);
+      }
       friendIdsRef.current = new Set(friendshipRows.map((row) => row.friend_id));
       setFriends(
         friendshipRows.flatMap((row) => {
@@ -414,6 +425,7 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
       setFriends(prev => prev.map(f =>
         f.id === friend.id ? { ...f, is_notification_enabled: newValue } : f
       ));
+      setMutedFriendId(newValue ? null : friend.id);
       toast.success(newValue ? '공부 시작 알림을 켰어요.' : '공부 시작 알림을 껐어요.');
     } catch (error) {
       console.error('Error toggling notification:', error);
@@ -421,15 +433,56 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
     }
   };
 
-  if (loading) {
-    return <p className="m-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]">친구 목록을 불러오는 중이에요.</p>;
-  }
+  const openReport = (id: string, name: string) =>
+    setReport((prev) => ({ id, name, open: true, key: (prev?.key ?? 0) + 1 }));
 
-  if (friends.length === 0) {
+  const settleNewFriend = (event: AnimationEvent<HTMLLIElement>, id: string) => {
+    if (event.target === event.currentTarget) setNewFriendIds((prev) => prev.filter((item) => item !== id));
+  };
+
+  // 마지막 친구를 지워 빈 목록이 돼도 닫히는 창이 끝까지 퇴장하도록 창들은 어느 상태에서나 그린다.
+  const dialogs = (
+    <>
+      <FriendNicknameDialog
+        open={!!editingFriend}
+        email={editingFriend?.friend_email ?? ''}
+        value={editName}
+        saving={savingName}
+        onChange={setEditName}
+        onSave={() => void handleSaveEdit()}
+        onCancel={handleCancelEdit}
+      />
+
+      <ConfirmModal
+        isOpen={!!deletingFriend}
+        onClose={() => setDeletingFriend(null)}
+        onConfirm={() => void handleDelete()}
+        title="친구 삭제"
+        message={`${deletingFriend?.name ?? ''} 님을 친구 목록에서 삭제할까요? 서로의 공부 상태와 순위가 더 이상 보이지 않아요.`}
+        confirmText="삭제"
+        confirmTone="danger"
+      />
+
+      {report ? (
+        <MemberReportModal
+          key={`report-${report.key}`}
+          isOpen={report.open}
+          onClose={() => setReport((prev) => (prev ? { ...prev, open: false } : prev))}
+          userId={report.id}
+          userName={report.name}
+        />
+      ) : null}
+    </>
+  );
+
+  if (loading || friends.length === 0) {
     return (
-      <p className="m-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]">
-        아직 친구가 없어요. 찾기에서 친구를 추가해 보세요.
-      </p>
+      <>
+        <p className="m-0 px-2 py-5 text-sm text-ink-muted md:px-3 md:py-6 md:text-[15px]">
+          {loading ? '친구 목록을 불러오는 중이에요.' : '아직 친구가 없어요. 찾기에서 친구를 추가해 보세요.'}
+        </p>
+        {dialogs}
+      </>
     );
   }
 
@@ -486,17 +539,20 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
           {rows.map((row, index) => {
             const friend = row.friendship;
+            const isNew = friend !== null && newFriendIds.includes(friend.id);
             return (
               <li
                 key={row.key}
+                onAnimationEnd={isNew ? (event) => settleNewFriend(event, row.key) : undefined}
                 className={cn(
                   'flex items-center rounded-tile transition-colors md:rounded-2xl',
                   row.isMe ? 'bg-surface' : 'hover:bg-hover',
+                  isNew && 'animate-fade-up',
                 )}
               >
                 <button
                   type="button"
-                  onClick={() => setSelectedFriendForReport({ id: row.userId, name: row.name })}
+                  onClick={() => openReport(row.userId, row.name)}
                   className="flex min-h-[72px] min-w-0 flex-1 items-center gap-3 rounded-[inherit] px-2 py-1.5 text-left md:min-h-[82px] md:gap-4 md:px-3 md:py-2"
                 >
                   <span
@@ -530,7 +586,13 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
                       ) : null}
                       {friend && !friend.is_notification_enabled ? (
                         <>
-                          <BellOff aria-hidden="true" size={14} strokeWidth={1.8} className="shrink-0 text-ink-faint" />
+                          <BellOff
+                            aria-hidden="true"
+                            size={14}
+                            strokeWidth={1.8}
+                            onAnimationEnd={() => setMutedFriendId(null)}
+                            className={cn('shrink-0 text-ink-faint', mutedFriendId === friend.id && 'animate-pop-in')}
+                          />
                           <span className="sr-only">공부 시작 알림 꺼짐</span>
                         </>
                       ) : null}
@@ -569,36 +631,7 @@ function FriendListContent({ session, refreshTrigger, onSummaryChange }: FriendL
         </p>
       </section>
 
-      <FriendNicknameDialog
-        open={!!editingFriend}
-        email={editingFriend?.friend_email ?? ''}
-        value={editName}
-        saving={savingName}
-        onChange={setEditName}
-        onSave={() => void handleSaveEdit()}
-        onCancel={handleCancelEdit}
-      />
-
-      <ConfirmModal
-        isOpen={!!deletingFriend}
-        onClose={() => setDeletingFriend(null)}
-        onConfirm={() => void handleDelete()}
-        title="친구 삭제"
-        message={`${deletingFriend?.name ?? ''} 님을 친구 목록에서 삭제할까요? 서로의 공부 상태와 순위가 더 이상 보이지 않아요.`}
-        confirmText="삭제"
-        confirmTone="danger"
-      />
-
-      {
-        selectedFriendForReport && (
-          <MemberReportModal
-            isOpen={!!selectedFriendForReport}
-            onClose={() => setSelectedFriendForReport(null)}
-            userId={selectedFriendForReport.id}
-            userName={selectedFriendForReport.name}
-          />
-        )
-      }
+      {dialogs}
     </>
   );
 }

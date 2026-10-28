@@ -32,11 +32,14 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
   const searchParams = useSearchParams();
   const urlTab = parseTab(searchParams.get('tab'));
   const [tab, setTab] = useState<FriendsTab>(urlTab);
+  // 탭을 바꿔 새로 보이게 된 패널. 그 패널만 서서히 나타난다(처음 열 때는 화면 전환이 맡는다).
+  const [enteredTab, setEnteredTab] = useState<FriendsTab | null>(null);
   // 같은 페이지에서 주소의 탭이 바뀌면(알림 링크 등) 따라간다.
   const [lastUrlTab, setLastUrlTab] = useState(urlTab);
   if (urlTab !== lastUrlTab) {
     setLastUrlTab(urlTab);
     setTab(urlTab);
+    if (urlTab !== tab) setEnteredTab(urlTab);
   }
   const baseId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -51,6 +54,7 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
 
   // 탭은 기록을 쌓지 않고 주소만 바꾼다(새로고침·공유해도 같은 탭).
   const selectTab = (next: FriendsTab) => {
+    if (next !== tab) setEnteredTab(next);
     setTab(next);
     const params = new URLSearchParams(searchParams.toString());
     if (next === 'friends') params.delete('tab');
@@ -88,6 +92,8 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
   };
   const tabId = (key: FriendsTab) => `${baseId}-tab-${key}`;
   const panelId = (key: FriendsTab) => `${baseId}-panel-${key}`;
+  // 숨겼다(hidden) 보이는 패널은 CSS 애니메이션이 처음부터 다시 돈다. 바꿔서 보이게 된 패널에만 붙인다.
+  const panelClass = (key: FriendsTab) => (enteredTab === key ? 'animate-fade-in' : undefined);
 
   const loginButton = (
     <button type="button" onClick={onOpenLogin} className="ui-button-secondary min-h-10 px-4 text-sm">
@@ -150,10 +156,10 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
 
       {session ? (
         <div className="mx-auto box-border w-full max-w-[960px] px-3 pt-1 pb-8 md:px-10 md:pt-2 md:pb-16">
-          <div role="tabpanel" id={panelId('friends')} aria-labelledby={tabId('friends')} hidden={tab !== 'friends'}>
+          <div role="tabpanel" id={panelId('friends')} aria-labelledby={tabId('friends')} hidden={tab !== 'friends'} className={panelClass('friends')}>
             <FriendList session={session} refreshTrigger={refreshTrigger} onSummaryChange={setSummary} />
           </div>
-          <div role="tabpanel" id={panelId('requests')} aria-labelledby={tabId('requests')} hidden={tab !== 'requests'}>
+          <div role="tabpanel" id={panelId('requests')} aria-labelledby={tabId('requests')} hidden={tab !== 'requests'} className={panelClass('requests')}>
             <FriendRequestList
               session={session}
               refreshTrigger={refreshTrigger}
@@ -162,7 +168,7 @@ export default function FriendsDashboard({ session, onOpenLogin }: FriendsDashbo
               onCountChange={setRequestCount}
             />
           </div>
-          <div role="tabpanel" id={panelId('search')} aria-labelledby={tabId('search')} hidden={tab !== 'search'}>
+          <div role="tabpanel" id={panelId('search')} aria-labelledby={tabId('search')} hidden={tab !== 'search'} className={panelClass('search')}>
             <AddFriend session={session} onFriendAdded={refreshData} />
           </div>
         </div>

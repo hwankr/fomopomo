@@ -3,9 +3,10 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import type { RealtimePostgresChangesPayload, User } from '@supabase/supabase-js';
 import { toast } from 'react-hot-toast';
-import { Pencil } from 'lucide-react';
+import { Check, Pencil } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getDayStart, getStudyWeekRange } from '@/lib/dateUtils';
+import { cn } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
 import MemberReportModal from '@/components/MemberReportModal';
 import GroupLoading from './GroupLoading';
@@ -67,7 +68,14 @@ interface GroupDetailProps {
     onRemoved: (groupId: string) => void;
     /** 그룹을 불러오지 못했을 때(멤버가 아니거나 없는 그룹) */
     onLoadError: () => void;
+    /** 사용자가 고른 그룹이면 불러온 내용을 한 번 서서히 보여 준다(처음 화면을 열 때는 화면 전환이 맡는다). */
+    animateIn?: boolean;
 }
+
+type CopyTarget = 'link' | 'code';
+
+// 복사한 뒤 버튼에 체크를 보여 두는 시간(토스트와 함께 보인다)
+const COPY_FEEDBACK_MS = 1600;
 
 const getInviteCode = (data: unknown) => {
     if (typeof data === 'string') return data;
@@ -110,7 +118,7 @@ const toStudyTimeMap = (rows: StudyTimeRow[]) => {
 
 // 선택한 그룹: 이름·멤버·리더, 이번 주 함께 집중한 시간과 내 순위, 멤버 순위, 초대·나가기·관리 동작.
 // 멤버 상태와 공부 시간은 Realtime으로 갱신한다.
-export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, onLoadError }: GroupDetailProps) {
+export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, onLoadError, animateIn = false }: GroupDetailProps) {
     const titleId = useId();
     const [group, setGroup] = useState<GroupInfo | null>(null);
     const [members, setMembers] = useState<Member[]>([]);
@@ -121,11 +129,17 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
     const [tempNickname, setTempNickname] = useState('');
     const [isEditingGroupName, setIsEditingGroupName] = useState(false);
     const [tempGroupName, setTempGroupName] = useState('');
-    const [selectedMemberForReport, setSelectedMemberForReport] = useState<{ id: string; name: string } | null>(null);
+    // 리포트·그룹장 넘기기 창은 닫아도 남겨 두어 퇴장 애니메이션을 하고(마지막 멤버를 그대로 보인다),
+    // 열 때마다 key를 바꿔 새로 그린다(전에 고른 멤버·불러온 리포트가 남지 않게). 두 창은 형제라 key 앞에 이름을 붙인다.
+    const [report, setReport] = useState<{ id: string; name: string; open: boolean; key: number } | null>(null);
     const [studyTimes, setStudyTimes] = useState<Record<string, number>>({});
     const [weekStartMs, setWeekStartMs] = useState(() => getThisStudyWeek().startMs);
     const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+    const [transferKey, setTransferKey] = useState(0);
     const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+    // 방금 복사한 버튼. 다시 누를 때마다 count가 바뀌어 체크가 다시 나타난다.
+    const [copied, setCopied] = useState<{ target: CopyTarget; count: number } | null>(null);
+    const copiedTimerRef = useRef<number | undefined>(undefined);
 
     // 다른 그룹으로 바꾼 뒤 늦게 끝난 조회가 화면 쪽 콜백을 부르지 않게 한다.
     const isActiveRef = useRef(true);
@@ -359,10 +373,15 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    const copyText = async (text: string, successMessage: string) => {
+    useEffect(() => () => window.clearTimeout(copiedTimerRef.current), []);
+
+    const copyText = async (text: string, successMessage: string, target: CopyTarget) => {
         try {
             await navigator.clipboard.writeText(text);
             toast.success(successMessage);
+            setCopied((prev) => ({ target, count: (prev?.count ?? 0) + 1 }));
+            window.clearTimeout(copiedTimerRef.current);
+            copiedTimerRef.current = window.setTimeout(() => setCopied(null), COPY_FEEDBACK_MS);
         } catch (error) {
             console.error('Error copying to clipboard:', error);
             toast.error('복사하지 못했어요. 다시 시도해 주세요.');
@@ -371,12 +390,12 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
 
     const copyInviteLink = () => {
         if (!inviteCode) return;
-        void copyText(buildInviteLink(window.location.origin, inviteCode), '초대 링크를 복사했어요.');
+        void copyText(buildInviteLink(window.location.origin, inviteCode), '초대 링크를 복사했어요.', 'link');
     };
 
     const copyCode = () => {
         if (!inviteCode) return;
-        void copyText(inviteCode, '초대 코드를 복사했어요.');
+        void copyText(inviteCode, '초대 코드를 복사했어요.', 'code');
     };
 
     const handleUpdateNickname = async () => {
@@ -534,13 +553,35 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
             };
 
     const actionButton = 'min-h-11 rounded-control px-4 text-sm md:min-h-[46px] md:rounded-tile md:px-[18px] md:text-[15px]';
+    // 복사하면 버튼 글자(초대 링크 복사 / 코드) 자리에 체크가 나타났다가 돌아온다. 버튼 폭은 그대로다.
+    const copiedCount = (target: CopyTarget) => (copied?.target === target ? copied.count : 0);
+    const copiedCheck = (target: CopyTarget, size: number) => (
+        <span
+            aria-hidden="true"
+            className={cn(
+                'pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity',
+                copiedCount(target) === 0 && 'opacity-0',
+            )}
+        >
+            <Check
+                key={copiedCount(target)}
+                size={size}
+                strokeWidth={2.4}
+                className={copiedCount(target) ? 'animate-pop-in' : undefined}
+            />
+        </span>
+    );
+
+    const openReport = (memberId: string, name: string) =>
+        setReport((prev) => ({ id: memberId, name, open: true, key: (prev?.key ?? 0) + 1 }));
+    const closeReport = () => setReport((prev) => (prev ? { ...prev, open: false } : prev));
 
     return (
-        <section aria-labelledby={titleId} className="flex flex-col gap-4 md:gap-6">
+        <section aria-labelledby={titleId} className={cn('flex flex-col gap-4 md:gap-6', animateIn && 'animate-fade-in')}>
             <div className="flex flex-col gap-4 px-2 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-6 md:px-0">
                 <div className="flex min-w-0 flex-col gap-0.5 md:gap-1">
                     {isEditingGroupName ? (
-                        <form onSubmit={handleUpdateGroupName} className="flex min-w-0 flex-wrap items-center gap-2">
+                        <form onSubmit={handleUpdateGroupName} className="flex min-w-0 animate-fade-up flex-wrap items-center gap-2">
                             <input
                                 type="text"
                                 value={tempGroupName}
@@ -642,7 +683,7 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                                 onSaveNickname={handleUpdateNickname}
                                 onCancelEditNickname={() => setEditingNickname(false)}
                                 onKickMember={() => setPendingConfirm({ kind: 'kick', memberId: member.id, name: displayName })}
-                                onSelectForReport={() => setSelectedMemberForReport({ id: member.user_id, name: displayName })}
+                                onSelectForReport={() => openReport(member.user_id, displayName)}
                             />
                         );
                     })}
@@ -656,9 +697,10 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                             type="button"
                             onClick={copyInviteLink}
                             disabled={!inviteCode}
-                            className={`ui-button-primary ui-press ${actionButton}`}
+                            className={`ui-button-primary ui-press relative ${actionButton}`}
                         >
-                            초대 링크 복사
+                            <span className={cn('transition-opacity', copiedCount('link') > 0 && 'opacity-0')}>초대 링크 복사</span>
+                            {copiedCheck('link', 20)}
                         </button>
                         {inviteCode ? (
                             <button
@@ -667,7 +709,12 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                                 className={`ui-button-secondary ${actionButton}`}
                                 aria-label={`초대 코드 ${inviteCode} 복사`}
                             >
-                                <span className="font-medium text-ink-muted">코드</span>
+                                <span className="relative">
+                                    <span className={cn('font-medium text-ink-muted transition-opacity', copiedCount('code') > 0 && 'opacity-0')}>
+                                        코드
+                                    </span>
+                                    {copiedCheck('code', 16)}
+                                </span>
                                 <span className="tracking-[0.12em]">{inviteCode}</span>
                             </button>
                         ) : (
@@ -675,7 +722,10 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                         )}
                         <button
                             type="button"
-                            onClick={() => setIsTransferModalOpen(true)}
+                            onClick={() => {
+                                setTransferKey((key) => key + 1);
+                                setIsTransferModalOpen(true);
+                            }}
                             className={`ui-button-secondary ${actionButton}`}
                         >
                             그룹장 넘기기
@@ -699,17 +749,19 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                 )}
             </div>
 
-            {selectedMemberForReport && (
+            {report ? (
                 <MemberReportModal
-                    isOpen={!!selectedMemberForReport}
-                    onClose={() => setSelectedMemberForReport(null)}
-                    userId={selectedMemberForReport.id}
-                    userName={selectedMemberForReport.name}
+                    key={`report-${report.key}`}
+                    isOpen={report.open}
+                    onClose={closeReport}
+                    userId={report.id}
+                    userName={report.name}
                 />
-            )}
+            ) : null}
 
-            {isTransferModalOpen && currentUser && (
+            {currentUser ? (
                 <TransferLeadershipModal
+                    key={`transfer-${transferKey}`}
                     isOpen={isTransferModalOpen}
                     onClose={() => setIsTransferModalOpen(false)}
                     groupId={group.id}
@@ -718,7 +770,7 @@ export default function GroupDetail({ groupId: id, onSummaryChange, onRemoved, o
                     currentUserId={currentUser?.id ?? ''}
                     onTransferred={fetchGroupData}
                 />
-            )}
+            ) : null}
 
             <ConfirmModal
                 isOpen={pendingConfirm !== null}

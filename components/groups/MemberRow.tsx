@@ -1,6 +1,6 @@
 'use client';
 
-import type { FormEvent, KeyboardEvent, MouseEvent } from 'react';
+import { useState, type AnimationEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Check, Pencil, UserMinus, X } from 'lucide-react';
@@ -86,6 +86,16 @@ export default function MemberRow({
 }: MemberRowProps) {
     const displayName = getMemberDisplayName(member);
     const status = getStatus(member.profiles);
+    // 닉네임 폼은 열 때 한 번 떠오른다. 순위가 바뀌어 줄이 옮겨지면 CSS 애니메이션이 다시 돌므로 끝나면 클래스를 뗀다.
+    const [formEntering, setFormEntering] = useState(editingNickname);
+    const [wasEditing, setWasEditing] = useState(editingNickname);
+    if (editingNickname !== wasEditing) {
+        setWasEditing(editingNickname);
+        setFormEntering(editingNickname);
+    }
+    const settleForm = (event: AnimationEvent<HTMLFormElement>) => {
+        if (event.target === event.currentTarget) setFormEntering(false);
+    };
 
     const handleNicknameSubmit = (event: FormEvent) => {
         event.preventDefault();
@@ -125,7 +135,12 @@ export default function MemberRow({
 
             <div className="flex min-w-0 flex-1 flex-col gap-1.5 md:gap-[7px]">
                 {editingNickname ? (
-                    <form onSubmit={handleNicknameSubmit} onClick={stopPropagation} className="flex min-w-0 items-center gap-1">
+                    <form
+                        onSubmit={handleNicknameSubmit}
+                        onClick={stopPropagation}
+                        onAnimationEnd={formEntering ? settleForm : undefined}
+                        className={cn('flex min-w-0 items-center gap-1', formEntering && 'animate-fade-up')}
+                    >
                         <input
                             type="text"
                             value={tempNickname}
@@ -183,7 +198,8 @@ export default function MemberRow({
                             </button>
                         )}
                         <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 text-xs text-ink-muted">
-                            <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', status.dot)} />
+                            {/* 실시간으로 바뀌는 상태는 색만 부드럽게 바뀐다(움직임 없음). */}
+                            <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full transition-colors', status.dot)} />
                             <span className="truncate">{status.text}</span>
                         </span>
                     </div>

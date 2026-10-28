@@ -34,7 +34,8 @@ export function FriendStatusBadge({ status, task, className }: FriendStatusBadge
 
     return (
         <span className={cn('flex min-w-0 items-center gap-1.5 text-xs text-ink-muted md:gap-2 md:text-[13px]', className)}>
-            <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full md:size-2', STATUS_DOT[key])} />
+            {/* 실시간으로 바뀌는 상태는 색만 부드럽게 바뀐다(움직임 없음). */}
+            <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full transition-colors md:size-2', STATUS_DOT[key])} />
             <span className="shrink-0">{STATUS_WORD[key]}</span>
             {currentTask ? (
                 <span className="min-w-0 truncate" title={currentTask}>

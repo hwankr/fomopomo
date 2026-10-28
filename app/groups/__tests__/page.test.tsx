@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { supabaseMock, toastMock, routerMock, authState, navbarMock, groupsState } = vi.hoisted(() => ({
@@ -57,9 +57,11 @@ vi.mock('@/components/Navbar', () => ({
     },
 }));
 
-// 상세는 /groups/[id] 테스트와 GroupDetail 구성 요소가 다룬다. 여기서는 어느 그룹이 선택됐는지만 본다.
+// 상세는 /groups/[id] 테스트와 GroupDetail 구성 요소가 다룬다. 여기서는 어느 그룹이 선택됐는지(와 서서히 보일지)만 본다.
 vi.mock('@/components/groups/GroupDetail', () => ({
-    default: ({ groupId }: { groupId: string }) => <p>{`detail:${groupId}`}</p>,
+    default: ({ groupId, animateIn }: { groupId: string; animateIn?: boolean }) => (
+        <p data-animate-in={animateIn ? 'true' : 'false'}>{`detail:${groupId}`}</p>
+    ),
 }));
 
 import GroupsPage from '@/app/groups/page';
@@ -268,6 +270,133 @@ describe('GroupsPage (/groups)', () => {
         });
         expect(window.location.search).toBe('');
         expect(supabaseMock.rpc).not.toHaveBeenCalledWith('join_group_by_code', expect.anything());
+    });
+
+    it('초대 링크의 참여 창은 닫아도 같은 창이 코드를 그대로 보이며 퇴장한 뒤 사라진다', async () => {
+        // happy-dom은 CSS 애니메이션을 돌리지 않으므로 닫히는 덮개에서 퇴장 애니메이션이 도는 것처럼 꾸민다.
+        const finishers: Array<() => void> = [];
+        Object.defineProperty(Element.prototype, 'getAnimations', {
+            configurable: true,
+            value(this: Element, options?: { subtree?: boolean }) {
+                const elements = [this, ...(options?.subtree ? Array.from(this.querySelectorAll('*')) : [])];
+                return elements
+                    .filter((element) => element.matches('.ui-dialog-overlay[data-state="closed"]'))
+                    .map(() => ({
+                        playState: 'running',
+                        currentTime: 0,
+                        finished: new Promise<void>((resolve) => { finishers.push(resolve); }),
+                        effect: {
+                            getTiming: () => ({ iterations: 1, duration: 140, delay: 0 }),
+                            getComputedTiming: () => ({ endTime: 140 }),
+                        },
+                    }));
+            },
+        });
+        try {
+            window.history.replaceState(null, '', '/groups?code=abc123');
+            render(<GroupsPage />);
+
+            const dialog = await screen.findByRole('dialog', { name: '초대 코드로 참여' });
+            fireEvent.click(within(dialog).getByRole('button', { name: '취소' }));
+
+            // 코드를 지워도(주소에서 빠짐) 창이 바뀌지 않고 닫힌다: data-state="closed"로 남아 퇴장 애니메이션을 한다.
+            expect(window.location.search).toBe('');
+            const overlay = document.querySelector('.ui-dialog-overlay[data-state="closed"]');
+            expect(overlay).not.toBeNull();
+            expect(overlay).toContainElement(dialog);
+            expect(dialog).toHaveAttribute('data-state', 'closed');
+            expect(overlay).toHaveAttribute('inert');
+            expect((within(dialog).getByLabelText('초대 코드') as HTMLInputElement).value).toBe('ABC123');
+
+            await act(async () => {
+                finishers.splice(0).forEach((finish) => finish());
+            });
+            expect(document.querySelector('.ui-dialog-overlay')).toBeNull();
+            expect(supabaseMock.rpc).not.toHaveBeenCalledWith('join_group_by_code', expect.anything());
+        } finally {
+            delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+        }
+    });
+
+    it('처음 연 상세는 그대로 두고, 그룹이나 보기를 바꾼 뒤 보이는 내용만 서서히 보여 준다', async () => {
+        render(<GroupsPage />);
+
+        expect((await screen.findByText('detail:group-a')).dataset.animateIn).toBe('false');
+
+        const chips = screen.getByRole('group', { name: '내 그룹' });
+        fireEvent.click(within(chips).getByRole('button', { name: '토익 900 5명' }));
+        expect(screen.getByText('detail:group-b').dataset.animateIn).toBe('true');
+
+        fireEvent.click(screen.getByRole('button', { name: '코드로 참여' }));
+        expect(screen.getByRole('region', { name: '초대 코드로 참여' })).toHaveClass('animate-fade-in');
+
+        fireEvent.click(screen.getByRole('button', { name: '내 그룹 2' }));
+        expect(screen.getByText('detail:group-b').dataset.animateIn).toBe('true');
+    });
+
+    it('지금 보이는 그룹 칩이나 보기를 다시 눌러도 같은 내용은 움직이지 않는다', async () => {
+        render(<GroupsPage />);
+
+        const detail = await screen.findByText('detail:group-a');
+        const chips = screen.getByRole('group', { name: '내 그룹' });
+        fireEvent.click(within(chips).getByRole('button', { name: '새벽 스터디 3명' }));
+        fireEvent.click(screen.getByRole('button', { name: '내 그룹 2' }));
+
+        expect(screen.getByText('detail:group-a')).toBe(detail);
+        expect(detail.dataset.animateIn).toBe('false');
+        expect(window.location.pathname).toBe('/groups/group-a');
+
+        // 다른 그룹으로 바꾸면 그때부터 서서히 보인다.
+        fireEvent.click(within(chips).getByRole('button', { name: '토익 900 5명' }));
+        expect(screen.getByText('detail:group-b').dataset.animateIn).toBe('true');
+    });
+
+    it('그룹이 없을 때 지금 보기를 다시 눌러도 빈 문구는 움직이지 않는다', async () => {
+        groupsState.groups = [];
+        groupsState.counts = {};
+        render(<GroupsPage />);
+
+        const empty = await screen.findByText('아직 속한 그룹이 없어요. 초대 코드로 참여하거나 새 그룹을 만들어 보세요.');
+        fireEvent.click(screen.getByRole('button', { name: '내 그룹 0' }));
+
+        expect(screen.getByText('아직 속한 그룹이 없어요. 초대 코드로 참여하거나 새 그룹을 만들어 보세요.')).toBe(empty);
+        expect(empty).not.toHaveClass('animate-fade-in');
+    });
+
+    it('그룹이 없을 때의 빈 문구는 처음엔 그대로, 보기를 바꿔 돌아오면 서서히 나타난다', async () => {
+        groupsState.groups = [];
+        groupsState.counts = {};
+        render(<GroupsPage />);
+
+        const empty = '아직 속한 그룹이 없어요. 초대 코드로 참여하거나 새 그룹을 만들어 보세요.';
+        expect(await screen.findByText(empty)).not.toHaveClass('animate-fade-in');
+
+        fireEvent.click(screen.getByRole('button', { name: '코드로 참여' }));
+        fireEvent.click(screen.getByRole('button', { name: '내 그룹 0' }));
+        expect(screen.getByText(empty)).toHaveClass('animate-fade-in');
+    });
+
+    it('방금 만든 그룹의 칩만 한 번 떠오르고, 다른 칩을 고르면 표시를 뗀다', async () => {
+        supabaseMock.rpc.mockResolvedValue({ data: [{ id: 'group-new', name: '기말고사 2주 작전' }], error: null });
+        render(<GroupsPage />);
+
+        const chips = await screen.findByRole('group', { name: '내 그룹' });
+        expect(within(chips).getAllByRole('button').some((chip) => chip.classList.contains('animate-fade-up'))).toBe(false);
+
+        groupsState.groups = [...groupsState.groups, { id: 'group-new', name: '기말고사 2주 작전', leader_id: 'user-1' }];
+        groupsState.counts = { ...groupsState.counts, 'group-new': 1 };
+        fireEvent.click(screen.getByRole('button', { name: '그룹 만들기' }));
+        const dialog = await screen.findByRole('dialog', { name: '새 그룹' });
+        fireEvent.change(within(dialog).getByLabelText('그룹 이름'), { target: { value: '기말고사 2주 작전' } });
+        fireEvent.click(within(dialog).getByRole('button', { name: '만들기' }));
+
+        const newChip = await within(chips).findByRole('button', { name: '기말고사 2주 작전 1명' });
+        expect(newChip).toHaveClass('animate-fade-up');
+        expect(newChip.getAttribute('aria-pressed')).toBe('true');
+        expect(within(chips).getByRole('button', { name: '새벽 스터디 3명' })).not.toHaveClass('animate-fade-up');
+
+        fireEvent.click(within(chips).getByRole('button', { name: '새벽 스터디 3명' }));
+        expect(newChip).not.toHaveClass('animate-fade-up');
     });
 
     it('로그아웃 상태로 초대 링크를 열면 참여 대신 로그인을 안내한다', () => {

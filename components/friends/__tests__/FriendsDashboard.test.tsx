@@ -107,6 +107,26 @@ describe('FriendsDashboard', () => {
     expect(screen.getByRole('tabpanel', { name: '찾기' })).toBeVisible();
   });
 
+  it('fades in only the panel the user switched to, never the one shown on load', () => {
+    window.history.replaceState(null, '', '/friends?tab=requests');
+    render(<FriendsDashboard session={session as never} />);
+
+    const panel = (name: RegExp) => screen.getByText(name).closest('[role="tabpanel"]');
+    expect(panel(/request list/)).not.toHaveClass('animate-fade-in');
+
+    fireEvent.click(getTab(/^친구/));
+    expect(panel(/friend list/)).toHaveClass('animate-fade-in');
+    expect(panel(/request list/)).not.toHaveClass('animate-fade-in');
+
+    // 키보드로 바꿔도 같다. 보이는 탭을 다시 누르면 아무것도 바뀌지 않는다.
+    fireEvent.keyDown(getTab(/^친구/), { key: 'ArrowRight' });
+    expect(panel(/request list/)).toHaveClass('animate-fade-in');
+    expect(panel(/friend list/)).not.toHaveClass('animate-fade-in');
+    fireEvent.click(getTab(/^요청/));
+    expect(panel(/request list/)).toHaveClass('animate-fade-in');
+    expect(panel(/friend list/)).not.toHaveClass('animate-fade-in');
+  });
+
   it('moves between tabs with arrow, Home and End keys', () => {
     render(<FriendsDashboard session={session as never} />);
 

@@ -4,6 +4,7 @@ import { useId, useState, type FormEvent } from 'react';
 import { useJoinGroup } from './useJoinGroup';
 
 // '코드로 참여' 탭. 공개 그룹 둘러보기 대신, 그룹은 초대 코드로만 들어간다.
+// 탭을 눌러야만 그려지므로 그릴 때마다 서서히 나타난다.
 export default function JoinGroupPanel({ onJoined }: { onJoined: (groupId?: string) => void }) {
     const titleId = useId();
     const inputId = useId();
@@ -17,7 +18,7 @@ export default function JoinGroupPanel({ onJoined }: { onJoined: (groupId?: stri
     };
 
     return (
-        <section aria-labelledby={titleId} className="flex max-w-[520px] flex-col gap-4 px-2 py-1 md:gap-5 md:px-3">
+        <section aria-labelledby={titleId} className="flex max-w-[520px] animate-fade-in flex-col gap-4 px-2 py-1 md:gap-5 md:px-3">
             <div className="flex flex-col gap-1">
                 <h2 id={titleId} className="ui-h2">초대 코드로 참여</h2>
                 <p id={hintId} className="m-0 text-sm text-ink-muted md:text-[15px]">

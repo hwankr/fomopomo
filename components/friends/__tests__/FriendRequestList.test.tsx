@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { supabaseMock, toastMock } = vi.hoisted(() => {
@@ -95,6 +95,78 @@ describe('FriendRequestList', () => {
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('친구 요청을 수락하지 못했어요.'));
     expect(onUpdate).not.toHaveBeenCalled();
     expect(screen.getByText('sua@example.com')).toBeInTheDocument();
+  });
+
+  it('lets a handled request fade out in place, out of reach, while the list already moved on', async () => {
+    // happy-dom은 CSS 애니메이션을 돌리지 않으므로 사라지는 줄에서 퇴장 애니메이션이 도는 것처럼 꾸민다.
+    const finishers: Array<() => void> = [];
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value(this: Element) {
+        if (!this.matches('li[data-state="closed"]')) return [];
+        return [{
+          playState: 'running',
+          currentTime: 0,
+          finished: new Promise<void>((resolve) => { finishers.push(resolve); }),
+          effect: {
+            getTiming: () => ({ iterations: 1, duration: 140, delay: 0 }),
+            getComputedTiming: () => ({ endTime: 140 }),
+          },
+        }];
+      },
+    });
+    try {
+      const onCountChange = vi.fn();
+      render(<FriendRequestList session={session as never} refreshTrigger={0} onUpdate={vi.fn()} onCountChange={onCountChange} />);
+      await screen.findByText('sua@example.com');
+      supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [pending[1]], error: null });
+
+      fireEvent.click(screen.getByRole('button', { name: 'sua@example.com 친구 요청 수락' }));
+      await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(1));
+
+      // 다시 불러온 목록에는 없지만, 그 줄은 원래 자리(첫 줄)에서 사라지는 중이다.
+      const rows = screen.getAllByRole('listitem', { hidden: true });
+      expect(rows.map((row) => row.textContent)).toEqual([
+        expect.stringContaining('sua@example.com'),
+        expect.stringContaining('old@example.com'),
+      ]);
+      expect(rows[0]).toHaveAttribute('data-state', 'closed');
+      expect(rows[0]).toHaveAttribute('inert');
+      expect(rows[0]).toHaveClass('animate-fade-out', 'pointer-events-none');
+      rows[0].querySelectorAll('button').forEach((button) => expect(button).toBeDisabled());
+      expect(rows[1]).not.toHaveAttribute('data-state');
+      expect(screen.getByRole('button', { name: 'old@example.com 친구 요청 수락' })).toBeEnabled();
+
+      await act(async () => {
+        finishers.splice(0).forEach((finish) => finish());
+      });
+      expect(screen.queryByText('sua@example.com')).not.toBeInTheDocument();
+      expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    } finally {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+    }
+  });
+
+  it('fades the empty copy in only after the user handled the last request', async () => {
+    supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [pending[0]], error: null });
+    render(<FriendRequestList session={session as never} refreshTrigger={0} onUpdate={vi.fn()} />);
+    await screen.findByText('sua@example.com');
+    supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [], error: null });
+
+    fireEvent.click(screen.getByRole('button', { name: 'sua@example.com 친구 요청 거절' }));
+
+    const empty = await screen.findByText('받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.');
+    expect(empty).toHaveClass('animate-fade-in');
+    // 한 번 돌면 떼어, 탭을 다시 열어도 되풀이하지 않는다.
+    fireEvent.animationEnd(empty);
+    expect(empty).not.toHaveClass('animate-fade-in');
+  });
+
+  it('shows the empty copy on load without motion', async () => {
+    supabaseMock.__mocks.orderMock.mockResolvedValue({ data: [], error: null });
+    render(<FriendRequestList session={session as never} refreshTrigger={0} onUpdate={vi.fn()} />);
+
+    expect(await screen.findByText('받은 요청이 없어요. 찾기에서 친구를 추가해 보세요.')).not.toHaveClass('animate-fade-in');
   });
 
   it('refetches when the shell reports a new incoming request', async () => {

@@ -53,6 +53,65 @@ describe('AddFriend', () => {
     expect(screen.getByRole('button', { name: '요청 보냄' })).toBeDisabled();
   });
 
+  it('raises the result row once each time a complete email is typed', () => {
+    render(<AddFriend session={session as never} onFriendAdded={vi.fn()} />);
+
+    fireEvent.change(getInput(), { target: { value: 'friend@example.com' } });
+    const row = screen.getByRole('listitem');
+    expect(row).toHaveClass('animate-fade-up');
+
+    // 계속 입력해도 같은 줄이라 다시 돌지 않고, 한 번 돈 뒤에는 떼어 탭을 다시 열어도 되풀이하지 않는다.
+    fireEvent.change(getInput(), { target: { value: 'friend@example.co' } });
+    expect(screen.getByRole('listitem')).toBe(row);
+    fireEvent.animationEnd(row);
+    expect(row).not.toHaveClass('animate-fade-up');
+
+    // 주소가 다시 미완성이 되면 줄이 빠지고, 다시 완성되면 새 줄이 한 번 떠오른다.
+    fireEvent.change(getInput(), { target: { value: 'friend@' } });
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    fireEvent.change(getInput(), { target: { value: 'friend@example.com' } });
+    expect(screen.getByRole('listitem')).toHaveClass('animate-fade-up');
+  });
+
+  it('pops a check into the sent button and fades the result message in, once', async () => {
+    render(<AddFriend session={session as never} onFriendAdded={vi.fn()} />);
+    const status = screen.getByRole('status');
+    expect(status).not.toHaveClass('animate-fade-in');
+
+    fireEvent.change(getInput(), { target: { value: 'friend@example.com' } });
+    const requestButton = screen.getByRole('button', { name: '친구 요청' });
+    expect(requestButton.querySelector('svg')).toBeNull();
+    fireEvent.click(requestButton);
+
+    const sent = await screen.findByRole('button', { name: '요청 보냄' });
+    // 같은 버튼이 보냄 상태로 바뀌어(색이 바뀐다) 체크가 한 번 나타난다.
+    expect(sent).toBe(requestButton);
+    const check = sent.querySelector('svg')!;
+    expect(check).toHaveAttribute('aria-hidden', 'true');
+    expect(check).toHaveClass('animate-pop-in');
+    expect(status).toHaveTextContent('친구 요청을 보냈어요.');
+    expect(status).toHaveClass('animate-fade-in');
+    // 보낸 결과 줄은 같은 줄이라 다시 떠오르지 않는다.
+    expect(screen.getByRole('listitem')).toContainElement(sent);
+
+    fireEvent.animationEnd(check);
+    fireEvent.animationEnd(status);
+    expect(check).not.toHaveClass('animate-pop-in');
+    expect(status).not.toHaveClass('animate-fade-in');
+  });
+
+  it('fades a server error in as the result message', async () => {
+    supabaseMock.rpc.mockResolvedValue({ error: { message: 'You are already friends.' } });
+    render(<AddFriend session={session as never} onFriendAdded={vi.fn()} />);
+
+    fireEvent.change(getInput(), { target: { value: 'friend@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: '친구 요청' }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('이미 친구예요.'));
+    expect(screen.getByRole('status')).toHaveClass('animate-fade-in');
+    expect(screen.getByRole('button', { name: '친구 요청' }).querySelector('svg')).toBeNull();
+  });
+
   it('submits from the input with Enter', async () => {
     render(<AddFriend session={session as never} onFriendAdded={vi.fn()} />);
 

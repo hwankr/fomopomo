@@ -70,6 +70,10 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
     const [isInviteDismissed, setIsInviteDismissed] = useState(false);
+    // 사용자가 그룹·보기를 바꾼 뒤로는 새로 보이는 내용을 서서히 보여 준다(처음 열 때는 화면 전환이 맡는다).
+    const [hasSwitched, setHasSwitched] = useState(false);
+    // 방금 만들거나 참여한 그룹. 그 칩만 한 번 떠오른다. 다른 칩을 고르거나 보기를 바꾸면 비운다.
+    const [lastAddedGroupId, setLastAddedGroupId] = useState<string | null>(null);
     const guestTitleId = useId();
 
     const user = session?.user;
@@ -78,6 +82,9 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
     // 초대 링크(/groups?code=XXXXXX)의 코드. 서버 렌더와 첫 하이드레이션에서는 null이다.
     const urlInviteCode = useSyncExternalStore(subscribeNothing, readInviteCode, () => null);
     const inviteCode = isInviteDismissed ? null : urlInviteCode;
+    // 참여 창은 닫혀도 같은 창이 남아 퇴장 애니메이션을 하도록 마지막으로 받은 코드로 그린다.
+    const [lastInviteCode, setLastInviteCode] = useState(inviteCode);
+    if (inviteCode && inviteCode !== lastInviteCode) setLastInviteCode(inviteCode);
 
     // 요청 세대 카운터: 값이 바뀌면 그 이전에 시작된 조회의 응답은 폐기된다.
     const fetchGenerationRef = useRef(0);
@@ -185,19 +192,33 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
 
     const openCreate = () => handleActionClick(() => setIsCreateModalOpen(true));
 
+    // 보기가 실제로 바뀔 때만 새 내용을 서서히 보여 준다(지금 보기를 다시 누르면 그대로).
+    const switchView = (next: View) => {
+        if (next !== view) setHasSwitched(true);
+        setView(next);
+        setLastAddedGroupId(null);
+    };
+
     // 칩으로 그룹을 바꾸면 주소도 /groups/[id]로 맞춰 새로고침·공유해도 같은 그룹이 열린다.
+    // 지금 보이는 그룹의 칩을 다시 누르면 내용이 그대로라 움직이지 않는다.
     const selectGroup = (groupId: string) => {
+        if (groupId !== activeGroupId) setHasSwitched(true);
         setSelectedGroupId(groupId);
-        setView('mine');
+        switchView('mine');
         if (window.location.pathname !== `/groups/${groupId}`) {
             window.history.replaceState(null, '', `/groups/${groupId}`);
         }
     };
 
+    // 만들거나 참여한 그룹은 늘 새 내용이다.
     const handleGroupAdded = (groupId?: string) => {
-        setView('mine');
+        switchView('mine');
+        setHasSwitched(true);
         void fetchGroups();
-        if (groupId) selectGroup(groupId);
+        if (groupId) {
+            selectGroup(groupId);
+            setLastAddedGroupId(groupId);
+        }
     };
 
     const handleGroupRemoved = useCallback((groupId: string) => {
@@ -290,11 +311,12 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
                 onSummaryChange={handleSummaryChange}
                 onRemoved={handleGroupRemoved}
                 onLoadError={handleDetailLoadError}
+                animateIn={hasSwitched}
             />
         );
     } else {
         body = (
-            <p className="m-0 px-2 py-3 text-sm text-ink-muted md:p-3 md:text-[15px]">
+            <p className={cn('m-0 px-2 py-3 text-sm text-ink-muted md:p-3 md:text-[15px]', hasSwitched && 'animate-fade-in')}>
                 아직 속한 그룹이 없어요. 초대 코드로 참여하거나 새 그룹을 만들어 보세요.
             </p>
         );
@@ -333,10 +355,10 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
                                 aria-label="그룹 보기 방식"
                                 className="ui-segmented [&>button]:h-[34px] [&>button]:px-3.5 md:[&>button]:h-[38px] md:[&>button]:px-4 md:[&>button]:text-[15px]"
                             >
-                                <button type="button" aria-pressed={view === 'mine'} onClick={() => setView('mine')}>
+                                <button type="button" aria-pressed={view === 'mine'} onClick={() => switchView('mine')}>
                                     {groupsLoading ? '내 그룹' : `내 그룹 ${groups.length}`}
                                 </button>
-                                <button type="button" aria-pressed={view === 'join'} onClick={() => setView('join')}>
+                                <button type="button" aria-pressed={view === 'join'} onClick={() => switchView('join')}>
                                     코드로 참여
                                 </button>
                             </div>
@@ -368,15 +390,16 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
                                     aria-pressed={isSelected}
                                     onClick={() => selectGroup(group.id)}
                                     className={cn(
-                                        'inline-flex h-10 max-w-[80vw] shrink-0 items-center gap-2 rounded-control px-3.5 text-sm font-semibold whitespace-nowrap transition-[filter] duration-150 hover:brightness-97 md:h-11 md:max-w-none md:gap-2.5 md:rounded-tile md:px-[18px] md:text-[15px]',
+                                        'ui-press inline-flex h-10 max-w-[80vw] shrink-0 items-center gap-2 rounded-control px-3.5 text-sm font-semibold whitespace-nowrap transition-[filter,background-color,color,scale] hover:brightness-97 md:h-11 md:max-w-none md:gap-2.5 md:rounded-tile md:px-[18px] md:text-[15px]',
                                         isSelected ? 'bg-pomo-tint text-pomo' : 'bg-surface text-ink',
+                                        group.id === lastAddedGroupId && 'animate-fade-up',
                                     )}
                                 >
                                     <span className="min-w-0 truncate">{group.name}</span>
                                     {group.memberCount !== null ? (
                                         <span
                                             className={cn(
-                                                'shrink-0 text-xs font-medium md:text-[13px]',
+                                                'shrink-0 text-xs font-medium transition-colors md:text-[13px]',
                                                 isSelected ? 'text-ink-muted md:text-pomo' : 'text-ink-muted',
                                             )}
                                         >
@@ -403,9 +426,9 @@ export default function GroupsScreen({ initialGroupId }: GroupsScreenProps) {
             />
 
             <JoinGroupModal
-                key={inviteCode ?? 'none'}
+                key={`invite-${lastInviteCode ?? 'none'}`}
                 isOpen={!!session && !!inviteCode}
-                initialCode={inviteCode ?? ''}
+                initialCode={lastInviteCode ?? ''}
                 onClose={dismissInvite}
                 onJoined={(groupId) => {
                     dismissInvite();
