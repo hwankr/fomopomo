@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StopwatchDisplay } from '../StopwatchDisplay';
@@ -29,6 +29,13 @@ const renderTimerDisplay = (overrides: Partial<Parameters<typeof TimerDisplay>[0
 
 const beadStates = () =>
   Array.from(screen.getByRole('img').querySelectorAll('[data-state]')).map((bead) => bead.getAttribute('data-state'));
+
+// 무대 아래쪽 자리: [재설정 칸][시작][설정 칸] 줄과 그 아래 칩 줄
+const controlsRow = () => document.querySelector('[data-stage-controls]') as HTMLElement;
+const slot = (name: 'reset' | 'settings') => document.querySelector(`[data-stage-slot="${name}"]`) as HTMLElement;
+const chipRow = () => document.querySelector('[data-stage-chip-row]') as HTMLElement;
+const buttonNames = (container: HTMLElement) =>
+  within(container).queryAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
 
 describe('TimerDisplay stage', () => {
   it('shows the resting status, cycle, spoken time and one empty bead per minute', () => {
@@ -247,6 +254,47 @@ describe('TimerDisplay task handoff', () => {
   });
 });
 
+describe('TimerDisplay stage layout', () => {
+  it('keeps reset left and settings right of the start button, holding an empty reset slot while reset is hidden', () => {
+    const view = renderTimerDisplay();
+    expect(Array.from(controlsRow().children)).toEqual([slot('reset'), screen.getByRole('button', { name: '시작' }), slot('settings')]);
+    // 빈 칸은 자리만 차지한다(포커스도 낭독도 없음).
+    expect(slot('reset')).toBeEmptyDOMElement();
+    expect(slot('reset')).not.toHaveAttribute('tabindex');
+    expect(slot('reset')).not.toHaveAttribute('role');
+    expect(buttonNames(controlsRow())).toEqual(['시작', '타이머 설정']);
+    view.unmount();
+
+    renderTimerDisplay({ timeLeft: 20 * 60, showResetButton: true });
+    expect(Array.from(controlsRow().children)).toEqual([slot('reset'), screen.getByRole('button', { name: '시작' }), slot('settings')]);
+    expect(slot('reset')).toContainElement(screen.getByRole('button', { name: '타이머 초기화' }));
+    expect(slot('settings')).toContainElement(screen.getByRole('button', { name: '타이머 설정' }));
+    // 탭 순서도 초기화 → 시작 → 설정
+    expect(buttonNames(controlsRow())).toEqual(['타이머 초기화', '시작', '타이머 설정']);
+  });
+
+  it('keeps both side slots while running and without a settings handler', () => {
+    renderTimerDisplay({ isRunning: true, timeLeft: 20 * 60, onOpenSettings: undefined });
+    expect(Array.from(controlsRow().children)).toEqual([slot('reset'), screen.getByRole('button', { name: '일시정지' }), slot('settings')]);
+    expect(slot('reset')).toBeEmptyDOMElement();
+    expect(slot('settings')).toBeEmptyDOMElement();
+  });
+
+  it('reserves the chip row below the controls whether or not a chip shows', () => {
+    const view = renderTimerDisplay();
+    expect(chipRow()).toBeInTheDocument();
+    expect(chipRow()).toBeEmptyDOMElement();
+    expect(controlsRow().compareDocumentPosition(chipRow()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    view.unmount();
+
+    renderTimerDisplay({
+      timeLeft: 20 * 60, showResetButton: true, showSaveButton: true,
+      selectedTaskId: 'task-a', selectedTaskTitle: '작업 A', canCompleteTask: true, onCompleteTask: vi.fn(),
+    });
+    expect(buttonNames(chipRow())).toEqual(['기록 저장', '작업 완료 · 다음 작업']);
+  });
+});
+
 describe('StopwatchDisplay', () => {
   const renderStopwatch = (overrides: Partial<Parameters<typeof StopwatchDisplay>[0]> = {}) =>
     render(
@@ -290,5 +338,28 @@ describe('StopwatchDisplay', () => {
     fireEvent.click(screen.getByRole('button', { name: '스톱워치 초기화' }));
     expect(onSaveStopwatch).toHaveBeenCalledOnce();
     expect(onResetStopwatch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps reset left and settings right of the start button, holding an empty reset slot while reset is hidden', () => {
+    const view = renderStopwatch({ onOpenSettings: vi.fn() });
+    expect(Array.from(controlsRow().children)).toEqual([slot('reset'), screen.getByRole('button', { name: '시작' }), slot('settings')]);
+    expect(slot('reset')).toBeEmptyDOMElement();
+    expect(buttonNames(controlsRow())).toEqual(['시작', '타이머 설정']);
+    view.unmount();
+
+    renderStopwatch({ stopwatchTime: 90, isStopwatchRunning: true, onOpenSettings: vi.fn() });
+    expect(slot('reset')).toBeEmptyDOMElement();
+    expect(buttonNames(controlsRow())).toEqual(['일시정지', '타이머 설정']);
+  });
+
+  it('puts reset in its slot and the save chip in the reserved row once paused', () => {
+    const view = renderStopwatch();
+    expect(chipRow()).toBeEmptyDOMElement();
+    view.unmount();
+
+    renderStopwatch({ stopwatchTime: 90, onOpenSettings: vi.fn() });
+    expect(Array.from(controlsRow().children)).toEqual([slot('reset'), screen.getByRole('button', { name: '재개' }), slot('settings')]);
+    expect(buttonNames(controlsRow())).toEqual(['스톱워치 초기화', '재개', '타이머 설정']);
+    expect(buttonNames(chipRow())).toEqual(['기록 저장']);
   });
 });

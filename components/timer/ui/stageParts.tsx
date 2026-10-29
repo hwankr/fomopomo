@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { SlidersVertical } from 'lucide-react';
+import { RotateCcw, SlidersVertical } from 'lucide-react';
 import Beads, { type BeadState, type BeadTone } from '@/components/ui/Beads';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
@@ -47,12 +47,32 @@ export function StageIconButton({ className, children, ...props }: ButtonHTMLAtt
   );
 }
 
+// 시작 버튼 왼쪽의 재설정(타이머·스톱워치 초기화).
+export function StageResetButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <StageIconButton aria-label={label} onClick={onClick}>
+      <RotateCcw aria-hidden="true" size={20} strokeWidth={2} />
+    </StageIconButton>
+  );
+}
+
 // 데스크톱 시작 버튼 옆의 타이머 설정. 모바일은 상단 바에 같은 버튼이 있다.
 export function StageSettingsButton({ onClick }: { onClick: () => void }) {
   return (
     <StageIconButton aria-label="타이머 설정" onClick={onClick} className="hidden md:inline-flex">
       <SlidersVertical aria-hidden="true" size={20} strokeWidth={1.8} />
     </StageIconButton>
+  );
+}
+
+// [재설정][시작][설정]. 양옆 칸은 비어 있어도 48px을 차지해서 시작 버튼이 늘 가운데에 머문다.
+export function StageControls({ reset, settings, children }: { reset?: ReactNode; settings?: ReactNode; children: ReactNode }) {
+  return (
+    <div data-stage-controls="" className="mt-6 flex items-center justify-center gap-2.5 md:mt-1">
+      <div data-stage-slot="reset" className="flex w-12 shrink-0 justify-center">{reset}</div>
+      {children}
+      <div data-stage-slot="settings" className="flex w-12 shrink-0 justify-center">{settings}</div>
+    </div>
   );
 }
 
@@ -67,6 +87,7 @@ export function StageChipButton({ className, ...props }: ButtonHTMLAttributes<HT
   );
 }
 
-export function StageActions({ children }: { children: ReactNode }) {
-  return <div className="mt-3 flex flex-wrap items-center justify-center gap-2 md:-mt-3">{children}</div>;
+// 칩이 없어도 한 줄(칩 높이)을 비워 둔다. 칩이 나타나고 사라져도 위쪽이 움직이지 않는다.
+export function StageActions({ children }: { children?: ReactNode }) {
+  return <div data-stage-chip-row="" className="mt-3 flex min-h-10 w-full flex-wrap items-center justify-center gap-2 md:-mt-3">{children}</div>;
 }

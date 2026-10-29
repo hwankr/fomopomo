@@ -1,5 +1,4 @@
 import type { Ref } from 'react';
-import { RotateCcw } from 'lucide-react';
 import type { BeadState } from '@/components/ui/Beads';
 import { cn } from '@/lib/utils';
 import type { TimerMode } from '../hooks/useTimerLogic';
@@ -9,7 +8,8 @@ import {
   StageActions,
   StageBeads,
   StageChipButton,
-  StageIconButton,
+  StageControls,
+  StageResetButton,
   StageSettingsButton,
   StageStatus,
 } from './stageParts';
@@ -174,7 +174,10 @@ export const TimerDisplay = ({
         </div>
       )}
 
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 md:mt-1">
+      <StageControls
+        reset={showResetButton && <StageResetButton label="타이머 초기화" onClick={onResetTimer} />}
+        settings={onOpenSettings && <StageSettingsButton onClick={onOpenSettings} />}
+      >
         <button
           type="button"
           onClick={onToggleTimer}
@@ -186,30 +189,20 @@ export const TimerDisplay = ({
         >
           {isChoosingNextTask ? '다음 작업 선택' : isRunning ? '일시정지' : '시작'}
         </button>
+      </StageControls>
 
-        {showResetButton && (
-          <StageIconButton onClick={onResetTimer} aria-label="타이머 초기화">
-            <RotateCcw aria-hidden="true" size={20} strokeWidth={2} />
-          </StageIconButton>
+      <StageActions>
+        {showSaveButton && (
+          <StageChipButton onClick={onSaveTimer} disabled={isSaving}>
+            기록 저장
+          </StageChipButton>
         )}
-
-        {onOpenSettings && <StageSettingsButton onClick={onOpenSettings} />}
-      </div>
-
-      {(showSaveButton || showCompleteTask) && (
-        <StageActions>
-          {showSaveButton && (
-            <StageChipButton onClick={onSaveTimer} disabled={isSaving}>
-              기록 저장
-            </StageChipButton>
-          )}
-          {showCompleteTask && (
-            <StageChipButton onClick={onCompleteTask} disabled={!canCompleteTask || isCompletingTask}>
-              {isCompletingTask ? '작업 완료 처리 중…' : '작업 완료 · 다음 작업'}
-            </StageChipButton>
-          )}
-        </StageActions>
-      )}
+        {showCompleteTask && (
+          <StageChipButton onClick={onCompleteTask} disabled={!canCompleteTask || isCompletingTask}>
+            {isCompletingTask ? '작업 완료 처리 중…' : '작업 완료 · 다음 작업'}
+          </StageChipButton>
+        )}
+      </StageActions>
     </div>
   );
 };
