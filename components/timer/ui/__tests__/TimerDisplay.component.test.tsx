@@ -293,6 +293,15 @@ describe('TimerDisplay stage layout', () => {
     });
     expect(buttonNames(chipRow())).toEqual(['기록 저장', '작업 완료 · 다음 작업']);
   });
+
+  it('keeps the bead row within the stage width so a narrow screen wraps it instead of overflowing', () => {
+    renderTimerDisplay();
+    const row = screen.getByRole('img', { name: '25분 중 0분 지남' });
+    // 감싸는 칸은 무대 폭을 다 쓰고, 줄은 그 폭(+양옆 여백 12px씩)과 340px(데스크톱 560px) 중 좁은 쪽을 넘지 않는다.
+    expect(row.parentElement).toHaveClass('flex', 'w-full', 'justify-center');
+    expect(row).toHaveClass('flex-wrap', 'justify-center', 'max-w-[min(340px,calc(100%+24px))]', 'md:max-w-[min(560px,calc(100%+24px))]');
+    expect(row.className).not.toMatch(/(^|\s)(md:)?max-w-\[(340|560)px\]/);
+  });
 });
 
 describe('StopwatchDisplay', () => {
@@ -325,6 +334,13 @@ describe('StopwatchDisplay', () => {
   it('caps the row at sixty beads', () => {
     renderStopwatch({ stopwatchTime: 2 * 3600 });
     expect(beadStates()).toHaveLength(60);
+  });
+
+  it('keeps the bead row within the stage width like the timer', () => {
+    renderStopwatch({ stopwatchTime: 2 * 3600 });
+    const row = screen.getByRole('img', { name: '120분 경과' });
+    expect(row.parentElement).toHaveClass('w-full');
+    expect(row).toHaveClass('flex-wrap', 'max-w-[min(340px,calc(100%+24px))]', 'md:max-w-[min(560px,calc(100%+24px))]');
   });
 
   it('offers resume, save and reset once paused with progress', () => {

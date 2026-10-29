@@ -15,11 +15,12 @@ export function StageStatus({ status, detail }: { status: string; detail: string
 }
 
 // 1분 = 구슬 1알. 데스크톱 10px·간격 8px(30알 넘으면 7·6), 모바일 8·5(6·4).
+// 줄은 무대 폭에 양옆 여백 12px씩까지만 쓰고, 넘치면 가운데 맞춰 다음 줄로 넘긴다(좁은 화면에서 가로로 넘치지 않게).
 export function StageBeads({ label, states, tone }: { label: string; states: BeadState[]; tone: BeadTone }) {
   const isDesktop = useIsDesktop();
   const many = states.length > 30;
   return (
-    <div className="mt-[18px] flex justify-center md:mt-0">
+    <div className="mt-[18px] flex w-full justify-center md:mt-0">
       <Beads
         label={label}
         states={states}
@@ -28,7 +29,7 @@ export function StageBeads({ label, states, tone }: { label: string; states: Bea
         size={isDesktop ? (many ? 7 : 10) : (many ? 6 : 8)}
         gap={isDesktop ? (many ? 6 : 8) : (many ? 4 : 5)}
         wrap
-        className="min-h-2 max-w-[340px] justify-center md:min-h-3.5 md:max-w-[560px]"
+        className="min-h-2 max-w-[min(340px,calc(100%+24px))] justify-center md:min-h-3.5 md:max-w-[min(560px,calc(100%+24px))]"
       />
     </div>
   );
