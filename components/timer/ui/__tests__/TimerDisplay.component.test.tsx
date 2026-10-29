@@ -36,6 +36,7 @@ const slot = (name: 'reset' | 'settings') => document.querySelector(`[data-stage
 const chipRow = () => document.querySelector('[data-stage-chip-row]') as HTMLElement;
 const buttonNames = (container: HTMLElement) =>
   within(container).queryAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
+const maxWidthClasses = (element: HTMLElement) => element.className.split(/\s+/).filter((name) => name.includes('max-w-'));
 
 describe('TimerDisplay stage', () => {
   it('shows the resting status, cycle, spoken time and one empty bead per minute', () => {
@@ -297,10 +298,12 @@ describe('TimerDisplay stage layout', () => {
   it('keeps the bead row within the stage width so a narrow screen wraps it instead of overflowing', () => {
     renderTimerDisplay();
     const row = screen.getByRole('img', { name: '25분 중 0분 지남' });
-    // 감싸는 칸은 무대 폭을 다 쓰고, 줄은 그 폭(+양옆 여백 12px씩)과 340px(데스크톱 560px) 중 좁은 쪽을 넘지 않는다.
+    // 감싸는 칸은 무대 폭을 다 쓰고, 줄은 고르게 나눈 폭(340px·560px 안)과 무대 폭 + 양옆 여백 12px씩 중 좁은 쪽을 넘지 않는다.
     expect(row.parentElement).toHaveClass('flex', 'w-full', 'justify-center');
-    expect(row).toHaveClass('flex-wrap', 'justify-center', 'max-w-[min(340px,calc(100%+24px))]', 'md:max-w-[min(560px,calc(100%+24px))]');
-    expect(row.className).not.toMatch(/(^|\s)(md:)?max-w-\[(340|560)px\]/);
+    expect(row.parentElement!.style.getPropertyValue('--stage-beads-max')).toMatch(/^\d+px$/);
+    expect(row).toHaveClass('flex-wrap', 'justify-center');
+    // 너비 상한은 이 하나뿐이다(중단점에서 무대 폭 + 24px 보호를 덮어쓰지 않는다).
+    expect(maxWidthClasses(row)).toEqual(['max-w-[min(var(--stage-beads-max),calc(100%+24px))]']);
   });
 });
 
@@ -340,7 +343,9 @@ describe('StopwatchDisplay', () => {
     renderStopwatch({ stopwatchTime: 2 * 3600 });
     const row = screen.getByRole('img', { name: '120분 경과' });
     expect(row.parentElement).toHaveClass('w-full');
-    expect(row).toHaveClass('flex-wrap', 'max-w-[min(340px,calc(100%+24px))]', 'md:max-w-[min(560px,calc(100%+24px))]');
+    expect(row.parentElement!.style.getPropertyValue('--stage-beads-max')).toMatch(/^\d+px$/);
+    expect(row).toHaveClass('flex-wrap');
+    expect(maxWidthClasses(row)).toEqual(['max-w-[min(var(--stage-beads-max),calc(100%+24px))]']);
   });
 
   it('offers resume, save and reset once paused with progress', () => {
