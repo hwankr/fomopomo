@@ -1,5 +1,4 @@
 import type { Ref } from 'react';
-import { RotateCcw } from 'lucide-react';
 import type { BeadState } from '@/components/ui/Beads';
 import { TaskPickerTrigger } from './TaskPickerTrigger';
 import { TimerDigits } from './TimerDigits';
@@ -7,7 +6,8 @@ import {
   StageActions,
   StageBeads,
   StageChipButton,
-  StageIconButton,
+  StageControls,
+  StageResetButton,
   StageSettingsButton,
   StageStatus,
 } from './stageParts';
@@ -82,7 +82,10 @@ export const StopwatchDisplay = ({
         />
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 md:mt-1">
+      <StageControls
+        reset={!isStopwatchRunning && hasProgress && <StageResetButton label="스톱워치 초기화" onClick={onResetStopwatch} />}
+        settings={onOpenSettings && <StageSettingsButton onClick={onOpenSettings} />}
+      >
         <button
           type="button"
           onClick={onToggleStopwatch}
@@ -90,23 +93,15 @@ export const StopwatchDisplay = ({
         >
           {isStopwatchRunning ? '일시정지' : hasProgress ? '재개' : '시작'}
         </button>
+      </StageControls>
 
+      <StageActions>
         {!isStopwatchRunning && hasProgress && (
-          <StageIconButton onClick={onResetStopwatch} aria-label="스톱워치 초기화">
-            <RotateCcw aria-hidden="true" size={20} strokeWidth={2} />
-          </StageIconButton>
-        )}
-
-        {onOpenSettings && <StageSettingsButton onClick={onOpenSettings} />}
-      </div>
-
-      {!isStopwatchRunning && hasProgress && (
-        <StageActions>
           <StageChipButton onClick={onSaveStopwatch} disabled={isSaving}>
             기록 저장
           </StageChipButton>
-        </StageActions>
-      )}
+        )}
+      </StageActions>
     </div>
   );
 };
