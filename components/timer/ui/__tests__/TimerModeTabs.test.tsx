@@ -35,4 +35,24 @@ describe('TimerModeTabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: '스톱워치' }));
     expect(onSelect).toHaveBeenCalledWith('stopwatch');
   });
+
+  it('fits all four tabs on a narrow screen by using the side padding and shrinking the tab padding', () => {
+    render(<TimerModeTabs value="focus" onSelect={vi.fn()} panelId="panel" />);
+
+    const tablist = screen.getByRole('tablist', { name: '타이머 모드' });
+    // 탭 여백의 cqw는 감싸개(쿼리 컨테이너)의 내용 폭을 기준으로 한다.
+    const wrapper = tablist.parentElement!;
+    expect(wrapper).toHaveClass('@container', 'flex', 'justify-center', 'px-2', 'pt-2', 'md:px-8', 'md:pt-1');
+    expect(wrapper).not.toHaveClass('px-5');
+    expect(tablist).toHaveClass(
+      'ui-segmented',
+      '[&>button]:h-8',
+      '[&>button]:px-[clamp(8px,(100cqw-200px)/8,12px)]',
+      '[&>button]:text-[13px]',
+      'md:[&>button]:h-9',
+      'md:[&>button]:px-4',
+      'md:[&>button]:text-sm',
+    );
+    expect(tablist).not.toHaveClass('[&>button]:px-3');
+  });
 });

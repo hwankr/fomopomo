@@ -37,12 +37,14 @@ export function TimerModeTabs({ value, onSelect, panelId }: TimerModeTabsProps) 
     tabRefs.current[next]?.focus();
   };
 
+  // 좁은 화면에서는 탭 줄이 양옆 여백을 화면 끝 8px까지 쓰고, 그래도 모자라면 탭 여백을
+  // 12px에서 줄인다(라벨 합 약 187px + 간격 6px + 여유 약 7px = 200px). 8px 아래는 가로 스크롤.
   return (
-    <div className="flex justify-center px-5 pt-2 md:px-8 md:pt-1">
+    <div className="@container flex justify-center px-2 pt-2 md:px-8 md:pt-1">
       <div
         role="tablist"
         aria-label="타이머 모드"
-        className="ui-segmented [&>button]:h-8 [&>button]:px-3 [&>button]:text-[13px] md:[&>button]:h-9 md:[&>button]:px-4 md:[&>button]:text-sm"
+        className="ui-segmented [&>button]:h-8 [&>button]:px-[clamp(8px,(100cqw-200px)/8,12px)] [&>button]:text-[13px] md:[&>button]:h-9 md:[&>button]:px-4 md:[&>button]:text-sm"
       >
         {MODES.map((mode, index) => {
           const selected = mode.key === value;
