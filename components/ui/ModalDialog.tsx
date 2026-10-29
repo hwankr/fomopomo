@@ -28,7 +28,10 @@ type ModalDialogProps = {
   className?: string;
   /** 덮개(.ui-dialog-overlay)에 덧붙일 클래스(z-index 등) */
   overlayClassName?: string;
-  /** 덮개를 누르면 onClose를 부른다. 기본은 닫지 않는다(설치 안내처럼 가벼운 안내에만 쓴다). */
+  /**
+   * 덮개를 누르면 onClose를 부른다. 기본은 닫지 않는다.
+   * 닫기(X) 말고는 빠져나갈 동작(취소·건너뛰기 등)이 없는 대화상자에만 쓴다.
+   */
   closeOnOverlayClick?: boolean;
   children: ReactNode;
 };
@@ -52,11 +55,30 @@ let lastDialogId = 0;
 
 const isTopDialog = (id: number) => openDialogs[openDialogs.length - 1] === id;
 
+// 대화상자가 열리거나 닫힐 때마다 늘어난다. 덮개를 누르는 동안 바뀌었으면 그 누름은 세지 않는다.
+let dialogStackChanges = 0;
+
+// 덮개에서 시작한 누름 하나: 그 포인터, 할 일('close' 닫기, 'blur' 입력만 끝내기), 덮개에서 놓았는지
+type OverlayPress = { pointerId: number; action: 'close' | 'blur'; stack: number; released: boolean };
+
 // 대화상자가 이미 처리한 Escape. 같은 이벤트를 다른 경로에서 두 번 처리하지 않게 한다.
 const handledEscapes = new WeakSet<Event>();
 
 const isFromInertContent = (event: Event) =>
   event.target instanceof Element && event.target.closest('[inert]') !== null;
+
+// 대화상자 안에서 연 Radix 팝오버·선택 목록·달력이 열려 있는지(components/TimerApp.tsx의 hasOpenLayer와 같은 기준).
+// 퇴장 애니메이션 중인 것(내용이 data-state="closed")은 이미 닫혔으므로 세지 않는다.
+const hasOpenPopperLayer = () =>
+  Array.from(document.querySelectorAll('[data-radix-popper-content-wrapper]'))
+    .some((wrapper) => wrapper.firstElementChild?.getAttribute('data-state') !== 'closed');
+
+// 화면 키보드를 띄우는 글자 입력 칸
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'email', 'password', 'tel', 'url', 'number']);
+const isTextEntry = (element: Element | null) =>
+  element instanceof HTMLTextAreaElement
+  || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
+  || (element instanceof HTMLElement && element.isContentEditable);
 
 function isRendered(element: HTMLElement, root: HTMLElement) {
   for (let node: HTMLElement | null = element; node && node !== root; node = node.parentElement) {
@@ -195,6 +217,8 @@ function OpenModalDialog({
   const idRef = useRef(0);
   const onCloseRef = useRef(onClose);
   const teardownRef = useRef(() => {});
+  // 덮개에서 시작한 지금 누름(아래 덮개 누름 효과)
+  const overlayPressRef = useRef<OverlayPress | null>(null);
 
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
@@ -209,6 +233,7 @@ function OpenModalDialog({
     const id = ++lastDialogId;
     idRef.current = id;
     openDialogs.push(id);
+    dialogStackChanges += 1;
     dialogOpeners.set(overlay, opener);
     const restoreBackground = inertOutside(overlay, id);
 
@@ -258,6 +283,7 @@ function OpenModalDialog({
       document.removeEventListener('keydown', handleBubble);
       const index = openDialogs.indexOf(id);
       if (index >= 0) openDialogs.splice(index, 1);
+      dialogStackChanges += 1;
       restoreBackground();
       // 같은 순간 열린 다른 대화상자가 이미 포커스를 가져갔으면 빼앗지 않는다.
       const active = document.activeElement;
@@ -274,6 +300,57 @@ function OpenModalDialog({
   useLayoutEffect(() => {
     if (closing) teardownRef.current();
   }, [closing]);
+
+  // 덮개 누름(closeOnOverlayClick일 때만): 덮개에서 누르기 시작해 같은 포인터로 덮개에서 놓은 한 번의 누름만 센다.
+  // 문서 캡처 단계에서 보므로 html에 닿은 누름·놓음(선택 목록이 포인터 이벤트를 막을 때)이나
+  // 위에 뜬 대화상자에서 놓은 누름도 놓치지 않는다. 닫히기 시작하면 기록과 함께 치운다.
+  useLayoutEffect(() => {
+    const overlay = overlayRef.current;
+    if (!closeOnOverlayClick || closing || !overlay) return;
+
+    // 어디서든 새 누름이 시작되면 이전 기록은 버린다. 패널·안쪽 포털·위에 뜬 대화상자에서 시작한 누름,
+    // 주 버튼이 아닌 누름(클릭이 오지 않는다)은 덮개 누름이 아니다.
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      overlayPressRef.current = null;
+      if (event.button !== 0 || event.target !== overlay || !isTopDialog(idRef.current)) return;
+      // 안쪽 층(팝오버·선택 목록·달력)이 열려 있으면 이번 누름은 그 층만 닫는다(Radix가 닫는다). Escape와 같다.
+      // 문서 캡처 단계는 Radix의 document 리스너보다 먼저라서, 여기서는 그 층이 아직 열려 있다.
+      if (hasOpenPopperLayer()) return;
+      // 터치·펜: 패널 안 입력 칸에 글자를 쓰는 중이면 첫 탭은 입력만 끝낸다(화면 키보드를 내린다).
+      const active = document.activeElement;
+      const typing = isTextEntry(active) && panelRef.current?.contains(active);
+      const touchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
+      overlayPressRef.current = {
+        pointerId: event.pointerId,
+        action: typing && touchLike ? 'blur' : 'close',
+        stack: dialogStackChanges,
+        released: false,
+      };
+    };
+
+    // 같은 포인터를 덮개에서 놓아야 마친 누름이다. 패널·html·다른 대화상자에서 놓은 누름은 잊는다.
+    // (덮개에서 눌러 패널 안에서 놓으면 클릭은 둘의 공통 조상인 덮개에 온다.)
+    const handlePointerUp = (event: globalThis.PointerEvent) => {
+      const press = overlayPressRef.current;
+      if (press && event.pointerId === press.pointerId && event.target === overlay) press.released = true;
+      else overlayPressRef.current = null;
+    };
+
+    // 끌어서 스크롤하는 등 취소된 누름도 잊는다.
+    const forgetPress = () => {
+      overlayPressRef.current = null;
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('pointercancel', forgetPress, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('pointercancel', forgetPress, true);
+      forgetPress();
+    };
+  }, [closeOnOverlayClick, closing, overlayRef]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // 안쪽 키 입력이 부모 대화상자나 window 단축키(타이머 Space 등)로 새지 않게 한다.
@@ -292,9 +369,18 @@ function OpenModalDialog({
     if (event.target === event.currentTarget) event.preventDefault();
   };
 
-  // 패널이나 안쪽 포털(팝오버·위에 뜬 대화상자)에서 올라온 클릭은 덮개 클릭이 아니다.
+  // 마친 덮개 누름 뒤에 온 클릭에서만 할 일을 하고, 기록은 늘 지운다. 누름 기록 없이 덮개에 온 클릭
+  // (element.click(), 선택 목록이 열려 터치의 누름이 html에 닿은 뒤 오는 클릭, 패널에서 눌러 덮개에서 놓은 클릭)과
+  // 누르는 동안 다른 대화상자가 열리거나 닫힌 누름은 아무것도 하지 않는다.
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!closeOnOverlayClick || event.target !== event.currentTarget || !isTopDialog(idRef.current)) return;
+    const press = overlayPressRef.current;
+    overlayPressRef.current = null;
+    if (!closeOnOverlayClick || !press?.released || press.stack !== dialogStackChanges) return;
+    if (event.target !== event.currentTarget || !isTopDialog(idRef.current)) return;
+    if (press.action === 'blur') {
+      panelRef.current?.focus({ preventScroll: true });
+      return;
+    }
     onCloseRef.current();
   };
 

@@ -698,6 +698,7 @@ export default function TaskSidebar({
         open={isOpen}
         onClose={closeSidebar}
         aria-labelledby={titleId}
+        closeOnOverlayClick
         className="max-h-[80dvh] gap-2 pt-3 pb-[calc(36px+env(safe-area-inset-bottom))]"
       >
         <span aria-hidden="true" className="ui-sheet-grabber" />
