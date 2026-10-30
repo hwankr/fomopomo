@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode, useState } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AppSelect, { type AppSelectProps } from '../AppSelect';
 
@@ -158,6 +158,199 @@ describe('AppSelect key boundary', () => {
     parentKeyDown.mockClear();
     fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Tab' });
     expect(parentKeyDown).not.toHaveBeenCalled();
+  });
+});
+
+// 열린 목록은 페이지의 포인터 입력을 막는다(body pointer-events: none). 브라우저에서 본 터치 순서: 누름·뗌은 html에 닿고,
+// 목록이 닫힌 뒤의 호환 mousedown·mouseup·click(detail 1)은 손가락 아래 요소로 간다. 마우스는 모두 html에 간다.
+describe('AppSelect outside tap', () => {
+  // Radix는 바깥 누름 처리기를 목록이 열린 뒤 setTimeout(0)으로 붙인다.
+  const afterEventDispatch = () => act(() => new Promise(resolve => setTimeout(resolve, 20)));
+
+  function Page({ withSelect = true }: { withSelect?: boolean }) {
+    return (
+      <div>
+        {withSelect ? <ControlledSelect /> : null}
+        <button type="button" onClick={() => pressed()}>아래 버튼</button>
+      </div>
+    );
+  }
+  const pressed = vi.fn();
+  afterEach(() => pressed.mockReset());
+  // 목록이 열려 있는 동안은 나머지가 aria-hidden이라 역할로 찾지 않는다.
+  const below = () => screen.getByText('아래 버튼');
+
+  async function openPage(ui = <Page />) {
+    const view = render(ui);
+    const trigger = await openSelect();
+    await afterEventDispatch();
+    return { ...view, trigger };
+  }
+
+  // 브라우저의 기본 동작처럼, 막히지 않은 mousedown은 그 요소에 포커스를 준다. click을 막았으면 false.
+  function compatEvents(element: HTMLElement) {
+    if (fireEvent.mouseDown(element, { detail: 1 })) element.focus();
+    fireEvent.mouseUp(element, { detail: 1 });
+    return fireEvent.click(element, { detail: 1 });
+  }
+  function pressPage(pointerType: string) {
+    fireEvent.pointerDown(document.documentElement, { pointerType, pointerId: 7, button: 0 });
+  }
+  function releasePage(pointerType: string) {
+    fireEvent.pointerUp(document.documentElement, { pointerType, pointerId: 7, button: 0 });
+  }
+  // 목록이 닫힌 뒤 다시 막히지 않은 페이지에서의 탭
+  function tap(element: HTMLElement) {
+    fireEvent.pointerDown(element, { pointerType: 'touch', pointerId: 8, button: 0 });
+    fireEvent.pointerUp(element, { pointerType: 'touch', pointerId: 8, button: 0 });
+    fireEvent.touchEnd(element);
+    return compatEvents(element);
+  }
+  // 키보드 Enter로 누른 버튼은 detail 0인 click을 받는다.
+  function pressEnter(element: HTMLElement) {
+    fireEvent.keyDown(element, { key: 'Enter' });
+    fireEvent.click(element, { detail: 0 });
+    fireEvent.keyUp(element, { key: 'Enter' });
+  }
+
+  it.each(['touch', 'pen'])('closes only the list on an outside %s tap, like a mouse press there', async pointerType => {
+    const { trigger } = await openPage();
+
+    pressPage(pointerType);
+    releasePage(pointerType);
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(fireEvent.touchEnd(document.documentElement)).toBe(false);
+    expect(compatEvents(below())).toBe(false);
+    await afterEventDispatch();
+    expect(pressed).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+
+    // 다음 탭은 그대로 누른다.
+    expect(tap(below())).toBe(true);
+    expect(pressed).toHaveBeenCalledTimes(1);
+    expect(below()).toHaveFocus();
+  });
+
+  it('keeps the list closed when the tap lands on its own trigger', async () => {
+    const { trigger } = await openPage();
+
+    pressPage('touch');
+    releasePage('touch');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    compatEvents(trigger);
+    await afterEventDispatch();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    // 닫힌 트리거를 다시 탭하면 열린다.
+    tap(trigger);
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('lets keyboard and programmatic clicks through while it waits for the tap', async () => {
+    await openPage();
+    pressPage('touch');
+    releasePage('touch');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+
+    act(() => below().click());
+    pressEnter(below());
+    expect(pressed).toHaveBeenCalledTimes(2);
+    expect(compatEvents(below())).toBe(false);
+    expect(pressed).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends when the touch turns into a scroll', async () => {
+    await openPage();
+    pressPage('touch');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    expect(fireEvent.mouseDown(below(), { detail: 1 })).toBe(false);
+    fireEvent.pointerCancel(document.documentElement, { pointerType: 'touch', pointerId: 7 });
+
+    expect(compatEvents(below())).toBe(true);
+    act(() => below().click());
+    pressEnter(below());
+    expect(pressed).toHaveBeenCalledTimes(3);
+  });
+
+  it('ends a short time after the finger lifts without a click', async () => {
+    await openPage();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pressPage('touch');
+      releasePage('touch');
+      act(() => vi.advanceTimersByTime(300));
+      expect(fireEvent.mouseDown(below(), { detail: 1 })).toBe(false);
+      act(() => vi.advanceTimersByTime(400));
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+
+    expect(compatEvents(below())).toBe(true);
+    act(() => below().click());
+    pressEnter(below());
+    expect(pressed).toHaveBeenCalledTimes(3);
+  });
+
+  it('leaves a mouse press alone', async () => {
+    const { trigger } = await openPage();
+
+    pressPage('mouse');
+    fireEvent.mouseDown(document.documentElement, { detail: 1 });
+    releasePage('mouse');
+    fireEvent.mouseUp(document.documentElement, { detail: 1 });
+    fireEvent.click(document.documentElement, { detail: 1 });
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    // 다음 누름 없이 바로 와도 그대로 받는다.
+    expect(fireEvent.click(below(), { detail: 1 })).toBe(true);
+    expect(pressed).toHaveBeenCalledTimes(1);
+  });
+
+  // 예: 목록이 열려 있어도 펼친 .ui-collapse 내용은 포인터를 받는다(globals.css). 마우스로 눌러도 그 요소가 받는다.
+  it('leaves a tap alone when its press reached a real element', async () => {
+    await openPage();
+
+    expect(tap(below())).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    expect(pressed).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes its listeners when it ends or the select unmounts, also under StrictMode', async () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const guardListeners = () => add.mock.calls.filter(([, , options]) =>
+      typeof options === 'object' && options.capture === true && options.passive === false);
+    const removed = (type: string, listener: unknown) =>
+      remove.mock.calls.some(call => call[0] === type && call[1] === listener && call[2] === true);
+    try {
+      const { trigger, rerender } = await openPage(<StrictMode><Page /></StrictMode>);
+      pressPage('touch');
+      releasePage('touch');
+      await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+      expect(compatEvents(below())).toBe(false);
+      expect(guardListeners()).toHaveLength(7);
+      expect(guardListeners().every(([type, listener]) => removed(type, listener))).toBe(true);
+
+      // 탭을 기다리는 중에 선택 컨트롤이 사라져도 남지 않는다.
+      tap(trigger);
+      await screen.findByRole('listbox');
+      await afterEventDispatch();
+      pressPage('touch');
+      await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+      rerender(<StrictMode><Page withSelect={false} /></StrictMode>);
+      expect(guardListeners()).toHaveLength(14);
+      expect(guardListeners().every(([type, listener]) => removed(type, listener))).toBe(true);
+      releasePage('touch');
+      expect(compatEvents(below())).toBe(true);
+      expect(pressed).toHaveBeenCalledTimes(1);
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
   });
 });
 
