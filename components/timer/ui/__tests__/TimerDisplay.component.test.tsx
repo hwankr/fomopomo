@@ -324,12 +324,36 @@ describe('StopwatchDisplay', () => {
       />
     );
 
+  // 숫자 위 상태 줄(보조기기에 알리는 줄)
+  const stageStatus = () => document.querySelector('p[aria-live="polite"]') as HTMLElement;
+
+  it('says it is ready to record before the first start', () => {
+    renderStopwatch();
+
+    expect(screen.getByText('기록할 준비')).toBeInTheDocument();
+    expect(screen.getByRole('timer')).toHaveAccessibleName('경과 시간 0분 0초');
+    expect(screen.getByRole('button', { name: '시작' })).toBeInTheDocument();
+  });
+
+  // 스톱워치에는 사이클이 없으니 상태 문구만 둔다(빈 보조 문구 칸도 없음).
+  it.each([
+    ['idle', { stopwatchTime: 0 }, '기록할 준비'],
+    ['running', { stopwatchTime: 3 * 60 + 5, isStopwatchRunning: true }, '기록 중'],
+    ['paused with progress', { stopwatchTime: 90 }, '일시정지'],
+  ])('shows only the status word on the status line while %s', (_state, props, status) => {
+    renderStopwatch(props);
+
+    expect(stageStatus()).toHaveAttribute('aria-live', 'polite');
+    expect(stageStatus().textContent).toBe(status);
+    expect(stageStatus().children).toHaveLength(0);
+  });
+
   it('grows one bead per elapsed minute plus the current one while running', () => {
     renderStopwatch({ stopwatchTime: 3 * 60 + 5, isStopwatchRunning: true });
 
-    expect(screen.getByText('재는 중')).toBeInTheDocument();
-    expect(screen.getByText('시간을 재요')).toBeInTheDocument();
-    expect(screen.getByRole('timer')).toHaveAccessibleName('경과 3분 5초');
+    expect(screen.getByText('기록 중')).toBeInTheDocument();
+    expect(stageStatus().textContent).toBe('기록 중');
+    expect(screen.getByRole('timer')).toHaveAccessibleName('경과 시간 3분 5초');
     expect(screen.getByRole('img', { name: '3분 경과' })).toBeInTheDocument();
     expect(beadStates()).toEqual(['done', 'done', 'done', 'current']);
   });

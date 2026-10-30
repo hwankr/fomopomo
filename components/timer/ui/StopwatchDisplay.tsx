@@ -53,7 +53,7 @@ export const StopwatchDisplay = ({
   taskTriggerRef,
 }: StopwatchDisplayProps) => {
   const hasProgress = stopwatchTime > 0;
-  const status = isStopwatchRunning ? '재는 중' : hasProgress ? '일시정지' : '스톱워치';
+  const status = isStopwatchRunning ? '기록 중' : hasProgress ? '일시정지' : '기록할 준비';
 
   const minutes = Math.floor(stopwatchTime / 60);
   const beadStates: BeadState[] = Array.from({ length: Math.min(minutes, MAX_STOPWATCH_BEADS) }, () => 'done');
@@ -61,11 +61,11 @@ export const StopwatchDisplay = ({
 
   return (
     <div className="flex w-full flex-col items-center md:gap-6">
-      <StageStatus status={status} detail="시간을 재요" />
+      <StageStatus status={status} />
 
       <TimerDigits
         seconds={stopwatchTime}
-        label={`경과 ${formatSpokenTime(stopwatchTime)}`}
+        label={`경과 시간 ${formatSpokenTime(stopwatchTime)}`}
         runningTone={isStopwatchRunning ? 'watch' : null}
       />
 

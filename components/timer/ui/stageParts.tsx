@@ -4,12 +4,12 @@ import Beads, { type BeadState, type BeadTone } from '@/components/ui/Beads';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 
-// 상태 문구 + 사이클 표시. 상태가 바뀌면 보조기기에 알린다.
-export function StageStatus({ status, detail }: { status: string; detail: string }) {
+// 상태 문구 + 사이클 표시(있을 때만). 상태가 바뀌면 보조기기에 알린다.
+export function StageStatus({ status, detail }: { status: string; detail?: string }) {
   return (
     <p aria-live="polite" className="m-0 mb-1.5 flex items-baseline gap-2 text-sm font-semibold md:-mb-2 md:gap-2.5 md:text-base">
       {status}
-      <span className="text-[13px] font-medium text-ink-muted md:text-sm">{detail}</span>
+      {detail && <span className="text-[13px] font-medium text-ink-muted md:text-sm">{detail}</span>}
     </p>
   );
 }
