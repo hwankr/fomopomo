@@ -60,10 +60,8 @@ export default function SupportClient() {
           </Link>
         </div>
 
-        {/* 후원: 제목과 같은 왼쪽 줄에 맞춘다. */}
-        <div className="w-full max-w-sm">
-          <DonationSection variant="card" />
-        </div>
+        {/* 후원: 본문 가운데에 둔다. */}
+        <DonationSection variant="card" />
       </div>
     </div>
   );
