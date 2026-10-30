@@ -86,6 +86,7 @@ export default function MemberReportModal({ isOpen, onClose, userId, userName }:
             open={isOpen}
             onClose={onClose}
             aria-labelledby={titleId}
+            closeOnOverlayClick
         >
             <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
             <div className="flex items-start justify-between gap-3">

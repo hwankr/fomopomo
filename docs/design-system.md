@@ -164,7 +164,7 @@
   aria-describedby={descId}         // 선택
   initialFocusRef={cancelRef}       // 선택. 없으면 첫 번째 Tab 대상, 그것도 없으면 패널
   overlayClassName="z-70"           // 선택. 다른 대화상자 위에 뜰 때
-  closeOnOverlayClick               // 선택. 덮개를 누르면 onClose(기본은 닫지 않음)
+  closeOnOverlayClick               // 선택. 덮개를 누르면 onClose(기본은 닫지 않음). 닫기 말고 나갈 동작이 없는 창만
   className="md:max-w-[400px]"      // 선택. 패널(.ui-dialog)에 덧붙임
 >
   <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
@@ -178,11 +178,14 @@
 - 열 때: 연 요소를 기억하고 포커스를 안으로 옮긴다. 되돌릴 수 없는 확인은 안전한 취소에, 일반 확인은 확인 버튼에, 입력 대화상자는 첫 실제 컨트롤에 `initialFocusRef`를 준다.
 - 열린 동안: Tab/Shift+Tab을 패널 안에서 돈다(문서 캡처 단계에서 처리하므로 안쪽 컨트롤이 전파를 막아도 빠져나가지 않는다. 포털된 팝오버 내용 안의 Tab은 그 팝오버가 다룬다). body의 다른 자식은 `inert`가 된다(포인터·키보드·보조기기 모두 차단). 계속 보여야 하는 영역은 `data-dialog-keep`으로 남긴다(토스트). 패널 안 키 입력은 부모 대화상자나 window 단축키(타이머 Space)로 전달되지 않는다.
 - Escape: 맨 위 대화상자 하나만 `onClose`를 부른다. 겹친 층은 안쪽부터 하나씩 닫힌다.
-- 덮개: 기본은 눌러도 닫히지 않는다. 앱 설치 안내처럼 언제 닫아도 되는 가벼운 안내만 `closeOnOverlayClick`으로 덮개 클릭에 `onClose`를 부른다(맨 위 대화상자의 덮개를 직접 누를 때만이며, 패널이나 위에 뜬 대화상자에서 올라온 클릭은 무시한다). 입력·확인 대화상자에는 쓰지 않는다.
   - 열린 선택 목록·달력·팝오버가 있으면 첫 Escape는 그 층만 닫고(Radix가 `preventDefault`), 다음 Escape가 대화상자를 닫는다.
   - 안쪽 요소가 Escape를 직접 쓰려면(예: 입력만 닫는 폼) `event.preventDefault()`를 부른다. 그러면 대화상자는 닫히지 않는다.
   - 안쪽 요소가 전파만 막고 `preventDefault`를 하지 않은 Escape도 이벤트 처리가 끝난 뒤 대화상자가 닫는다(그래서 닫힌 선택·날짜 트리거에 포커스가 있어도 Escape로 닫힌다).
   - `ConfirmModal`처럼 다른 대화상자 위에 뜬 것은 자기만 닫힌다.
+- 덮개: 기본은 눌러도 닫히지 않는다. 닫기(X·`닫기`) 말고는 빠져나갈 동작(취소·건너뛰기 등)이 없는 대화상자만 `closeOnOverlayClick`을 주어, 덮개를 누르면(데스크톱 마우스 클릭, 모바일 터치 탭) 닫기 버튼과 같은 `onClose`를 부른다(퇴장·포커스 복귀도 같다). 쓰는 곳: 친구·그룹 멤버 리포트(`MemberReportModal`), 로그인(`LoginModal`), 모바일 작업 선택 시트(`TaskSidebar`. `md`부터는 바깥을 누르면 닫히는 팝오버), 앱 설치 안내(`InstallPrompt`). 취소·건너뛰기가 있거나 꼭 답해야 하는 대화상자(확인, 입력·설정 창, 세션 뒤 작업 질문 등)에는 쓰지 않는다.
+  - 맨 위 대화상자의 덮개에서 누르기 시작해 같은 포인터로 덮개에서 끝난 한 번의 누름만 센다. 패널에서 시작해 덮개 위에서 놓은 누름(글자 선택, 스크롤바·터치 끌기)이나 덮개에서 시작해 다른 곳(패널, 위에 뜬 대화상자, 선택 목록이 막은 페이지)에서 놓은 누름, 취소된 누름, 누르는 동안 다른 대화상자가 열리거나 닫힌 누름, 누름 없이 덮개에 온 클릭, 패널·안쪽 포털·위에 뜬 대화상자에서 온 누름, 닫히는 대화상자는 무시한다.
+  - 열린 선택 목록·달력·팝오버가 있으면 그 누름은 그 층만 닫고(Radix), 다음 누름이 대화상자를 닫는다(Escape와 같다).
+  - 터치·펜: 패널 안 글자 입력 칸(텍스트류 `input`, `textarea`, contenteditable)에 포커스가 있으면 첫 탭은 입력만 끝낸다(포커스를 패널로 옮겨 화면 키보드를 내리고 열어 둔다). 다음 탭이 닫는다. 마우스 클릭은 입력 중에도 바로 닫는다.
 - 닫을 때(`open=false`): `inert`를 되돌리고 연 요소로 포커스를 돌려준다. 다른 대화상자 위에 띄워도(예: 설정 창 위의 `ConfirmModal`) 아래 대화상자는 그대로다.
   - 퇴장 애니메이션(모바일 200ms, `md` 140ms) 동안 대화상자는 붙어 있지만, 닫히기 시작하는 순간 배경 `inert`와 포커스를 돌려주고 키(Escape·Tab)를 더 다루지 않으며, 자신은 `inert` + `pointer-events: none`에 `aria-modal`이 빠진다(열린 층으로 세지 않는다. 겹친 대화상자는 아래 것이 바로 맨 위가 된다). 애니메이션이 끝나면 내린다. 애니메이션이 없으면(동작 줄이기, 테스트 환경) 같은 커밋에서 바로 내리고, 끝 소식이 없으면 남은 시간 + 100ms(최대 1초) 뒤에 내린다.
   - 닫히는 동안에는 마지막으로 열려 있던 내용을 그대로 보여 준다(부모가 닫으면서 비운 상태로 패널이 바뀌지 않는다). 닫히는 중에 다시 열면 새 대화상자를 처음부터 그린다(이전 입력이 남지 않는다).
@@ -193,8 +196,8 @@
 
 - `ConfirmModal` `{ isOpen, onClose, onConfirm, title, message, confirmText?, cancelText?, confirmTone?, isDangerous? }` — `ModalDialog` `role="alertdialog"`, z-70. `confirmTone`: `'ink'`(일반 확인, 기본 · `bg-ink`) · `'pomo'`(모드 동작, 예: 그룹 나가기 · `bg-pomo`) · `'danger'`(되돌릴 수 없음, 예: 계정 초기화 · `bg-pomo-deep`). 쓰는 곳은 위 §3의 표. `danger`는 처음 포커스가 취소, 나머지는 확인. 예전 `isDangerous`는 `confirmTone`이 없을 때 `'danger'`와 같다(화면 코드는 모두 `confirmTone`을 쓴다).
 - `LogoutDialog` `{ open, onClose, beforeLogout?, onLogoutFailed? }` (`components/LogoutDialog.tsx`) — 프로필 보드의 “로그아웃할까요?” 확인. 프로필과 설정이 함께 쓴다. `alertdialog`, 처음 포커스는 `로그아웃`(`ui-button-primary`). 확인하면 정리 로그아웃(`signOutWithPushCleanup`) 뒤 `/`로 간다. 실패하면 알림을 띄우고 열어 둔다. `beforeLogout`은 그 앞 단계(설정 화면: 저장하지 않은 변경 저장)로, `false`를 돌려주면 로그아웃하지 않는다. `onLogoutFailed`는 로그아웃이 실패했을 때 그 단계에서 바꾼 상태를 되돌린다.
-- `LoginModal` `{ isOpen, onClose, onGoogleLogin }` — `ModalDialog`(데스크톱 400px), 처음 포커스는 `Google로 계속하기`, 닫기 `ui-icon-button`.
-- `AppSelect` `{ value, onValueChange, options, label?, placeholder?, displayValue?, compact?, disabled?, … }` — 트리거는 `ui-input`과 같은 모양(compact 36px·13px), 목록은 `ui-popover-surface`, 항목 40px·`hover` 강조·선택 600 + 로즈 체크. 화면에서는 기본 `<select>` 대신 이것을 쓴다.
+- `LoginModal` `{ isOpen, onClose, onGoogleLogin }` — `ModalDialog`(데스크톱 400px), 처음 포커스는 `Google로 계속하기`, 닫기 `ui-icon-button`. 덮개를 눌러도 닫힌다(`closeOnOverlayClick`).
+- `AppSelect` `{ value, onValueChange, options, label?, placeholder?, displayValue?, compact?, disabled?, … }` — 트리거는 `ui-input`과 같은 모양(compact 36px·13px), 목록은 `ui-popover-surface`, 항목 40px·`hover` 강조·선택 600 + 로즈 체크. 목록이 열려 있을 때 바깥을 누르면(마우스·터치 모두) 목록만 닫히고 그 아래 요소는 눌리지 않는다. 화면에서는 기본 `<select>` 대신 이것을 쓴다.
 - `DatePicker` `{ value, onChange, label, min?, max?, … }` — 같은 입력 모양, 달력 팝오버. 선택한 날 `bg-ink` 흰 글자, 오늘 로즈 글자.
 - `SubjectSelect` — `AppSelect` + `+ 새 과목`(로즈 고스트 버튼) + 새 과목 입력 줄(`ui-input` + `ui-button-primary`). 디자인의 `제목에 맞춰 선택 / 미분류 / 과목 / + 새 과목` 순서는 `onAutoSelect`를 주면 맞춰진다.
 

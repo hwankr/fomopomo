@@ -154,12 +154,21 @@ describe('InstallPrompt', () => {
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     const backdrop = dialog.parentElement as HTMLElement;
 
+    // 실제 누름 순서(pointerdown → mousedown → pointerup → mouseup → click). 덮개는 덮개에서 시작한 누름만 받는다.
+    const press = (element: HTMLElement) => {
+      fireEvent.pointerDown(element, { pointerType: 'mouse' });
+      fireEvent.mouseDown(element);
+      fireEvent.pointerUp(element, { pointerType: 'mouse' });
+      fireEvent.mouseUp(element);
+      fireEvent.click(element);
+    };
+
     // 패널 안을 눌러도 닫히지 않는다.
-    fireEvent.click(dialog);
+    press(dialog);
     expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).toBeNull();
 
     act(() => {
-      fireEvent.click(backdrop);
+      press(backdrop);
     });
     // 따로 기다리지 않는다: 퇴장 애니메이션이 없으면(테스트 환경·동작 줄이기) 바로 닫힌다.
     expect(window.localStorage.getItem('pwa_prompt_dismissed_at')).not.toBeNull();

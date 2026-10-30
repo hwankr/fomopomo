@@ -779,11 +779,24 @@ describe('TaskSidebar', () => {
     const originalMatchMedia = window.matchMedia;
     afterEach(() => { window.matchMedia = originalMatchMedia; });
 
-    it('opens as a bottom sheet with a title and a close button', () => {
+    const useMobileLayout = () => {
       window.matchMedia = ((query: string) => ({
         ...originalMatchMedia(query), matches: false,
         addEventListener: () => {}, removeEventListener: () => {},
       })) as typeof window.matchMedia;
+    };
+
+    // 실제 누름 순서: pointerdown → pointerup → mousedown → mouseup → click.
+    const press = (element: HTMLElement, pointerType = 'mouse') => {
+      fireEvent.pointerDown(element, { pointerType });
+      fireEvent.pointerUp(element, { pointerType });
+      fireEvent.mouseDown(element);
+      fireEvent.mouseUp(element);
+      fireEvent.click(element);
+    };
+
+    it('opens as a bottom sheet with a title and a close button', () => {
+      useMobileLayout();
       const onClose = vi.fn();
       renderSidebar({ tasks: [makeTask({ id: 'a', title: '작업 A' })], onClose });
 
@@ -791,6 +804,80 @@ describe('TaskSidebar', () => {
       expect(sheet).toHaveAttribute('aria-modal', 'true');
       expect(within(sheet).getByText('작업 A')).toBeInTheDocument();
       fireEvent.click(within(sheet).getByRole('button', { name: '닫기' }));
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('closes from a press on the sheet overlay, not from a press inside the sheet', () => {
+      useMobileLayout();
+      const onClose = vi.fn();
+      const onSelectTask = vi.fn();
+      renderSidebar({ tasks: [makeTask({ id: 'a', title: '작업 A' })], onClose, onSelectTask });
+
+      const sheet = screen.getByRole('dialog', { name: '작업 목록' });
+      press(within(sheet).getByRole('heading', { name: '작업 목록' }));
+      press(sheet);
+      expect(onClose).not.toHaveBeenCalled();
+
+      press(sheet.parentElement!);
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onSelectTask).not.toHaveBeenCalled();
+    });
+
+    it('ends typing in the task create form on the first overlay tap and closes on the next', () => {
+      useMobileLayout();
+      const onClose = vi.fn();
+      renderSidebar({ userId: 'user-1', onCreateTask: vi.fn(), onClose });
+
+      const sheet = screen.getByRole('dialog', { name: '작업 목록' });
+      fireEvent.click(within(sheet).getByRole('button', { name: '작업 추가' }));
+      const input = within(sheet).getByLabelText('새 작업 이름');
+      act(() => input.focus());
+
+      press(sheet.parentElement!, 'touch');
+      expect(onClose).not.toHaveBeenCalled();
+      expect(sheet).toHaveFocus();
+      // 입력만 끝냈다. 쓰던 칸은 그대로 남는다.
+      expect(within(sheet).getByLabelText('새 작업 이름')).toBeInTheDocument();
+
+      press(sheet.parentElement!, 'touch');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    // 브라우저에서 본 순서(V-T1-1 M1): 덮개를 마우스로 누른 채 과목 목록을 열고 놓으면 놓음·클릭은 html에 닿는다.
+    // 다음 바깥 탭은 과목 목록만 닫고 시트는 남는다(쓰던 칸도 그대로). 그다음 탭이 시트를 닫는다.
+    it('keeps the sheet open when a touch closes the subject list opened during an interrupted overlay press', async () => {
+      useMobileLayout();
+      const onClose = vi.fn();
+      renderSidebar({ userId: 'user-1', onCreateTask: vi.fn(), onClose });
+
+      const sheet = screen.getByRole('dialog', { name: '작업 목록' });
+      const overlay = sheet.parentElement!;
+      const root = document.documentElement;
+      fireEvent.click(within(sheet).getByRole('button', { name: '작업 추가' }));
+      const subject = within(sheet).getByRole('combobox', { name: '과목' });
+      act(() => subject.focus());
+
+      fireEvent.pointerDown(overlay, { pointerType: 'mouse' });
+      fireEvent.mouseDown(overlay);
+      fireEvent.keyDown(subject, { key: 'ArrowDown' });
+      await screen.findByRole('listbox');
+      // Radix는 열린 다음 차례에 바깥 누름을 듣기 시작한다.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      fireEvent.pointerUp(root, { pointerType: 'mouse' });
+      fireEvent.mouseUp(root);
+      fireEvent.click(root);
+
+      fireEvent.pointerDown(root, { pointerType: 'touch' });
+      fireEvent.pointerUp(root, { pointerType: 'touch' });
+      await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+      fireEvent.mouseDown(overlay);
+      fireEvent.mouseUp(overlay);
+      fireEvent.click(overlay);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(within(sheet).getByLabelText('새 작업 이름')).toBeInTheDocument();
+
+      press(overlay, 'touch');
       expect(onClose).toHaveBeenCalledOnce();
     });
   });

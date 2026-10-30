@@ -92,6 +92,7 @@ export default function LoginModal({
       aria-labelledby={titleId}
       // 닫기 버튼보다 실제 로그인 수단에 먼저 포커스를 둔다.
       initialFocusRef={googleButtonRef}
+      closeOnOverlayClick
       className="relative md:max-w-[400px]"
     >
       <span aria-hidden="true" className="ui-sheet-grabber md:hidden" />
