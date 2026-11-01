@@ -370,12 +370,66 @@ describe('AppSelect scroll lock', () => {
       .find(text => text.includes('body[data-scroll-locked]'));
     expect(lockStyle).toContain('--removed-body-scroll-bar-size:');
 
-    expect(block).toMatch(
-      /body\[data-scroll-locked\] :is\([^)]*\.ui-scroll-lock-fixed[^)]*\) \{\s*margin-right: var\(--removed-body-scroll-bar-size, 0px\);/,
+    // 보정 규칙 자체가 세 선택자를 모두 담는지 본다(같은 선택자를 쓰는 다른 규칙, 예: 동작 줄이기·덮개 옆 띠 색 규칙으로 통과하지 않게).
+    // md 미만 창과 scrollbar-gutter를 모르는 브라우저에서는 이 규칙이 고정 요소의 유일한 보정이다.
+    const compensation = block.match(
+      /body\[data-scroll-locked\] :is\(([^)]*)\) \{\s*margin-right: var\(--removed-body-scroll-bar-size, 0px\);/,
     );
-    for (const selector of ['.ui-dialog-overlay', '[data-dialog-keep] > div']) expect(block).toContain(selector);
+    expect(compensation).not.toBeNull();
+    expect(compensation![1].split(',').map(selector => selector.trim())).toEqual(
+      expect.arrayContaining(['.ui-scroll-lock-fixed', '.ui-dialog-overlay', '[data-dialog-keep] > div']),
+    );
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(document.body).not.toHaveAttribute('data-scroll-locked'));
+  });
+
+  // md 이상에서는 루트에 스크롤바 자리를 늘 남기므로 잠가도 폭이 그대로다. 그때 라이브러리의 보정(body 오른쪽 여백,
+  // 스크롤바 폭 변수)이 그대로면 본문이 왼쪽으로 밀리므로 0으로 둔다. 자리는 루트(html)에 있어야 화면에 적용되고,
+  // 라이브러리의 변수는 레이어 밖 규칙이라 0으로 두는 규칙도 레이어 밖에 있어야 이긴다. md 미만은 예전 보정 그대로다.
+  it('reserves the root scrollbar gutter and zeroes the lock compensation only at md and up, outside any layer', () => {
+    // 주석은 지우고, 따옴표 안 글자(중괄호가 들어 있을 수 있다)는 비운 뒤 중괄호를 센다.
+    const source = css.replace(/\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g, text =>
+      text.startsWith('/*') ? '' : "''",
+    );
+    // head 바로 뒤 중괄호 안을 짝 맞춰 꺼낸다. depth는 head 앞에서 아직 닫히지 않은 중괄호 수(0이면 맨 바깥).
+    const blockAfter = (text: string, head: string) => {
+      const at = text.indexOf(head);
+      if (at < 0) return null;
+      const open = text.indexOf('{', at + head.length);
+      const before = text.slice(0, at);
+      const depth = (before.match(/\{/g)?.length ?? 0) - (before.match(/\}/g)?.length ?? 0);
+      for (let i = open, level = 0; i < text.length; i++) {
+        if (text[i] === '{') level++;
+        else if (text[i] === '}' && --level === 0) return { depth, inner: text.slice(open + 1, i) };
+      }
+      return null;
+    };
+
+    // 규칙이 시작하는 곳에서 아직 닫히지 않은 중괄호 수(0이면 그 블록 바로 아래, 다른 @layer·@media 안이 아님). 없으면 null.
+    const depthOf = (text: string, rule: RegExp) => {
+      const match = rule.exec(text);
+      if (!match) return null;
+      const before = text.slice(0, match.index + match[1].length);
+      return (before.match(/\{/g)?.length ?? 0) - (before.match(/\}/g)?.length ?? 0);
+    };
+
+    const supports = blockAfter(source, '@supports (scrollbar-gutter: stable)');
+    expect(supports?.depth).toBe(0);
+    const md = blockAfter(supports!.inner, '@media (width >= 48rem)');
+    expect(md?.depth).toBe(0);
+    // 두 규칙은 md 블록 바로 아래에 있어야 한다. 그 안의 @layer에 넣으면 레이어 밖 라이브러리 변수에 지고(보정 변수가 다시 스크롤바 폭),
+    // 다른 @media 안에 넣으면 그 조건에서만 걸린다.
+    expect(depthOf(md!.inner, /(^|[;}\s])html \{\s*scrollbar-gutter: stable;\s*\}/)).toBe(0);
+    expect(
+      depthOf(
+        md!.inner,
+        /(^|[;}\s])html body\[data-scroll-locked\] \{\s*margin-right: 0 !important;\s*--removed-body-scroll-bar-size: 0px;\s*\}/,
+      ),
+    ).toBe(0);
+
+    // 그 밖(모든 폭, body 등)에는 두지 않는다.
+    expect(source.match(/scrollbar-gutter\s*:[^;)]*;/g)).toHaveLength(1);
+    expect(source.match(/--removed-body-scroll-bar-size\s*:\s*0/g)).toHaveLength(1);
   });
 });
