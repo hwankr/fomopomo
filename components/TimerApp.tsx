@@ -1157,7 +1157,8 @@ export default function TimerApp({
   // storage owner changes. Effects run in declaration order, so this is
   // guaranteed to run before the restore and server-sync effects below and
   // they can never reuse the previous account's refs.
-  useEffect(() => {
+  // 아래 되살리기가 레이아웃 효과라 이것도 레이아웃 효과여야 그보다 먼저 돈다.
+  useLayoutEffect(() => {
     hasSyncedRef.current = false;
     sessionIdentityRef.current = null;
     endTimeRef.current = 0;
@@ -1174,6 +1175,16 @@ export default function TimerApp({
       sessionRevisionRef.current += 1;
     };
   }, [storageOwner, endTimeRef, stopwatchStartTimeRef, stopwatchRunStartTimeRef, currentIntervalStartRef]);
+
+  // 되살리는 동안 생긴 프로필 상태 쓰기(끝난 단계 정리의 'online', 4시간 넘게 돈 스톱워치의 'paused')는 모아 두었다가
+  // 아래 효과에서 보낸다. 되살리기는 그리기 전(레이아웃 효과)에 하지만, 이 쓰기는 예전처럼 useStudySession의 마운트 효과
+  // (접속 표시 'online') 뒤에 줄을 서야 한다. 프로필 쓰기 줄은 마지막에 들어온 것만 보내므로(queueProfileWrite),
+  // 그보다 앞에 서면 되살린 결과가 서버에 닿지 않는다. 되살리는 중이 아니면(서버 동기화 등) 바로 보낸다.
+  const restoreStatusWritesRef = useRef<(() => void)[] | null>(null);
+  const sendStatusAfterRestore = (send: () => void) => {
+    if (restoreStatusWritesRef.current) restoreStatusWritesRef.current.push(send);
+    else send();
+  };
 
   // Completion transition for a timer whose deadline passed while the tab was
   // closed: the closed tab never ran handleTimerComplete, so the restore must
@@ -1303,11 +1314,11 @@ export default function TimerApp({
     // and clear the server-side session state (the closed tab's offline
     // beacon is best-effort and may never have landed).
     hasSyncedRef.current = true;
-    void updateStatus('online', undefined, undefined, 0, 'timer', nextMode, 0);
+    sendStatusAfterRestore(() => void updateStatus('online', undefined, undefined, 0, 'timer', nextMode, 0));
   });
 
   const pauseRecoveredStopwatch = useEffectEvent((snapshot: StopwatchSnapshot) => {
-    updateStatus('paused', undefined, undefined, snapshot.elapsed, 'stopwatch', 'focus', 0, snapshot.endTime);
+    sendStatusAfterRestore(() => updateStatus('paused', undefined, undefined, snapshot.elapsed, 'stopwatch', 'focus', 0, snapshot.endTime));
     notifyStopwatchAutoPause();
   });
 
@@ -1351,8 +1362,13 @@ export default function TimerApp({
     return settled;
   });
 
+  // 저장된 상태를 되살렸는지. 되살리기 전의 첫 그림(쉬는 모습)은 페이지에 무대로 알리지 않는다.
+  const [restored, setRestored] = useState(false);
+
   // --- Restore ---
-  useEffect(() => {
+  // 그리기 전(레이아웃 효과)에 되살린다. 타이머 화면이 붙을 때 처음 보이는 모습이 곧바로 되살린 상태여야 한다.
+  // 그리고 나서 되살리면 쉬는 모습이 한 번 그려진 뒤 바뀌어, 무대 높이·색과 기록 시트가 움직인다(docs/design-system.md §8).
+  useLayoutEffect(() => {
     const restoreState = () => {
       if (storageOwner !== GUEST_OWNER) {
         // Explicit migration for authenticated accounts: legacy global-key
@@ -1508,9 +1524,19 @@ export default function TimerApp({
         // Let's assume we can access it. 
         // Wait, destructuring `checkActiveSession` from `useStudySession` result at the top of component is needed first.
       }
+      setRestored(true);
     };
+    restoreStatusWritesRef.current = [];
     restoreState();
   }, [setTimerMode, setCycleCount, setFocusLoggedSeconds, setTimeLeft, setTimerDuration, setIsRunning, endTimeRef, setIsStopwatchRunning, setStopwatchTime, stopwatchStartTimeRef, stopwatchRunStartTimeRef, setIntervals, setSelectedTaskId, setSelectedTask, setSelectedSubjectId, setTaskHandoff, isLoggedIn, currentIntervalStartRef, storageOwner, ensureSessionIdentity]);
+
+  // 되살리기가 모아 둔 프로필 상태 쓰기를 보낸다. 같은 커밋의 효과 가운데 위의 훅들(접속 표시) 뒤, 아래 서버 동기화 앞에 돈다.
+  useEffect(() => {
+    const writes = restoreStatusWritesRef.current;
+    if (!writes) return;
+    restoreStatusWritesRef.current = null;
+    writes.forEach((send) => send());
+  });
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -1732,9 +1758,11 @@ export default function TimerApp({
     ? (isStopwatchRunning ? 'watch' : null)
     : (isRunning ? (timerMode === 'focus' ? 'pomo' : 'rest') : null);
   const stageBusy = clockRunning || ended !== null;
-  useEffect(() => {
+  // 되살린 뒤의 무대부터, 그리기 전에 알린다. 그래야 페이지가 화면이 붙을 때 되살린 무대를 첫 그림부터 그린다.
+  useLayoutEffect(() => {
+    if (!restored) return;
     onStageChange?.({ tone: stageTone, busy: stageBusy, startCount });
-  }, [onStageChange, stageTone, stageBusy, startCount]);
+  }, [onStageChange, restored, stageTone, stageBusy, startCount]);
 
   // Update Document Title
   useEffect(() => {
