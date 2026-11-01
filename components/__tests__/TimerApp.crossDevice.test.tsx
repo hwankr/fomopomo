@@ -341,6 +341,46 @@ describe('TimerApp stopwatch continuous-run auto-pause', () => {
     ]);
   });
 
+  // 되살리기는 그리기 전(레이아웃 효과)에 돈다. 그래도 되살린 결과의 프로필 쓰기는 마운트 때의 접속 표시 쓰기 뒤에
+  // 줄을 서야, 마지막 쓰기만 보내는 줄에서 밀리지 않고 서버에 닿는다.
+  it('publishes an automatic pause found on restore after the mount-time presence write', async () => {
+    const startedAt = Date.now();
+    const firstView = await startFreshStopwatch();
+    firstView.unmount();
+    profile = pausedProfile({
+      status: 'studying', timer_type: 'stopwatch', study_start_time: new Date(startedAt).toISOString(),
+      total_stopwatch_time: 0, last_active_at: new Date(startedAt).toISOString(),
+    });
+    vi.setSystemTime(startedAt + 30 * 3_600_000);
+    await mount();
+    for (let i = 0; i < 5; i++) await act(async () => {});
+
+    expect(lastStopwatchProps().isStopwatchRunning).toBe(false);
+    expect(profile).toMatchObject({ status: 'paused', study_start_time: null, total_stopwatch_time: maxRunSeconds });
+  });
+
+  it('clears the presence of a focus session that ended while the tab was closed', async () => {
+    const startedAt = Date.now() - 35 * 60_000;
+    window.localStorage.setItem(STATE_KEY, JSON.stringify({
+      sessionIdentity: { id: '11111111-1111-4111-8111-111111111111', progressStart: 0 },
+      ownerUserId: 'user-1', activeTab: 'timer',
+      timer: { mode: 'focus', duration: 1500, isRunning: true, timeLeft: 1500, targetTime: startedAt + 1_500_000, cycleCount: 0, loggedSeconds: 0 },
+      stopwatch: { isRunning: false, elapsed: 0, startTime: null },
+      intervals: [], currentIntervalStart: startedAt,
+      configuredDurations: { focus: 1500, shortBreak: 300, longBreak: 900 },
+      lastUpdated: startedAt,
+    }));
+    profile = pausedProfile({
+      status: 'studying', study_start_time: new Date(startedAt).toISOString(),
+      total_stopwatch_time: 0, last_active_at: new Date(startedAt).toISOString(),
+    });
+    await mount();
+    for (let i = 0; i < 5; i++) await act(async () => {});
+
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(profile).toMatchObject({ status: 'online', study_start_time: null, timer_mode: 'shortBreak' });
+  });
+
   it('keeps the original continuous-run deadline when a running local session reloads', async () => {
     const startedAt = Date.now();
     const view = await startFreshStopwatch();

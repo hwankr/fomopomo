@@ -1,9 +1,8 @@
 'use client';
 
 import Navbar from '@/components/Navbar';
+import { useAuthSession } from '@/hooks/useAuthSession';
 import { supabase } from '@/lib/supabase';
-import { useEffect, useState } from 'react';
-import { Session } from '@supabase/supabase-js';
 
 // 흰 페이지 위 본문: 카드·구분선 없이 여백과 글자 크기로만 나눈다.
 const bodyClass = 'flex flex-col gap-9 text-[15px] leading-[1.75] break-keep text-ink md:gap-10';
@@ -12,21 +11,7 @@ const listClass = 'flex list-disc flex-col gap-1.5 pl-5 marker:text-ink-faint';
 const datesClass = 'flex flex-col gap-0.5 text-[13px] text-ink-subtle';
 
 export default function PrivacyClient() {
-  const [session, setSession] = useState<Session | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const { session } = useAuthSession();
 
   return (
     <div className="flex flex-col">

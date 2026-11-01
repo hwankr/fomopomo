@@ -46,6 +46,7 @@
 
   /* 겹침 */
   --color-hover: rgb(31 27 29 / 0.06);
+  /* 대화상자 덮개. 덮개가 열린 동안의 빈 스크롤바 자리 색('스크롤 막대 자리')도 이 값의 색·알파에서 계산하므로 이 값만 바꾸면 된다. */
   --color-scrim: rgb(31 27 29 / 0.32);
 
   --radius-chip: 10px;
@@ -128,9 +129,72 @@
    화면에 고정된 전체 너비 요소(대화상자 덮개, 하단 탭 바, 토스트 영역)는 그 여백을 받지 못해 스크롤바 폭만큼 넓어지고
    가운데 정렬된 대화상자·토스트가 옆으로 흔들리므로, 잠긴 동안 같은 폭의 오른쪽 여백을 준다.
    --removed-body-scroll-bar-size는 잠긴 동안에만 있고, 스크롤바가 없거나 내용 위에 겹쳐 그려지면 0이다.
+   md 이상에서 스크롤바 자리를 늘 남겨 두는 브라우저(아래 '스크롤 막대 자리')에서는 잠가도 폭이 그대로라 이 보정 전체가 0이 된다.
+   md 미만 창과 그 규칙을 모르는 브라우저에서는 이 보정이 그대로 돈다.
    새로 만드는 고정 전체 너비 요소에는 ui-scroll-lock-fixed를 붙인다. */
 body[data-scroll-locked] :is(.ui-scroll-lock-fixed, .ui-dialog-overlay, [data-dialog-keep] > div) {
   margin-right: var(--removed-body-scroll-bar-size, 0px);
+}
+
+/* 스크롤 막대 자리: 화면마다 길이가 달라(로그인 확인·불러오는 중 화면은 짧다) 페이지 스크롤바가 생겼다 없어지면
+   PC의 보통 스크롤바(15–17px)만큼 레이아웃 폭이 바뀌어, 전체 폭 헤더의 가운데 메뉴는 그 절반, 오른쪽 알림·아바타는 그만큼
+   옆으로 밀리고 가운데 정렬 본문도 밀린다. 스크롤바 자리를 늘 남겨 두어 넘치든 안 넘치든 폭을 같게 한다.
+   루트 요소에 줘야 화면 스크롤에 적용된다(overflow와 달리 body에서 옮겨 가지 않는다). 내용 위에 겹쳐 그리는 스크롤바
+   (모바일, macOS 기본)는 자리를 차지하지 않으므로 아무것도 바뀌지 않는다. 지원하지 않는 브라우저는 예전 그대로 둔다.
+   남겨 둔 자리는 스크롤을 잠가도(overflow: hidden) 그대로 있어 잠글 때 폭이 바뀌지 않는다. 그런데 react-remove-scroll-bar는
+   잠글 때 innerWidth − clientWidth를 스크롤바 폭으로 재서 body와 고정 요소에 그만큼 오른쪽 여백을 준다. 이 값은 스크롤바가
+   그려진 긴 화면에서는 남겨 둔 자리와 같은 폭이고 짧은 화면에서는 0이다. 자리가 그대로인데 여백을 주면 긴 화면에서 본문이
+   왼쪽으로 밀리므로 이 보정을 0으로 둔다.
+   md(데스크톱 헤더가 보이는 폭) 이상에서만 한다. 그보다 좁은 창에는 전체 폭 데스크톱 헤더가 없고, 짧은 화면의 대화상자 옆
+   빈 자리 띠를 맞추는 아래 규칙도 md 이상의 덮개 애니메이션에 묶여 있으므로, 예전처럼 자리를 남기지 않고 위 보정을 그대로 쓴다.
+   창이 페이지보다 높아 스크롤바가 그려지지 않으면 남겨 둔 자리에는 화면 바탕(흰색)만 보여 타이머 무대 옆에 흰 띠가 보일 수 있다.
+   화면 바탕은 한 색으로만 그려지는데 세로로 무대·시트 색이 달라 맞출 수 없어 받아들인 한계다. */
+@supports (scrollbar-gutter: stable) {
+  @media (width >= 48rem) {
+    html {
+      scrollbar-gutter: stable;
+    }
+
+    html body[data-scroll-locked] {
+      margin-right: 0 !important;
+      --removed-body-scroll-bar-size: 0px;
+    }
+
+    /* 대화상자 덮개는 화면에 고정된 요소라 남겨 둔 스크롤바 자리까지는 덮지 못한다. 짧은 화면(스크롤바가 안 그려질 때)에서는
+       그 자리가 화면 바탕(흰색) 띠로 남아 어둡게 덮인 화면 옆에서 눈에 띄므로, 덮개가 열린 동안 화면 바탕을 덮개(--color-scrim)를
+       흰 바탕(255)에 겹친 불투명한 색으로 두고, 덮개의 등장·퇴장과 같은 시간·가속(md 이상의 덮개 애니메이션 값)으로 바꾼다.
+       색은 --color-scrim의 색(r g b)과 알파(alpha)에서 바로 계산한다(상대 색 문법). 한 겹: c·a + 255·(1 − a).
+       덮개는 body에 바로 붙으므로 두 겹 열리면 형제로 이어진다. 두 겹이면 두 번 겹친 색: c·a·(2 − a) + 255·(1 − a)²,
+       위 덮개가 닫히는 동안에는 퇴장 시간으로 돌아온다. 시간·가속이 덮개와 같아 한 겹이 열리고 닫힐 때와 정상적으로 겹칠 때는
+       띠가 덮개와 같은 색이지만, 닫히는 대화상자와 새로 열리는 대화상자가 겹치는 짧은 순간(약 0.1초)에는 두 덮개의 진행이 달라
+       띠 색이 조금 어긋날 수 있다(받아들인 한계). 스크롤바가 그려지는 긴 화면에서는 스크롤바가 이 자리를 가려 예전과 같다.
+       상대 색 문법·:has()를 모르는 브라우저는 이 색 규칙만 버려 흰 띠로 남고 나머지는 같다. */
+    html {
+      transition: background-color var(--duration-exit) var(--ease-exit);
+    }
+
+    html:has(.ui-dialog-overlay[data-state='open']) {
+      background-color: rgb(
+        from var(--color-scrim) calc(r * alpha + 255 * (1 - alpha)) calc(g * alpha + 255 * (1 - alpha))
+          calc(b * alpha + 255 * (1 - alpha)) / 1
+      );
+      transition-duration: var(--duration-enter);
+      transition-timing-function: var(--ease-enter);
+    }
+
+    html:has(.ui-dialog-overlay[data-state='open'] ~ .ui-dialog-overlay[data-state='open']) {
+      background-color: rgb(
+        from var(--color-scrim) calc(r * alpha * (2 - alpha) + 255 * (1 - alpha) * (1 - alpha))
+          calc(g * alpha * (2 - alpha) + 255 * (1 - alpha) * (1 - alpha))
+          calc(b * alpha * (2 - alpha) + 255 * (1 - alpha) * (1 - alpha)) / 1
+      );
+    }
+
+    html:has(.ui-dialog-overlay[data-state='open'] ~ .ui-dialog-overlay[data-state='closed']) {
+      transition-duration: var(--duration-exit);
+      transition-timing-function: var(--ease-exit);
+    }
+  }
 }
 
 /* 동작 줄이기에서는 아래 전역 규칙이 모든 요소의 전환 시간을 0.01ms로 두므로(transition-property 기본값은 all)

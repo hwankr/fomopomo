@@ -174,6 +174,11 @@ describe('Calendar month motion', () => {
   beforeEach(() => {
     animate.mockClear();
     Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
+    // 오늘 날짜 칸은 이름 끝에 ', 오늘'이 붙는다. 실제 오늘이 2026년 11월 1일이면 아래에서 찾는 '11월 1일 일요일'이
+    // 달라지므로, 오늘을 10월 5일(기본으로 고른 날)로 고정해 11월 칸 이름이 실행하는 날과 상관없이 같게 한다.
+    // 파일의 afterEach가 vi.useRealTimers()로 되돌린다.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 5, 12));
   });
   afterEach(() => {
     delete (Element.prototype as { animate?: unknown }).animate;

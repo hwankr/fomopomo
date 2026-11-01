@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import toast from 'react-hot-toast';
 import HomeClient from '@/app/home-client';
 import TimerApp, { type TimerStage } from '../TimerApp';
@@ -168,6 +170,104 @@ const pressSpace = (target: Element) => {
   const event = new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
   act(() => { target.dispatchEvent(event); });
   return event;
+};
+
+const seedEndedFocusTimer = () => {
+  const now = Date.now();
+  window.localStorage.setItem('fomopomo_full_state', JSON.stringify({
+    activeTab: 'timer',
+    timer: { mode: 'focus', isRunning: true, timeLeft: 0, targetTime: now - 60_000, cycleCount: 0, loggedSeconds: 0 },
+    stopwatch: { isRunning: false, elapsed: 0, startTime: null },
+    intervals: [],
+    currentIntervalStart: now - 120_000,
+    lastUpdated: now - 60_000,
+  }));
+};
+
+// --- 페이지 무대(HomeClient) 관찰 ---
+// 지켜보는 값: 루트(바탕색·전환), 무대(높이 클래스·전환), 최근 활동 시트의 펼침.
+type StageFrame = { root: string | null; stage: string | null; expanded: string | null };
+const stageElements = (container: Element) => {
+  const root = container.firstElementChild!;
+  return {
+    root: [root, 'class'],
+    stage: [root.firstElementChild!, 'class'],
+    expanded: [screen.getByRole('button', { name: '최근 활동' }), 'aria-expanded'],
+  } as Record<keyof StageFrame, [Element, string]>;
+};
+// MutationObserver 기록으로, 붙은 뒤 바뀐 순서대로 그 순간의 값을 처음 값부터 되살린다.
+const replayStageFrames = (records: MutationRecord[], container: Element): StageFrame[] => {
+  const tracked = stageElements(container);
+  const keys = Object.keys(tracked) as (keyof StageFrame)[];
+  const keyOf = (record: MutationRecord) =>
+    keys.find((key) => tracked[key][0] === record.target && tracked[key][1] === record.attributeName);
+  const changes = records.filter((record) => record.type === 'attributes' && keyOf(record));
+  const frame = {} as StageFrame;
+  for (const key of keys) {
+    const first = changes.find((record) => keyOf(record) === key);
+    frame[key] = first ? first.oldValue : tracked[key][0].getAttribute(tracked[key][1]);
+  }
+  const frames = [{ ...frame }];
+  changes.forEach((record, index) => {
+    const key = keyOf(record)!;
+    const next = changes.slice(index + 1).find((later) => keyOf(later) === key);
+    frame[key] = next ? next.oldValue : tracked[key][0].getAttribute(tracked[key][1]);
+    frames.push({ ...frame });
+  });
+  return frames;
+};
+const tokens = (className: string | null) => (className ?? '').split(/\s+/);
+// 움직일 수 있는 값만: 바탕색, 무대 높이, 시트 펼침.
+const stageValues = (frame: StageFrame) => ({
+  background: tokens(frame.root).filter((token) => token.startsWith('bg-')),
+  minHeight: tokens(frame.stage).filter((token) => token.includes('min-h-')),
+  expanded: frame.expanded,
+});
+const motionOn = (frame: StageFrame) => tokens(frame.root).includes('transition-colors');
+const observeAttributes = (target: Element) => {
+  const observer = new MutationObserver(() => {});
+  observer.observe(target, { subtree: true, childList: true, attributes: true, attributeOldValue: true });
+  return observer;
+};
+// 지금 이 순간의 값(MutationObserver 기록이 아니라 DOM에서 바로 읽는다).
+const currentStageFrame = (container: Element): StageFrame => {
+  const root = container.firstElementChild;
+  const sheet = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '최근 활동');
+  return {
+    root: root?.getAttribute('class') ?? null,
+    stage: root?.firstElementChild?.getAttribute('class') ?? null,
+    expanded: sheet?.getAttribute('aria-expanded') ?? null,
+  };
+};
+const gateTokens = ['transition-none!', '[&_*]:transition-none!'];
+const gated = (frame: StageFrame) => gateTokens.every((token) => tokens(frame.root).includes(token));
+// 화면이 붙는 동기 작업(커밋·레이아웃 효과와 거기서 생긴 동기 다시 그리기)만 마친 순간 = 브라우저가 처음 그릴 수 있는 때.
+// act는 효과와 예약된 다시 그리기까지 모두 비우므로, act 밖에서 flushSync로 붙이고 바로 본다.
+// rootReads: 그동안 루트의 레이아웃을 읽은(getBoundingClientRect) 순간의 값. 브라우저는 레이아웃을 읽을 때 그때의 값을 계산해 두고
+// 그 값이 다음 전환의 출발점이 된다. happy-dom은 스타일을 계산하지 않으므로 읽은 순간의 클래스로 본다.
+const mountAtFirstPaint = () => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const observer = observeAttributes(container);
+  const root = createRoot(container);
+  const rootReads: StageFrame[] = [];
+  const readLayout = Element.prototype.getBoundingClientRect;
+  const layoutSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this === container.firstElementChild) rootReads.push(currentStageFrame(container));
+    return readLayout.call(this);
+  });
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    flushSync(() => root.render(<HomeClient />));
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    layoutSpy.mockRestore();
+  }
+  const frames = replayStageFrames(observer.takeRecords(), container);
+  observer.disconnect();
+  return { frames, rootReads, unmount: () => act(() => root.unmount()) };
 };
 
 const renderTimer = (props: Partial<Parameters<typeof TimerApp>[0]> = {}) =>
@@ -498,6 +598,65 @@ describe('TimerApp stage', () => {
     expect(onStageChange).toHaveBeenLastCalledWith({ tone: null, busy: false, startCount: 2 });
     act(() => call('onToggleTimer'));
     expect(onStageChange).toHaveBeenLastCalledWith({ tone: 'rest', busy: true, startCount: 3 });
+  });
+
+  it('reports the restored stage first, never the resting one drawn before the restore', () => {
+    const onStageChange = vi.fn<(stage: TimerStage) => void>();
+    seedRunningFocusTimer(600);
+    renderTimer({ onStageChange });
+    expect(onStageChange).toHaveBeenNthCalledWith(1, { tone: 'pomo', busy: true, startCount: 1 });
+  });
+
+  describe('HomeClient stage when the timer screen mounts', () => {
+    // 화면을 옮겨 왔다가 돌아오거나 새로고침할 때: 첫 그림부터 되살린 무대이고, 쉬는 무대에서 바뀌어 가는 전환이 없다.
+    it.each([
+      { name: 'a running focus timer', seed: () => seedRunningFocusTimer(600), background: ['bg-pomo-tint'] },
+      { name: 'a phase that ended while away', seed: seedEndedFocusTimer, background: ['bg-surface'] },
+    ])('draws the restored stage of $name from the first paint without moving', ({ seed, background }) => {
+      seed();
+      const { frames, rootReads, unmount } = mountAtFirstPaint();
+      const first = frames.at(-1)!;
+      expect(stageValues(first)).toEqual({ background, minHeight: expect.arrayContaining(['md:min-h-[calc(100dvh-72px)]']), expanded: 'false' });
+      // 값이 바뀌는 동안에는 전환이 꺼져 있다: 전환이 켜진 모든 순간의 값은 되살린 값과 같다.
+      for (const frame of frames.filter(motionOn)) expect(stageValues(frame)).toEqual(stageValues(first));
+      // 꺼져 있는 모든 순간에는 루트와 안쪽(무대·시트·타이머) 전환을 함께 끈다. 시트 접힘(.ui-collapse) 같은 안쪽 전환은
+      // 루트만 꺼서는 멈추지 않는다.
+      const motionOff = frames.filter((frame) => !motionOn(frame));
+      expect(motionOff.length).toBeGreaterThan(0);
+      for (const frame of motionOff) expect(tokens(frame.root)).toEqual(expect.arrayContaining(gateTokens));
+      // 전환을 켜기 전, 되살린 값이 적용되고 전환이 꺼진 채로 루트의 레이아웃을 한 번 읽는다. 그래야 그 값이 전환의 출발점이 되어
+      // 켜는 순간 쉬는 무대 값에서 되살린 값으로 가는 전환이 돌지 않는다(home-client.tsx의 강제 레이아웃).
+      expect(rootReads.map((read) => ({ gated: gated(read), values: stageValues(read) }))).toContainEqual({
+        gated: true,
+        values: stageValues(first),
+      });
+      // 그 뒤 사용자가 할 동작을 위해 전환은 켜 둔다.
+      expect(motionOn(first)).toBe(true);
+      expect(tokens(first.stage)).toContain('transition-[min-height]');
+      unmount();
+    });
+
+    it('keeps the resting stage as it was', () => {
+      const { frames, unmount } = mountAtFirstPaint();
+      const first = frames.at(-1)!;
+      expect(stageValues(first)).toEqual({ background: ['bg-surface'], minHeight: expect.arrayContaining(['md:min-h-0']), expanded: 'true' });
+      for (const frame of frames) expect(stageValues(frame)).toEqual(stageValues(first));
+      expect(motionOn(first)).toBe(true);
+      unmount();
+    });
+
+    it('still moves the stage, colour and sheet when the user starts the timer', () => {
+      const view = render(<HomeClient />);
+      const observer = observeAttributes(view.container);
+      act(() => call('onToggleTimer'));
+      const frames = replayStageFrames(observer.takeRecords(), view.container);
+      observer.disconnect();
+      expect(stageValues(frames[0])).toMatchObject({ background: ['bg-surface'], expanded: 'true' });
+      expect(stageValues(frames.at(-1)!)).toMatchObject({ background: ['bg-pomo-tint'], expanded: 'false' });
+      expect(tokens(frames.at(-1)!.stage)).toContain('md:min-h-[calc(100dvh-72px)]');
+      expect(frames.every(motionOn)).toBe(true);
+      expect(frames.every((frame) => tokens(frame.stage).includes('transition-[min-height]'))).toBe(true);
+    });
   });
 
   describe('quick settings', () => {
