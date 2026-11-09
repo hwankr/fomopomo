@@ -60,11 +60,11 @@ export default function ConfirmModal({
                 {title}
             </h2>
             {typeof message === 'string' ? (
-                <p id={messageId} className="m-0 text-sm text-ink-muted md:text-[15px]">
+                <p id={messageId} className="m-0 text-sm break-keep text-ink-muted md:text-[15px]">
                     {message}
                 </p>
             ) : (
-                <div id={messageId} className="text-sm text-ink-muted md:text-[15px]">
+                <div id={messageId} className="text-sm break-keep text-ink-muted md:text-[15px]">
                     {message}
                 </div>
             )}

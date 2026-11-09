@@ -6,6 +6,9 @@ const db = vi.hoisted(() => ({
   calls: [] as { action: string; owner: unknown; payload: Record<string, unknown> }[],
   pendingRead: null as null | ((value: unknown) => void),
   deferNextRead: false,
+  // 다음 추가·이름 변경 요청의 응답을 잡아 두고, 테스트가 정한 응답으로 끝낸다.
+  pendingWrite: null as null | ((value: unknown) => void),
+  deferNextWrite: false,
   failure: null as { code: string } | null,
   rpc: vi.fn(),
   // 저장된 로그인 세션의 사용자(null = 알 수 없음/로그아웃)
@@ -35,6 +38,10 @@ vi.mock('@/lib/supabase', () => ({
           if (action === 'select' && db.deferNextRead) {
             db.deferNextRead = false;
             return new Promise(result => { db.pendingRead = result; }).then(resolve);
+          }
+          if (action !== 'select' && db.deferNextWrite) {
+            db.deferNextWrite = false;
+            return new Promise(result => { db.pendingWrite = result; }).then(resolve);
           }
           if (db.failure && action !== 'select') return Promise.resolve({ data: null, error: db.failure }).then(resolve);
           if (action === 'insert') {
@@ -68,6 +75,8 @@ beforeEach(() => {
   db.calls = [];
   db.pendingRead = null;
   db.deferNextRead = false;
+  db.pendingWrite = null;
+  db.deferNextWrite = false;
   db.failure = null;
   db.signedInAs = null;
   db.rpc.mockReset();
@@ -277,6 +286,81 @@ describe('useStudySubjects deleteSubject', () => {
     // 사용자 키로 다시 그려지는 관리 화면은 계정을 바꾸면 언마운트된다. 그 사이 저장된 세션이 bob으로 바뀌었다.
     db.signedInAs = 'bob';
     expect(await settle({ data: { status: 'deleted' }, error: null })).toEqual({ status: 'failed' });
+    expect(changed).not.toHaveBeenCalled();
+  });
+});
+
+describe('useStudySubjects late create and rename responses', () => {
+  type Hook = ReturnType<typeof useStudySubjects>;
+  const writes = {
+    create: { send: (hook: Hook) => hook.createSubject('데이터베이스'), ok: { data: { id: 'new', user_id: 'alice', name: '데이터베이스' }, error: null } },
+    rename: { send: (hook: Hook) => hook.renameSubject('a', '블록체인 이론'), ok: { data: { id: 'a' }, error: null } },
+  };
+  const okResult = { create: { id: 'new', user_id: 'alice', name: '데이터베이스' }, rename: true };
+  const staleResult = { create: null, rename: false };
+
+  // 요청을 보낸 뒤 같은 계정에서 훅만 언마운트하고(예: 과목 관리 패널을 접음) 응답을 돌려준다.
+  async function writeThenUnmount(kind: keyof typeof writes, signedInAs: string | null) {
+    db.signedInAs = signedInAs;
+    const view = await loaded();
+    db.deferNextWrite = true;
+    let pending!: Promise<unknown>;
+    act(() => { pending = writes[kind].send(view.result.current); });
+    await waitFor(() => expect(db.pendingWrite).not.toBeNull());
+    view.unmount();
+    return async (response: unknown) => {
+      let outcome: unknown;
+      await act(async () => { db.pendingWrite?.(response); outcome = await pending; });
+      return outcome;
+    };
+  }
+
+  it.each([
+    ['create', null],
+    ['create', 'alice'],
+    ['rename', null],
+    ['rename', 'alice'],
+  ] as const)('%s still announces a saved change once after unmount (signed in as %s) and returns it', async (kind, signedInAs) => {
+    const settle = await writeThenUnmount(kind, signedInAs);
+    const consoleError = vi.spyOn(console, 'error');
+    expect(await settle(writes[kind].ok)).toEqual(okResult[kind]);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it.each([
+    ['create', { data: null, error: { code: '23505' } }],
+    ['create', { data: null, error: { code: '42501' } }],
+    ['rename', { data: null, error: { code: '23505' } }],
+    ['rename', { data: null, error: null }],
+  ] as const)('%s sends no change event when the late response after unmount is a failure (%j)', async (kind, response) => {
+    const settle = await writeThenUnmount(kind, null);
+    expect(await settle(response)).toEqual(staleResult[kind]);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it.each(['create', 'rename'] as const)('%s treats a late response after unmount as stale when another account is now signed in', async kind => {
+    const settle = await writeThenUnmount(kind, 'alice');
+    // 사용자 키로 다시 그려지는 화면은 계정을 바꾸면 언마운트된다. 그 사이 저장된 세션이 bob으로 바뀌었다.
+    db.signedInAs = 'bob';
+    expect(await settle(writes[kind].ok)).toEqual(staleResult[kind]);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it.each(['create', 'rename'] as const)('%s ignores a late response after the mounted hook switches accounts', async kind => {
+    const { result, rerender } = await loaded();
+    db.deferNextWrite = true;
+    let pending!: Promise<unknown>;
+    act(() => { pending = writes[kind].send(result.current); });
+    await waitFor(() => expect(db.pendingWrite).not.toBeNull());
+    rerender({ user: 'bob' });
+    await waitFor(() => expect(ids(result.current.subjects)).toEqual(['c']));
+    let outcome: unknown;
+    await act(async () => { db.pendingWrite?.(writes[kind].ok); outcome = await pending; });
+    expect(outcome).toEqual(staleResult[kind]);
+    expect(ids(result.current.subjects)).toEqual(['c']);
+    expect(result.current.error).toBeNull();
     expect(changed).not.toHaveBeenCalled();
   });
 });

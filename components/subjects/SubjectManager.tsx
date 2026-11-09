@@ -86,7 +86,8 @@ function OwnedSubjectManager({ userId, legacyTasks = [], onLegacyImported, onBus
 
   const begin = () => {
     const scope = scopeRef.current;
-    if (!scope.active || scope.pending || loading) return null;
+    // 목록이 보이는 동안의 다시 불러오기(예: 확인 창이 열린 사이 다른 화면의 변경)는 막지 않는다. 서버가 기준이다.
+    if (!scope.active || scope.pending || (loading && subjects.length === 0)) return null;
     scope.pending = true;
     setBusy(true);
     busyCallback.current?.(true);
