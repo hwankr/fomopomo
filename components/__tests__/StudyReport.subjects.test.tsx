@@ -9,6 +9,8 @@ const mock = vi.hoisted(() => ({
   fetchStats: vi.fn(),
   chartData: [] as ChartData[],
   empty: false,
+  // 보관한 과목 ID(보관해도 훅의 목록에 남는다).
+  archived: [] as string[],
 }));
 
 vi.mock('@/lib/supabase', () => ({ supabase: {} }));
@@ -16,7 +18,7 @@ vi.mock('@/hooks/useAuthSession', () => ({ useAuthSession: () => ({ session: { u
 vi.mock('@/hooks/useStudySubjects', () => ({ useStudySubjects: () => ({ subjects: [
   { id: 'blockchain', user_id: mock.userId, name: mock.name },
   { id: 'another', user_id: mock.userId, name: mock.name },
-], error: null }) }));
+].map(subject => ({ ...subject, archived_at: mock.archived.includes(subject.id) ? '2026-11-09T01:00:00.000Z' : null })), error: null }) }));
 vi.mock('@/components/subjects/SubjectHistoryManager', () => ({ default: () => <p>과목 정리 화면</p> }));
 
 import StudyReport, { type StudyStats } from '@/components/StudyReport';
@@ -41,7 +43,7 @@ function bucket(bucketKey: string, seconds: number, taskTotals: Record<string, n
 }
 
 describe('공부 기록 과목별 통계', () => {
-  beforeEach(() => { mock.name = '블록체인'; mock.chartData = []; mock.empty = false; mock.fetchStats.mockClear(); });
+  beforeEach(() => { mock.name = '블록체인'; mock.chartData = []; mock.empty = false; mock.archived = []; mock.fetchStats.mockClear(); });
   afterEach(cleanup);
 
   it('선택 기간의 과목 합계와 세부 할 일을 보여주고 전체 누적 및 할 일별로 전환한다', () => {
@@ -155,6 +157,31 @@ describe('공부 기록 과목별 통계', () => {
     expect(screen.getAllByText('블록체인 심화')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '기존 기록 과목 정리' }));
     expect(screen.getByText('과목 정리 화면')).toBeInTheDocument();
+  });
+
+  it('보관한 과목 줄에만 이름 뒤 보관 표시를 붙이고 이름·시간·비율·펼침은 그대로다', () => {
+    mock.archived = ['another'];
+    mock.name = '정보처리기사 실기 대비 기출 문제 풀이';
+    render(<StudyReport stats={stats()} />);
+    const overview = screen.getByRole('region', { name: '과목과 할 일별 누적' });
+    const active = within(overview).getByText('1시간 20분').closest('button')!;
+    const archived = within(overview).getByText('10분').closest('button')!;
+    expect(within(active).queryByText('보관')).not.toBeInTheDocument();
+    const badge = within(archived).getByText('보관');
+    expect(badge).toHaveClass('shrink-0', 'text-xs', 'font-medium', 'text-ink-subtle');
+    // 이름은 말줄임 칸에 그대로, 표시는 그 바로 뒤에 있고 화면 읽기에서 띄어 읽힌다.
+    const name = within(archived).getByText(mock.name);
+    expect(name).toHaveClass('truncate');
+    expect(name.nextSibling?.textContent).toBe(' ');
+    expect(name.nextSibling?.nextSibling).toBe(badge);
+    expect(archived).toHaveTextContent(`${mock.name} 보관11.1%10분`);
+    expect(archived).toHaveAccessibleName(`${mock.name} 보관 11.1% 10분`);
+    fireEvent.click(archived);
+    expect(archived).toHaveAttribute('aria-expanded', 'true');
+    expect(within(within(overview).getByRole('list', { name: `${mock.name} 세부 할 일` })).getByText('다른 과목의 할 일')).toBeInTheDocument();
+    // 할 일별 보기에는 표시가 없다.
+    fireEvent.click(screen.getByRole('button', { name: '할 일별' }));
+    expect(within(overview).queryByText('보관')).not.toBeInTheDocument();
   });
 
   it('기록이 하나도 없으면 첫 뽀모도로 안내를 보여 준다', () => {

@@ -17,7 +17,7 @@ import { ChartData, ViewMode, StudyTotals, UNCLASSIFIED_SUBJECT, type useStudySt
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
 import { getDayStart } from '@/lib/dateUtils';
-import { StudySubject } from '@/lib/studySubjects';
+import { isArchivedSubject, StudySubject } from '@/lib/studySubjects';
 import { cn } from '@/lib/utils';
 import { playMotion } from '@/components/ui/motion';
 import { usePresence } from '@/components/ui/usePresence';
@@ -366,7 +366,7 @@ export default function StudyReport({ stats }: { stats: StudyStats }) {
   );
 }
 
-type TotalsRow = { id: string; name: string; seconds: number; taskTotals: Record<string, number>; unclassified: boolean };
+type TotalsRow = { id: string; name: string; seconds: number; taskTotals: Record<string, number>; unclassified: boolean; archived: boolean };
 
 function StudyTotalsOverview({ ref, totals, hasAnyRecord, subjects, grouping }: {
   ref?: Ref<HTMLDivElement>;
@@ -377,10 +377,17 @@ function StudyTotalsOverview({ ref, totals, hasAnyRecord, subjects, grouping }: 
 }) {
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const listId = useId();
-  const names = new Map(subjects.map(subject => [subject.id, subject.name]));
+  const byId = new Map(subjects.map(subject => [subject.id, subject]));
+  // 보관한 과목도 이름과 시간이 그대로 잡힌다. 줄에는 작은 '보관' 표시만 더한다.
   const rows: TotalsRow[] = grouping === 'subject'
-    ? Object.entries(totals.subjects).map(([id, value]) => ({ id, name: id === UNCLASSIFIED_SUBJECT ? '미분류' : names.get(id) ?? '알 수 없는 과목', unclassified: id === UNCLASSIFIED_SUBJECT, ...value }))
-    : Object.entries(totals.taskTotals).map(([task, seconds]) => ({ id: task, name: task, seconds, taskTotals: {}, unclassified: false }));
+    ? Object.entries(totals.subjects).map(([id, value]) => ({
+        id,
+        name: id === UNCLASSIFIED_SUBJECT ? '미분류' : byId.get(id)?.name ?? '알 수 없는 과목',
+        unclassified: id === UNCLASSIFIED_SUBJECT,
+        archived: isArchivedSubject(byId.get(id)),
+        ...value,
+      }))
+    : Object.entries(totals.taskTotals).map(([task, seconds]) => ({ id: task, name: task, seconds, taskTotals: {}, unclassified: false, archived: false }));
   rows.sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
   const maxSeconds = Math.max(1, ...rows.map(row => row.seconds));
 
@@ -407,6 +414,8 @@ function StudyTotalsOverview({ ref, totals, hasAnyRecord, subjects, grouping }: 
             const content = <>
               <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 font-semibold md:gap-2">
                 <span className="truncate">{row.name}</span>
+                {/* 이름은 말줄임해도 표시는 줄지 않는다. 앞의 공백은 화면 읽기에서 이름과 띄어 읽히게 한다(flex라 보이지 않는다). */}
+                {row.archived ? <>{' '}<span className="shrink-0 text-xs font-medium text-ink-subtle">보관</span></> : null}
                 {expandable ? <ChevronDown aria-hidden="true" size={14} strokeWidth={2.2} className={cn('shrink-0 text-ink-muted transition-transform duration-(--duration-enter) motion-reduce:transition-none', open && 'rotate-180')} /> : null}
               </span>
               <span aria-hidden="true" className="col-span-2 row-start-2 block h-1.5 overflow-hidden rounded-full bg-surface md:col-span-1 md:col-start-2 md:row-start-1 md:h-2">

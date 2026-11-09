@@ -5,9 +5,9 @@ import { format } from 'date-fns';
 import { ChevronDown, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getDayStart } from '@/lib/dateUtils';
-import { notifyStudySubjectsChanged, STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
+import { isArchivedSubject, notifyStudySubjectsChanged, STUDY_SUBJECTS_CHANGED_EVENT } from '@/lib/studySubjects';
 import { useStudySubjects } from '@/hooks/useStudySubjects';
-import SubjectSelect from '@/components/subjects/SubjectSelect';
+import SubjectSelect, { archivedSubjectLabel } from '@/components/subjects/SubjectSelect';
 import SubjectManager from '@/components/subjects/SubjectManager';
 import AppSelect from '@/components/ui/AppSelect';
 import DatePicker from '@/components/ui/DatePicker';
@@ -134,6 +134,13 @@ function HistoryManager({ userId }: { userId: string }) {
 
   const visible = filtered.slice(0, visibleCount);
   const subjectNames = new Map(subjects.map(subject => [subject.id, subject.name]));
+  // 지난 기록을 정리하는 곳이라 보관한 과목도 고를 수 있다. 사용 중 과목 뒤에 '(보관)'과 함께 둔다.
+  const filterOptions = [
+    { value: 'all', label: '모든 과목' },
+    { value: 'unclassified', label: '미분류' },
+    ...subjects.filter(subject => !isArchivedSubject(subject)).map(subject => ({ value: subject.id, label: subject.name })),
+    ...subjects.filter(subject => isArchivedSubject(subject)).map(subject => ({ value: subject.id, label: archivedSubjectLabel(subject) })),
+  ];
   const resetSelection = () => {
     setSelected(new Set());
     setVisibleCount(DISPLAY_SIZE);
@@ -184,7 +191,7 @@ function HistoryManager({ userId }: { userId: string }) {
           </span>
         </label>
         <AppSelect label="현재 과목" value={subjectFilter} onValueChange={value => { setSubjectFilter(value); resetSelection(); }} disabled={saving}
-          options={[{ value: 'all', label: '모든 과목' }, { value: 'unclassified', label: '미분류' }, ...subjects.map(subject => ({ value: subject.id, label: subject.name }))]} />
+          options={filterOptions} />
         <DatePicker label="시작 공부일" value={fromDate} max={toDate || undefined} disabled={saving} placeholder="처음부터" onChange={value => {
           if (value && toDate && value > toDate) return;
           setFromDate(value); resetSelection();
@@ -200,7 +207,7 @@ function HistoryManager({ userId }: { userId: string }) {
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1"><SubjectSelect subjects={subjects} value={targetSubject} onChange={setTargetSubject} onCreate={createSubject} disabled={saving || subjectsLoading} label="변경할 과목" /></div>
+          <div className="min-w-0 flex-1"><SubjectSelect subjects={subjects} value={targetSubject} onChange={setTargetSubject} onCreate={createSubject} disabled={saving || subjectsLoading} label="변경할 과목" includeArchived /></div>
           <button type="button" onClick={() => void classify()} disabled={!selected.size || saving || loading || !!loadError} className="ui-button-primary ui-press shrink-0 self-start rounded-tile px-5 sm:self-auto">
             {saving ? '저장 중…' : '저장'}
           </button>

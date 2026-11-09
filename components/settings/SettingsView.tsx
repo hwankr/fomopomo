@@ -227,7 +227,7 @@ export default function SettingsView({ session, onOpenLogin }: SettingsViewProps
         <SettingsSection
           id="settings-subjects"
           title="과목 관리"
-          description="할 일, 타이머, 공부 기록에서 같은 과목을 사용해요. 이름을 바꿔도 기록은 유지돼요."
+          description="할 일, 타이머, 공부 기록에서 같은 과목을 사용해요. 이름을 바꾸거나 보관해도 기록은 유지돼요."
         >
           {form.ready ? (
             <SubjectManager

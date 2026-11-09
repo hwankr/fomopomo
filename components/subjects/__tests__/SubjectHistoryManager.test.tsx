@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row = { id: number; task: string; duration: number; created_at: string; subject_id: string | null; session_batch_id: string | null; group_id: string | null; user_id: string };
-type Subject = { id: string; name: string; user_id: string };
+type Subject = { id: string; name: string; user_id: string; archived_at?: string | null };
 const BLOCKCHAIN: Subject = { id: 'blockchain', name: '블록체인', user_id: 'user-a' };
 const mock = vi.hoisted(() => ({
   rows: [] as Row[], rpc: vi.fn(), eq: vi.fn(), range: vi.fn(), rename: vi.fn(),
@@ -225,6 +225,53 @@ describe('기존 기록 과목 일괄 분류', () => {
     view.rerender(<SubjectHistoryManager userId="user-a" />);
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [1, 2], p_subject_id: null }));
+  });
+
+  describe('보관한 과목', () => {
+    const ENGLISH: Subject = { id: 'english', name: '영어', user_id: 'user-a', archived_at: '2026-11-09T01:00:00.000Z' };
+    const MATH: Subject = { id: 'math', name: '수학', user_id: 'user-a', archived_at: null };
+    const optionLabels = (label: string) => Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map(option => option.textContent);
+    beforeEach(() => {
+      // 훅의 목록처럼 이름순이고 보관한 과목도 들어 있다.
+      mock.subjects = [BLOCKCHAIN, MATH, ENGLISH];
+      mock.rows = [
+        row(1, { task: '영어 단어 1일차', subject_id: 'english' }),
+        row(2, { task: '영어 단어 2일차', subject_id: 'english', duration: 1200 }),
+        row(3, { task: '블록체인 복습', subject_id: 'blockchain' }),
+        row(4, { task: '토익 모의고사' }),
+      ];
+    });
+
+    it('현재 과목 필터에 사용 중 과목 뒤로 보관한 과목이 (보관)과 함께 있고, 그 과목 기록만 거른다', async () => {
+      render(<SubjectHistoryManager userId="user-a" />);
+      await screen.findByText('검색 결과 1개 · 표시 1개 · 선택 0개');
+      expect(optionLabels('현재 과목')).toEqual(['모든 과목', '미분류', '블록체인', '수학', '영어 (보관)']);
+      fireEvent.change(screen.getByLabelText('현재 과목'), { target: { value: 'english' } });
+      expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
+      expect(screen.getByText('영어 단어 1일차')).toBeInTheDocument();
+      expect(screen.getByText('영어 단어 2일차')).toBeInTheDocument();
+      expect(screen.queryByText('블록체인 복습')).not.toBeInTheDocument();
+      expect(screen.queryByText('토익 모의고사')).not.toBeInTheDocument();
+      // 기록 줄의 과목 이름 표시는 이름만이다.
+      expect(screen.getByText('영어 단어 1일차').nextElementSibling).toHaveTextContent(/· 영어$/);
+    });
+
+    it('변경할 과목에도 보관한 과목이 있어 지난 기록을 옮길 수 있고, 다시 불러와도 미분류로 되돌리지 않는다', async () => {
+      const view = render(<SubjectHistoryManager userId="user-a" />);
+      await screen.findByText('검색 결과 1개 · 표시 1개 · 선택 0개');
+      expect(optionLabels('변경할 과목')).toEqual(['미분류', '블록체인', '수학', '영어 (보관)']);
+      fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+      fireEvent.change(screen.getByLabelText('변경할 과목'), { target: { value: 'english' } });
+      expect(screen.getByLabelText('변경할 과목')).toHaveValue('english');
+      expect(screen.getByRole('status')).toHaveTextContent('선택한 기록 1개를 영어로 바꿔요.');
+      // 보관한 과목은 목록에 남으므로 '지운 과목' 규칙으로 되돌리지 않는다.
+      view.rerender(<SubjectHistoryManager userId="user-a" />);
+      expect(screen.getByLabelText('변경할 과목')).toHaveValue('english');
+      expect(optionLabels('변경할 과목')).toEqual(['미분류', '블록체인', '수학', '영어 (보관)']);
+      fireEvent.click(screen.getByRole('button', { name: '저장' }));
+      await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [4], p_subject_id: 'english' }));
+      expect(await screen.findByText('1개 기록의 과목을 정리했어요.')).toBeInTheDocument();
+    });
   });
 
   it('저장 결과만 살짝 나타나고 고르는 동안의 개수 안내는 그대로 바뀐다', async () => {
