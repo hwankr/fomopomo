@@ -1,5 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
+# Pin the exact Supabase CLI release this harness was verified with. Major
+# releases change flags and defaults (3.0 made local the default target and
+# deprecated --local for removal in 4.0), so an unpinned latest can silently
+# change what runs. Every subcommand below targets the local stack by default.
+# When bumping this version, rerun the whole harness and confirm it passes.
+$supabaseCliPackage = 'supabase@3.0.0'
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $harnessRoot = Join-Path $projectRoot 'test-harness'
 $fixturePath = Join-Path $projectRoot 'supabase\tests\fixtures\security_base.sql'
@@ -34,15 +41,16 @@ function Invoke-CheckedCommand {
         [switch]$SuppressOutput
     )
 
+    # --yes lets npx fetch the pinned CLI without an install prompt.
     if ($SuppressOutput) {
-        & npx @Arguments | Out-Null
+        & npx --yes @Arguments | Out-Null
     }
     else {
-        & npx @Arguments
+        & npx --yes @Arguments
     }
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed: npx $($Arguments -join ' ')"
+        throw "Command failed: npx --yes $($Arguments -join ' ')"
     }
 }
 
@@ -66,18 +74,18 @@ function Invoke-LocalSqlFile {
 Push-Location $projectRoot
 try {
     Invoke-CheckedCommand -SuppressOutput -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'start',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'start',
         '--exclude', $excludedServices
     )
 
     Invoke-CheckedCommand -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'db', 'reset', '--local',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'reset',
         '--sql-paths', $fixturePath,
         '--sql-paths', $baseMigrationPath
     )
 
     Invoke-CheckedCommand -SuppressOutput -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'db', 'query', '--local',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'query',
         '--file', $preflightPath
     )
     Write-Output 'Read-only preflight query: PASS'
@@ -122,23 +130,23 @@ try {
     })
 
     Invoke-CheckedCommand -Arguments (@(
-        'supabase', '--workdir', $harnessRoot, 'test', 'db', '--local'
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'test', 'db'
     ) + $effectiveTestPaths)
 
     Invoke-CheckedCommand -SuppressOutput -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'db', 'query', '--local',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'query',
         '--file', $postflightPath
     )
     Write-Output 'Read-only postflight checks: PASS'
 
     Invoke-CheckedCommand -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'db', 'lint', '--local',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'lint',
         '--schema', 'public,private', '--level', 'warning',
         '--fail-on', 'error'
     )
 
     Invoke-CheckedCommand -Arguments @(
-        'supabase', '--workdir', $harnessRoot, 'db', 'advisors', '--local',
+        $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'advisors',
         '--type', 'security', '--fail-on', 'error'
     )
 }

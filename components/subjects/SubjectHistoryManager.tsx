@@ -58,6 +58,10 @@ function HistoryManager({ userId }: { userId: string }) {
   const [targetSubject, setTargetSubject] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const mountedRef = useRef(true);
+  // 과목 관리에서 지운 과목이 '지정된 과목'으로 남아 저장이 거부되지 않게, 다 불러온 목록에 없으면 미분류로 되돌린다.
+  if (targetSubject && !subjectsLoading && !subjectError && !subjects.some(subject => subject.id === targetSubject)) {
+    setTargetSubject(null);
+  }
 
   useEffect(() => {
     mountedRef.current = true;

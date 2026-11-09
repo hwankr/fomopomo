@@ -95,16 +95,16 @@ Vault의 `push_notification_webhook_secret`과 Edge의 `WEBHOOK_SECRET`은 같�
 
 ## 로컬 검증
 
-설치된 CLI는 `npx --yes supabase`로 호출하며, 구현 시 확인한 stable version은 2.111.0이다. 먼저 각 명령의 `--help`를 확인한다.
+CLI는 버전을 고정해 `npx --yes supabase@3.0.0`으로 호출한다. SQL 하니스 `scripts/test-supabase-security.ps1`도 같은 버전을 쓴다. 2026-08-07 구현 시 확인한 stable version은 2.111.0이었다. CLI 3부터 `db reset`·`db lint`·`db advisors`·`test db`는 로컬이 기본 대상이라 `--local`을 붙이지 않고, `--remote`를 줄 때만 원격을 대상으로 한다. 버전을 올릴 때는 각 명령의 `--help`와 하니스 전체를 다시 확인한다. 먼저 각 명령의 `--help`를 확인한다.
 
 ```powershell
-npx --yes supabase --version
-npx --yes supabase migration list --help
-npx --yes supabase db reset --help
-npx --yes supabase db lint --help
-npx --yes supabase db advisors --help
-npx --yes supabase test db --help
-npx --yes supabase functions serve --help
+npx --yes supabase@3.0.0 --version
+npx --yes supabase@3.0.0 migration list --help
+npx --yes supabase@3.0.0 db reset --help
+npx --yes supabase@3.0.0 db lint --help
+npx --yes supabase@3.0.0 db advisors --help
+npx --yes supabase@3.0.0 test db --help
+npx --yes supabase@3.0.0 functions serve --help
 ```
 
 historical migration 체인은 서로 중복되는 과거 baseline 때문에 그대로 replay하지 않는다. 과거 파일을 수정하는 대신 격리된 `test-harness`가 빈 Postgres 17 DB에 현재 운영 전제 fixture와 기존 canonical 보안 migration만 먼저 적용하고, preflight를 실행한 다음 이번 migration 한 건을 적용한다. 그 뒤 pgTAP, postflight, lint, advisor를 실행해 실제 운영 순서를 재현한다.
@@ -130,7 +130,7 @@ Pop-Location
 
 secret 값이 없는 테스트 환경에서는 placeholder test secret만 process/runtime memory에 주입하고 저장소에 기록하지 않는다.
 
-2026-08-07 최종 로컬 검증 결과는 다음과 같다.
+2026-08-07 최종 로컬 검증 결과는 다음과 같다(당시 CLI 2 기준 명령이다. 지금 하니스는 `supabase@3.0.0`에서 `--local` 없이 같은 lint·advisors를 실행한다).
 
 - pre-migration preflight → migration 단독 적용 → 126개 pgTAP → postflight: 통과
 - `supabase db lint --local --schema public,private --level warning --fail-on error`: 이슈 0개

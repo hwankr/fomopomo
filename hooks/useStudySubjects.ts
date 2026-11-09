@@ -4,16 +4,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
   notifyStudySubjectsChanged,
+  readDeleteStudySubjectResponse,
   STUDY_SUBJECTS_CHANGED_EVENT,
   validateSubjectName,
+  type DeleteStudySubjectResult,
   type StudySubject,
 } from '@/lib/studySubjects';
+import { getCurrentUserId } from '@/lib/userScopedStorage';
 
 export function useStudySubjects(userId?: string | null) {
   const owner = userId ?? null;
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
   const generation = useRef(0);
+  // Mount lifetime, separate from the read `generation`: a mutation that settles after
+  // unmount must not touch this hook's state (see deleteSubject for what it still does).
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [state, setState] = useState<{
     owner: string | null;
     subjects: StudySubject[];
@@ -147,9 +157,50 @@ export function useStudySubjects(userId?: string | null) {
     }
   }, [owner, reportError]);
 
+  // Referencing rows block a direct DELETE, so deletion goes through the RPC, which
+  // unassigns them (study time is kept). Failures stay out of the shared load `error`
+  // (that one carries a "reload" button); the caller shows its own message once.
+  //
+  // Late responses:
+  // - Account changed: report `failed` and touch neither state nor the change event.
+  //   A mounted hook sees this as `currentOwner`. Managers are keyed by user, so a switch
+  //   usually unmounts this hook with `currentOwner` frozen; then a known, different
+  //   signed-in user in the persisted session means the same thing.
+  // - Same account, hook unmounted (e.g. the history page's subject panel was collapsed
+  //   right after confirming): skip local state, but still announce a confirmed deletion.
+  //   The subject is already gone on the server, so the same account's other screens
+  //   (record cleanup's target select, records, statistics, timer task lists) must reload.
+  const accountChanged = useCallback(() => {
+    if (currentOwner.current !== owner) return true;
+    if (mounted.current) return false;
+    const signedInAs = getCurrentUserId();
+    return signedInAs !== null && signedInAs !== owner;
+  }, [owner]);
+
+  const deleteSubject = useCallback(async (id: string): Promise<DeleteStudySubjectResult> => {
+    if (!owner || currentOwner.current !== owner) return { status: 'failed' };
+    try {
+      const { data, error } = await supabase.rpc('delete_study_subject', { p_subject_id: id });
+      if (accountChanged() || error) return { status: 'failed' };
+      const result = readDeleteStudySubjectResponse(data);
+      if (result.status === 'deleted') {
+        if (mounted.current) {
+          setState(previous => previous.owner === owner
+            ? { ...previous, subjects: previous.subjects.filter(subject => subject.id !== id) }
+            : previous);
+        }
+        // History, statistics and timer task lists reload their (now unassigned) references.
+        notifyStudySubjectsChanged();
+      }
+      return result;
+    } catch {
+      return { status: 'failed' };
+    }
+  }, [owner, accountChanged]);
+
   // A previous account's subjects must never flash during the effect transition.
   const visible = state.owner === owner ? state : {
     subjects: [], loading: Boolean(owner), error: null,
   };
-  return { ...visible, refresh, createSubject, renameSubject };
+  return { ...visible, refresh, createSubject, renameSubject, deleteSubject };
 }

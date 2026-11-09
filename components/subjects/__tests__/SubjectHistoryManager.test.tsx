@@ -2,7 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row = { id: number; task: string; duration: number; created_at: string; subject_id: string | null; session_batch_id: string | null; group_id: string | null; user_id: string };
-const mock = vi.hoisted(() => ({ rows: [] as Row[], rpc: vi.fn(), eq: vi.fn(), range: vi.fn(), rename: vi.fn() }));
+type Subject = { id: string; name: string; user_id: string };
+const BLOCKCHAIN: Subject = { id: 'blockchain', name: '블록체인', user_id: 'user-a' };
+const mock = vi.hoisted(() => ({
+  rows: [] as Row[], rpc: vi.fn(), eq: vi.fn(), range: vi.fn(), rename: vi.fn(),
+  subjects: [] as Subject[], subjectsLoading: false, subjectError: null as string | null,
+}));
 
 // The primitive suites cover popover keyboard/calendar behavior. These boundaries
 // keep this suite focused on filtering, complete batches and mutation ownership.
@@ -31,7 +36,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
 } }));
 
 vi.mock('@/hooks/useStudySubjects', () => ({ useStudySubjects: () => ({
-  subjects: [{ id: 'blockchain', name: '블록체인', user_id: 'user-a' }], loading: false, error: null,
+  subjects: mock.subjects, loading: mock.subjectsLoading, error: mock.subjectError,
   createSubject: vi.fn(), renameSubject: mock.rename,
 }) }));
 
@@ -42,7 +47,10 @@ function row(id: number, overrides: Partial<Row> = {}): Row {
 }
 
 describe('기존 기록 과목 일괄 분류', () => {
-  beforeEach(() => { mock.rows = [row(1), row(2)]; mock.rpc.mockReset().mockResolvedValue({ data: 2, error: null }); mock.eq.mockClear(); mock.range.mockClear(); });
+  beforeEach(() => {
+    mock.rows = [row(1), row(2)]; mock.rpc.mockReset().mockResolvedValue({ data: 2, error: null }); mock.eq.mockClear(); mock.range.mockClear();
+    mock.subjects = [BLOCKCHAIN]; mock.subjectsLoading = false; mock.subjectError = null;
+  });
   afterEach(cleanup);
 
   it('짧은 서버 페이지도 끝까지 검색하고 논리 기록으로 묶어 선택 및 과목 적용한다', async () => {
@@ -186,6 +194,39 @@ describe('기존 기록 과목 일괄 분류', () => {
     expect(screen.getByText('검색 결과 2개 · 표시 2개 · 선택 0개')).toBeInTheDocument();
     expect(screen.getByText('공통 과목 관리')).toBeInTheDocument();
   });
+  it('과목 관리에서 지운 과목이 다 불러온 목록에서 빠지면 변경할 과목을 미분류로 되돌린다', async () => {
+    const english = { id: 'english', name: '영어', user_id: 'user-a' };
+    mock.subjects = [BLOCKCHAIN, english];
+    const view = render(<SubjectHistoryManager userId="user-a" />);
+    await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');
+    fireEvent.click(screen.getByRole('button', { name: '표시된 기록 선택' }));
+    fireEvent.change(screen.getByLabelText('변경할 과목'), { target: { value: 'english' } });
+    expect(screen.getByRole('status')).toHaveTextContent('선택한 기록 2개를 영어로 바꿔요.');
+
+    // 다시 불러오는 중이거나 불러오기에 실패한 목록으로는 판단하지 않는다.
+    mock.subjects = [BLOCKCHAIN];
+    mock.subjectsLoading = true;
+    view.rerender(<SubjectHistoryManager userId="user-a" />);
+    expect(screen.getByLabelText('변경할 과목')).toHaveValue('english');
+    mock.subjectsLoading = false;
+    mock.subjectError = '과목을 불러오지 못했습니다. 다시 시도해주세요.';
+    view.rerender(<SubjectHistoryManager userId="user-a" />);
+    expect(screen.getByLabelText('변경할 과목')).toHaveValue('english');
+
+    mock.subjectError = null;
+    view.rerender(<SubjectHistoryManager userId="user-a" />);
+    expect(screen.getByLabelText('변경할 과목')).toHaveValue('__unclassified__');
+    expect(screen.getByRole('status')).toHaveTextContent('선택한 기록 2개를 미분류로 바꿔요.');
+    // 다시 불러와도 지운 과목으로 돌아가지 않는다.
+    mock.subjectError = '과목을 불러오지 못했습니다. 다시 시도해주세요.';
+    view.rerender(<SubjectHistoryManager userId="user-a" />);
+    expect(screen.getByLabelText('변경할 과목')).toHaveValue('__unclassified__');
+    mock.subjectError = null;
+    view.rerender(<SubjectHistoryManager userId="user-a" />);
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('classify_study_sessions', { p_session_ids: [1, 2], p_subject_id: null }));
+  });
+
   it('저장 결과만 살짝 나타나고 고르는 동안의 개수 안내는 그대로 바뀐다', async () => {
     render(<SubjectHistoryManager userId="user-a" />);
     await screen.findByText('검색 결과 2개 · 표시 2개 · 선택 0개');

@@ -46,5 +46,8 @@ keys.json
 /test-harness/supabase/.temp/
 /test-harness/supabase/.branches/
 
+# Supabase CLI cache that records the linked production project; never commit it
+/supabase/.temp/
+
 # Local agent tooling state
 /.omc/
