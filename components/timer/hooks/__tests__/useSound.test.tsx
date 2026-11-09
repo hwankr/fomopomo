@@ -245,3 +245,109 @@ describe('useSound', () => {
     expect(console.warn).not.toHaveBeenCalled();
   });
 });
+
+describe('useSound audio session', () => {
+  let useFreshSound: typeof useSound;
+  let session: { type: string };
+
+  class SessionAwareAudio extends MockAudio {
+    static created: SessionAwareAudio[] = [];
+
+    readonly typeAtCreate = session.type;
+    readonly typesAtPlay: string[] = [];
+
+    constructor(src: string) {
+      super(src);
+      SessionAwareAudio.created.push(this);
+      this.play.mockImplementation(() => {
+        this.typesAtPlay.push(session.type);
+        return Promise.resolve();
+      });
+    }
+  }
+
+  const installAudioSession = (value: { type: string }) => {
+    session = value;
+    Object.defineProperty(navigator, 'audioSession', { configurable: true, value });
+  };
+
+  beforeEach(async () => {
+    // A fresh module keeps the once-per-page warning independent of test order.
+    vi.resetModules();
+    ({ useSound: useFreshSound } = await import('../useSound'));
+    MockAudio.instances = [];
+    SessionAwareAudio.created = [];
+    vi.stubGlobal('Audio', SessionAwareAudio);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    installAudioSession({ type: 'auto' });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'audioSession');
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('switches to ambient before creating the media elements', () => {
+    renderHook(() => useFreshSound(defaultProps));
+
+    expect(SessionAwareAudio.created.map(audio => audio.src)).toEqual(['/alarm.mp3', '/click-v2.wav']);
+    expect(SessionAwareAudio.created.map(audio => audio.typeAtCreate)).toEqual(['ambient', 'ambient']);
+  });
+
+  it('reapplies ambient right before every playback', () => {
+    const { result } = renderHook(() => useFreshSound(defaultProps));
+    const [alarm, click] = SessionAwareAudio.created;
+
+    session.type = 'auto';
+    act(() => result.current.playClickSound());
+    session.type = 'auto';
+    act(() => result.current.playAlarm());
+
+    expect(click.typesAtPlay).toEqual(['ambient']);
+    expect(alarm.typesAtPlay).toEqual(['ambient']);
+    expect(session.type).toBe('ambient');
+  });
+
+  it('keeps the page ambient after unmount', () => {
+    const { result, unmount } = renderHook(() => useFreshSound(defaultProps));
+    act(() => result.current.playClickSound());
+
+    unmount();
+
+    expect(session.type).toBe('ambient');
+  });
+
+  it('still plays and reports sound failures when the session rejects ambient', async () => {
+    const attempts: string[] = [];
+    installAudioSession({
+      get type() { return 'auto'; },
+      set type(value: string) {
+        attempts.push(value);
+        throw new DOMException('Audio session unavailable', 'InvalidStateError');
+      },
+    });
+    const { result } = renderHook(() => useFreshSound(defaultProps));
+    const [alarm, click] = SessionAwareAudio.created;
+    alarm.play.mockRejectedValueOnce(new DOMException('Permission required', 'NotAllowedError'));
+
+    await act(async () => {
+      result.current.playAlarm();
+      result.current.playClickSound();
+    });
+
+    expect(attempts).toEqual(['ambient', 'ambient', 'ambient']);
+    expect(alarm.play).toHaveBeenCalledTimes(1);
+    expect(click.play).toHaveBeenCalledTimes(1);
+    expect(alarm.pause).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledWith(
+      'Unable to set ambient audio session:',
+      expect.objectContaining({ name: 'InvalidStateError' }),
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      'Unable to play alarm sound:',
+      expect.objectContaining({ name: 'NotAllowedError' }),
+    );
+  });
+});

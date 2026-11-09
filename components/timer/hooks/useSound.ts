@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { requestAmbientAudioSession } from './audioSession';
 
 interface UseSoundProps {
   volume: number;
@@ -17,6 +18,10 @@ export const useSound = ({ volume, isMuted }: UseSoundProps) => {
   const soundsRef = useRef<Partial<Record<SoundName, Sound>>>({});
 
   useEffect(() => {
+    // Set before any media element exists. Never restored to 'auto' on cleanup:
+    // WebKit could then pick MediaPlayback again for a recently audible element and
+    // stop other apps' audio. The app has no other sounds, so the page stays ambient.
+    requestAmbientAudioSession();
     const sounds: Record<SoundName, Sound> = {
       alarm: { audio: new Audio('/alarm.mp3'), playId: 0, hasLoadError: false },
       click: { audio: new Audio('/click-v2.wav'), playId: 0, hasLoadError: false },
@@ -83,6 +88,9 @@ export const useSound = ({ volume, isMuted }: UseSoundProps) => {
       audio.currentTime = 0;
       audio.volume = Math.min(1, Math.max(0, volume / 100));
       audio.muted = isMuted;
+      // The mount request may have failed, or a bfcache restore or other code may have
+      // changed the type, so synchronously reassert the ambient override before play().
+      requestAmbientAudioSession();
       void audio.play().catch(onFailure);
     } catch (error) {
       onFailure(error);
