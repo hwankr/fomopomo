@@ -1,4 +1,4 @@
-import type { StudySubject } from '@/lib/studySubjects';
+import { isArchivedSubject, type StudySubject } from '@/lib/studySubjects';
 
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
 const latinWordCharacter = /[a-z0-9_]/u;
@@ -28,11 +28,16 @@ export function suggestSubjectId(title: string, subjects: StudySubject[]): strin
   });
 
   // Ignore "대수" within "선형대수", but keep an independent "대수" mention ambiguous.
+  // Archived subjects take part here: "대수" inside an archived "선형대수" stays ignored, so a
+  // title about the archived subject does not fall back to the shorter subject in use.
   const specificMatches = matches.filter(match => !matches.some(other =>
     other.start <= match.start && other.end >= match.end &&
     other.end - other.start > match.end - match.start
   ));
-  const subjectIds = [...new Set(specificMatches.map(match => match.id))];
+  // An archived subject is never suggested (it is not offered for new selections); the
+  // remaining subjects in use are judged on their own.
+  const archivedIds = new Set(subjects.filter(subject => isArchivedSubject(subject)).map(subject => subject.id));
+  const subjectIds = [...new Set(specificMatches.map(match => match.id))].filter(id => !archivedIds.has(id));
 
   return subjectIds.length === 1 ? subjectIds[0] : null;
 }

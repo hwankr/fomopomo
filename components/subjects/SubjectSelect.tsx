@@ -1,11 +1,15 @@
 'use client';
 
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { validateSubjectName, type StudySubject } from '@/lib/studySubjects';
+import { isArchivedSubject, subjectNameKey, validateSubjectName, type StudySubject } from '@/lib/studySubjects';
 import AppSelect from '@/components/ui/AppSelect';
 import { cn } from '@/lib/utils';
 
+/** 보관한 과목의 선택지 글자. 이미 지정된 값이나 지난 기록 정리에서만 보인다. */
+export const archivedSubjectLabel = (subject: Pick<StudySubject, 'name'>) => `${subject.name} (보관)`;
+
 type SubjectSelectProps = {
+  /** 보관한 과목도 함께 받는다. 선택지에는 사용 중 과목만 두고, 보관 여부는 isArchivedSubject로 가른다. */
   subjects: StudySubject[];
   value: string | null;
   onChange: (id: string | null) => void;
@@ -25,12 +29,14 @@ type SubjectSelectProps = {
   /** 선택 칸 너비 조정 */
   selectClassName?: string;
   onCreatingChange?: (creating: boolean) => void;
+  /** 보관한 과목도 고를 수 있게 사용 중 과목 뒤에 둔다(지난 기록을 정리하는 곳만). */
+  includeArchived?: boolean;
 };
 
 export default function SubjectSelect({
   subjects, value, onChange, onCreate, disabled = false, label = '과목', id, compact = false,
   automatic = false, onAutoSelect, createAsOption = false, automaticDisplay = 'subject', leading,
-  selectClassName, onCreatingChange,
+  selectClassName, onCreatingChange, includeArchived = false,
 }: SubjectSelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
@@ -55,14 +61,23 @@ export default function SubjectSelect({
     ...subjects,
     ...createdSubjects.filter(created => !subjects.some(subject => subject.id === created.id)),
   ];
+  // 보관한 과목은 새로 고르지 않는다. 이미 그 과목이 지정된 값이면 미분류·'지정된 과목'으로 바꾸지 않고
+  // 이름과 함께 보인다(보관해도 할 일·기록의 과목은 그대로다).
+  const activeSubjects = knownSubjects.filter(subject => !isArchivedSubject(subject));
+  const archivedSubjects = includeArchived ? knownSubjects.filter(subject => isArchivedSubject(subject)) : [];
+  const currentSubject = value ? knownSubjects.find(subject => subject.id === value) : undefined;
+  // includeArchived면 보관한 과목이 모두 뒤에 있으므로 따로 두지 않는다(고른 뒤에도 순서가 그대로다).
+  const currentArchived = currentSubject && isArchivedSubject(currentSubject) && !includeArchived ? currentSubject : null;
   const automaticLabel = automaticDisplay === 'option'
     ? '제목에 맞춰 선택'
-    : value ? knownSubjects.find(subject => subject.id === value)?.name ?? '지정된 과목' : '미분류';
+    : value ? currentSubject?.name ?? '지정된 과목' : '미분류';
   const options = [
     ...(onAutoSelect ? [{ value: automaticValue, label: '제목에 맞춰 선택' }] : []),
     { value: unclassifiedValue, label: '미분류' },
-    ...(value && !knownSubjects.some(subject => subject.id === value) ? [{ value, label: '지정된 과목' }] : []),
-    ...knownSubjects.map(subject => ({ value: subject.id, label: subject.name })),
+    ...(value && !currentSubject ? [{ value, label: '지정된 과목' }] : []),
+    ...(currentArchived ? [{ value: currentArchived.id, label: archivedSubjectLabel(currentArchived) }] : []),
+    ...activeSubjects.map(subject => ({ value: subject.id, label: subject.name })),
+    ...archivedSubjects.map(subject => ({ value: subject.id, label: archivedSubjectLabel(subject) })),
     ...(offerCreateOption ? [{ value: createValue, label: '+ 새 과목' }] : []),
   ];
 
@@ -75,7 +90,9 @@ export default function SubjectSelect({
     if (!onCreate || disabled || pending.current) return;
     const validationError = validateSubjectName(draft);
     if (validationError) { setError(validationError); return; }
-    const existing = knownSubjects.find(subject => subject.name.trim().toLocaleLowerCase() === draft.trim().toLocaleLowerCase());
+    // 사용 중 과목과 같은 이름이면 그 과목을 고른다. 보관한 과목과 같은 이름이면 ID만 고르지 않고
+    // onCreate로 보낸다. 과목 목록 훅이 그 과목을 다시 사용으로 바꿔 돌려주므로 기록이 이어진다.
+    const existing = activeSubjects.find(subject => subjectNameKey(subject.name) === subjectNameKey(draft));
     if (existing) {
       onChange(existing.id);
       setCreating(false);

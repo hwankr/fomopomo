@@ -80,6 +80,22 @@ describe('useSuggestedSubject', () => {
     expect(result.current).toMatchObject({ subjectId: null, isAutomatic: false });
   });
 
+  it('stops suggesting an archived subject but keeps it when the user chose it', () => {
+    // 보관해도 과목은 목록에 남는다(이름 표시용). 그래서 "목록에서 사라진 선택 → 미분류" 규칙에 걸리지 않는다.
+    const archive = (id: string) => subjects.map(subject => subject.id === id ? { ...subject, archived_at: '2026-11-09T01:00:00.000Z' } : subject);
+    const { result, rerender } = renderHook(({ available }) => useSuggestedSubject('블록체인 복습', available), {
+      initialProps: { available: subjects },
+    });
+    expect(result.current).toMatchObject({ subjectId: 'blockchain', isAutomatic: true });
+    rerender({ available: archive('blockchain') });
+    expect(result.current).toMatchObject({ subjectId: null, isAutomatic: true });
+
+    rerender({ available: subjects });
+    act(() => result.current.selectSubject('database'));
+    rerender({ available: archive('database') });
+    expect(result.current).toMatchObject({ subjectId: 'database', isAutomatic: false });
+  });
+
   it('keeps a subject that is created and chosen in the same step', () => {
     // 과목 선택기는 createSubject가 목록에 넣은 뒤에 그 과목을 고른다(같은 훅 인스턴스).
     const created = { id: 'new', user_id: 'user', name: '운영체제' };

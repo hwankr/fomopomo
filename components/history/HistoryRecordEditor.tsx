@@ -2,7 +2,8 @@
 
 import { useId, type KeyboardEvent, type RefObject } from 'react';
 import AppSelect from '@/components/ui/AppSelect';
-import type { StudySubject } from '@/lib/studySubjects';
+import { isArchivedSubject, type StudySubject } from '@/lib/studySubjects';
+import { archivedSubjectLabel } from '@/components/subjects/SubjectSelect';
 import { cn } from '@/lib/utils';
 
 const UNCLASSIFIED = '__unclassified__';
@@ -32,10 +33,14 @@ export default function HistoryRecordEditor({
 }: HistoryRecordEditorProps) {
   const fieldId = useId();
   const inline = variant === 'inline';
+  // 과목 선택 칸(SubjectSelect)과 같은 규칙: 보관한 과목은 새로 고르지 않고, 이 기록의 과목이면
+  // 미분류 뒤에 이름과 함께 두어 그대로 저장되게 한다.
+  const currentSubject = subjectId ? subjects.find(subject => subject.id === subjectId) : undefined;
   const subjectOptions = [
     { value: UNCLASSIFIED, label: '미분류' },
-    ...(subjectId && !subjects.some(subject => subject.id === subjectId) ? [{ value: subjectId, label: '지정된 과목' }] : []),
-    ...subjects.map(subject => ({ value: subject.id, label: subject.name })),
+    ...(subjectId && !currentSubject ? [{ value: subjectId, label: '지정된 과목' }] : []),
+    ...(currentSubject && isArchivedSubject(currentSubject) ? [{ value: currentSubject.id, label: archivedSubjectLabel(currentSubject) }] : []),
+    ...subjects.filter(subject => !isArchivedSubject(subject)).map(subject => ({ value: subject.id, label: subject.name })),
   ];
 
   const handleKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {

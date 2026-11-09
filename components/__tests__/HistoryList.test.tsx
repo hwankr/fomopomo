@@ -37,7 +37,7 @@ const mock = vi.hoisted(() => ({
   listResults: [] as Promise<Result>[],
   mutationResults: [] as Promise<Result>[],
   rpcResults: [] as Promise<RpcResult>[],
-  subjects: [] as { id: string; name: string }[],
+  subjects: [] as { id: string; name: string; archived_at?: string | null }[],
 }));
 
 vi.mock('@/lib/supabase', () => ({ supabase: { from: mock.from, rpc: mock.rpc, auth: { getUser: mock.getUser } } }));
@@ -45,7 +45,9 @@ vi.mock('react-hot-toast', () => ({ default: { success: mock.success, error: moc
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: () => ({ subjects: mock.subjects }),
 }));
-vi.mock('@/lib/studySubjects', () => ({
+// 알림만 바꾸고 보관 판단(isArchivedSubject) 같은 순수 도우미는 실제 것을 쓴다.
+vi.mock('@/lib/studySubjects', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/studySubjects')>(),
   STUDY_SUBJECTS_CHANGED_EVENT: 'study-subjects-changed',
   notifyStudySubjectsChanged: mock.notify,
 }));
@@ -171,6 +173,48 @@ describe('최근 활동', () => {
       expect(mock.queries.some(query => query.operation === 'update')).toBe(false);
       expect(screen.getByText('영어')).toBeInTheDocument();
       expect(mock.notify).toHaveBeenCalledOnce();
+    });
+
+    describe('보관한 과목', () => {
+      const archivedAt = '2026-11-09T01:00:00.000Z';
+      const openOptions = async () => {
+        const trigger = screen.getByRole('combobox', { name: '과목' });
+        trigger.focus();
+        fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+        return within(await screen.findByRole('listbox')).getAllByRole('option').map(option => option.textContent);
+      };
+
+      it('기록의 과목이 보관한 과목이면 이름 (보관)으로 보이고, 메모만 바꿔도 과목은 그대로다', async () => {
+        mock.subjects = [
+          { id: 'blockchain', name: '블록체인', archived_at: archivedAt },
+          { id: 'english', name: '영어', archived_at: null },
+          { id: 'exam', name: '정보처리기사', archived_at: archivedAt },
+        ];
+        render(<HistoryList session={session('user-a')} />);
+        // 목록의 이름 표시는 그대로 이름만이다.
+        expect(await screen.findByTitle('블록체인')).toHaveTextContent(/^블록체인$/);
+        fireEvent.click(await recordButton(/블록체인 9\/12 복습/));
+        expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('블록체인 (보관)');
+        expect(await openOptions()).toEqual(['미분류', '블록체인 (보관)', '영어']);
+        fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+        fireEvent.change(screen.getByRole('textbox', { name: '작업 메모' }), { target: { value: '블록체인 마지막 복습' } });
+        fireEvent.click(screen.getByRole('button', { name: '저장' }));
+        await screen.findByText('블록체인 마지막 복습');
+        expect(mock.queries.find(query => query.operation === 'update')?.payload).toEqual({ task: '블록체인 마지막 복습' });
+        expect(mock.rpc).not.toHaveBeenCalled();
+      });
+
+      it('보관한 과목은 다른 기록의 새 과목으로 고를 수 없다', async () => {
+        mock.rows = [row({ subject_id: 'english' })];
+        mock.subjects = [
+          { id: 'blockchain', name: '블록체인', archived_at: archivedAt },
+          { id: 'english', name: '영어', archived_at: null },
+        ];
+        render(<HistoryList session={session('user-a')} />);
+        fireEvent.click(await recordButton(/블록체인 9\/12 복습/));
+        expect(screen.getByRole('combobox', { name: '과목' })).toHaveTextContent('영어');
+        expect(await openOptions()).toEqual(['미분류', '영어']);
+      });
     });
 
     it('미분류로 바꾸면 과목 ID 없이 분류한다', async () => {

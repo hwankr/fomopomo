@@ -202,6 +202,7 @@
 - `AppSelect` `{ value, onValueChange, options, label?, placeholder?, displayValue?, compact?, disabled?, … }` — 트리거는 `ui-input`과 같은 모양(compact 36px·13px), 목록은 `ui-popover-surface`, 항목 40px·`hover` 강조·선택 600 + 로즈 체크. 목록이 열려 있을 때 바깥을 누르면(마우스·터치 모두) 목록만 닫히고 그 아래 요소는 눌리지 않는다. 화면에서는 기본 `<select>` 대신 이것을 쓴다.
 - `DatePicker` `{ value, onChange, label, min?, max?, … }` — 같은 입력 모양, 달력 팝오버. 선택한 날 `bg-ink` 흰 글자, 오늘 로즈 글자.
 - `SubjectSelect` — `AppSelect` + `+ 새 과목`(로즈 고스트 버튼) + 새 과목 입력 줄(`ui-input` + `ui-button-primary`). 디자인의 `제목에 맞춰 선택 / 미분류 / 과목 / + 새 과목` 순서는 `onAutoSelect`를 주면 맞춰진다.
+  보관한 과목은 선택지에 두지 않는다. 지금 값이 보관한 과목이면 `미분류` 바로 뒤에 `이름 (보관)` 항목 하나로 보이고, 지난 기록을 정리하는 칸(`includeArchived`)만 보관한 과목 전부를 사용 중 과목 뒤에 `이름 (보관)`으로 둔다(따로 색이나 아이콘을 붙이지 않는다). 통계의 과목 줄은 이름 뒤에 작은 `보관` 표시(`shrink-0 text-xs font-medium text-ink-subtle`)만 붙이고, 이름이 말줄임될 때도 표시는 줄지 않는다.
 
 ### 움직임 도구 `components/ui/motion.ts`, `components/ui/usePlayOnce.ts`
 
