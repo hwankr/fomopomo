@@ -28,6 +28,7 @@ with expected_authenticated_functions(signature) as (
     ('public.materialize_pinned_tasks(uuid,date)'),
     ('public.update_daily_task_with_pin(uuid,text,uuid)'),
     ('public.classify_study_sessions(bigint[],uuid)'),
+    ('public.delete_study_subject(uuid)'),
     ('public.send_friend_request(text)'),
     ('public.transfer_group_leadership(uuid,uuid)')
 ),

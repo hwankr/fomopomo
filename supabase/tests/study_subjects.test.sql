@@ -114,7 +114,10 @@ select is((select count(*)::integer from public.study_sessions where session_bat
 select is(tests.record_batch('53000000-0000-0000-0000-0000000000a1', '52000000-0000-0000-0000-0000000000a1', '51000000-0000-0000-0000-0000000000a1')->>'status', 'already_processed', 'same explicit subject retry is idempotent');
 select is(tests.capture_sqlstate($$select tests.record_batch('53000000-0000-0000-0000-0000000000a1', '52000000-0000-0000-0000-0000000000a1', '51000000-0000-0000-0000-0000000000a2')$$), '23505', 'changing captured subject conflicts for same batch');
 select is(tests.capture_sqlstate($$select tests.record_batch('53000000-0000-0000-0000-0000000000ff', null, '51000000-0000-0000-0000-0000000000b2')$$), '42501', 'cannot record another user subject');
-select is(tests.capture_sqlstate($$select tests.record_batch('53000000-0000-0000-0000-0000000000ff', null, '51000000-0000-0000-0000-0000000000ff')$$), '42501', 'cannot record nonexistent subject');
+-- A subject missing everywhere (deleted while a draft held it) keeps the time
+-- unclassified. A separate batch keeps the foreign-subject rollback check exact.
+select is(tests.record_batch('53000000-0000-0000-0000-0000000000fe', null, '51000000-0000-0000-0000-0000000000ff')->>'status', 'saved', 'nonexistent subject records unclassified time');
+select is((select count(*)::integer from public.study_sessions where session_batch_id = '53000000-0000-0000-0000-0000000000fe' and subject_id is null), 2, 'nonexistent subject is stored as unclassified');
 select is(public.record_study_session_batch('53000000-0000-0000-0000-0000000000a2', 'stopwatch', 'Review 9/17', '52000000-0000-0000-0000-0000000000a1', tests.segments())->>'status', 'saved', 'old five-argument client still records');
 select is((select count(*)::integer from public.study_sessions where session_batch_id = '53000000-0000-0000-0000-0000000000a2' and subject_id is null), 2, 'omitted subject stays unclassified even when task has a subject');
 update public.tasks set subject_id = '51000000-0000-0000-0000-0000000000a2' where id = '52000000-0000-0000-0000-0000000000a1';
