@@ -3,7 +3,19 @@ export type StudySubject = {
   user_id: string;
   name: string;
   created_at?: string;
+  /** 보관한 시각. 없거나 null이면 사용 중이다(보관 열이 생기기 전의 DB도 사용 중으로 읽힌다). */
+  archived_at?: string | null;
 };
+
+/** 보관한 과목인가. 보관해도 과목 ID·이름과 그 과목을 가리키는 기록은 그대로다. */
+export function isArchivedSubject(subject: Pick<StudySubject, 'archived_at'> | null | undefined): boolean {
+  return Boolean(subject?.archived_at);
+}
+
+/** 같은 과목 이름인지 비교하는 키. DB 유일 인덱스 `lower(btrim(name))`처럼 앞뒤 공백·대소문자를 무시한다. */
+export function subjectNameKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
 
 /**
  * 과목 삭제 결과(`delete_study_subject` RPC).

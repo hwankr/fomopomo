@@ -241,7 +241,7 @@
 | 탭 라벨 | — | 11px |
 | 타이머 숫자 | `font-display` 700, 232px(시:분:초면 150px), `min(…, 19vw)` | 124px(시:분:초면 90px) |
 
-목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 행 사이 간격 2px, 선 없음. 최소 높이는 아래 **바깥 높이**로 준다: 타이머 작업 선택 56px(모바일 56px), 최근 활동 행 데스크톱 52px / 모바일 60px(버튼, 모바일 보드는 `content-box` 50px + 위아래 5px), 설정 과목 행 60px(이름은 말줄임, 오른쪽에 `ui-icon-button` 이름 변경 연필과 삭제 휴지통 17px · `ink-muted`, 휴지통은 호버 때 `pomo-deep`), 친구 순위 82px, 받은 요청 92px — 화면마다 보드에서 아래 규칙으로 다시 계산한다.
+목록 행: 카드 없이 `-mx-3 rounded-tile px-3 hover:bg-hover`, 행 사이 간격 2px, 선 없음. 최소 높이는 아래 **바깥 높이**로 준다: 타이머 작업 선택 56px(모바일 56px), 최근 활동 행 데스크톱 52px / 모바일 60px(버튼, 모바일 보드는 `content-box` 50px + 위아래 5px), 설정 과목 행 60px(이름은 말줄임, 오른쪽에 `ui-icon-button` 17px · `ink-muted`. 사용 중 과목은 이름 변경 연필과 보관(`Archive`), 아래 접힌 `보관한 과목 (N)` 칸의 줄은 같은 높이에 이름을 `ink-muted`로 흐리게 두고 다시 사용(`ArchiveRestore`)과 삭제 휴지통, 휴지통은 호버 때 `pomo-deep`), 친구 순위 82px, 받은 요청 92px — 화면마다 보드에서 아래 규칙으로 다시 계산한다.
 
 **보드 치수 옮기기(content-box 주의)**: 보드의 `div`·`li`·`a`·`span`·`p`는 인라인 스타일에 `box-sizing: border-box`가 없으면 CSS 기본값 content-box라서 `width`/`min-height`/`height`에 padding이 **더해진다**(예: `min-height: 66px; padding: 8px 12px` → 바깥 82px). Tailwind는 모두 border-box이므로 `min-h-[82px] py-2`처럼 바깥 크기를 쓴다. `button`·`select`는 브라우저 기본이 border-box라 보드 값을 그대로 쓴다(예: 시작 버튼 `height: 56px; min-width: 200px; padding: 0 36px` → 바깥 200×56). 글자 입력칸(`input type=text·email` 등)은 브라우저 기본이 content-box지만, 보드의 입력칸은 인라인 스타일에 `box-sizing: border-box`를 직접 적어 두었으므로 역시 보드 값이 바깥 크기다. 어느 태그든 인라인 스타일에 적힌 `box-sizing`이 태그 기본값보다 먼저다(예: 모바일 최근 활동 행 버튼은 `content-box`라 50px + 위아래 5px → 60px). 같은 개수의 항목으로 PNG와 행 간격을 비교해 확인한다.
 
