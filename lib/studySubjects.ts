@@ -33,10 +33,47 @@ export function readDeleteStudySubjectResponse(data: unknown): DeleteStudySubjec
 
 export const STUDY_SUBJECTS_CHANGED_EVENT = 'study-subjects-changed';
 
-// The event carries no account data. Each subscriber reloads its own user's data.
+// Other tabs of this browser hear about changes too (other devices do not). One channel per
+// tab both sends and receives: a BroadcastChannel never gets its own messages, so this tab
+// does not reload twice, and a received message only re-dispatches the local event (no
+// re-broadcast). Opened at load so a tab that only listens still receives. Without
+// BroadcastChannel (or during SSR) only the same-tab event is sent.
+// The channel lives on the tab's global, not in this module: when the module runs again
+// (development reload), the previous channel is closed. Left open, it would hear the new
+// channel's messages in this same tab and dispatch every change twice.
+const CHANNEL_KEY = Symbol.for('fomopomo.studySubjectsChannel');
+type ChannelHolder = Record<symbol, BroadcastChannel | null | undefined>;
+
+openCrossTabChannel();
+
+function openCrossTabChannel() {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return;
+  const holder = globalThis as unknown as ChannelHolder;
+  try {
+    holder[CHANNEL_KEY]?.close();
+  } catch {
+    // An unusable previous channel is replaced all the same.
+  }
+  holder[CHANNEL_KEY] = null;
+  try {
+    const channel = new BroadcastChannel(STUDY_SUBJECTS_CHANGED_EVENT);
+    channel.onmessage = () => { window.dispatchEvent(new Event(STUDY_SUBJECTS_CHANGED_EVENT)); };
+    holder[CHANNEL_KEY] = channel;
+  } catch {
+    // Same-tab events only.
+  }
+}
+
+// The event and the message carry no account data. Each subscriber reloads its own user's data.
 export function notifyStudySubjectsChanged() {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(STUDY_SUBJECTS_CHANGED_EVENT));
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(STUDY_SUBJECTS_CHANGED_EVENT));
+  try {
+    // Read from the global so a caller still holding an older copy of this module sends
+    // through the tab's current channel.
+    (globalThis as unknown as ChannelHolder)[CHANNEL_KEY]?.postMessage(null);
+  } catch {
+    // A closed or broken channel must not fail the change that already happened.
   }
 }
 

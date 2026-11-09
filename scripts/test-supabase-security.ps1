@@ -22,6 +22,7 @@ $testPaths = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'supabase\test
     Sort-Object Name | Select-Object -ExpandProperty FullName)
 $preflightPath = Join-Path $projectRoot 'supabase\verification\security_preflight.sql'
 $postflightPath = Join-Path $projectRoot 'supabase\verification\security_postflight.sql'
+$concurrencyPath = Join-Path $projectRoot 'supabase\tests\concurrency\delete_study_subject_concurrency.sql'
 $excludedServices = 'gotrue,realtime,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor'
 $databaseContainer = 'supabase_db_fomopomo-security-test'
 $stagedTestDirectory = $null
@@ -132,6 +133,12 @@ try {
     Invoke-CheckedCommand -Arguments (@(
         $supabaseCliPackage, '--workdir', $harnessRoot, 'test', 'db'
     ) + $effectiveTestPaths)
+
+    # pgTAP runs each file in one session, so it cannot show one transaction
+    # waiting for another. This file drives two real sessions through dblink,
+    # fails unless each scenario actually blocks, and removes its fixtures.
+    Invoke-LocalSqlFile -Path $concurrencyPath
+    Write-Output 'Concurrency checks: PASS'
 
     Invoke-CheckedCommand -SuppressOutput -Arguments @(
         $supabaseCliPackage, '--workdir', $harnessRoot, 'db', 'query',

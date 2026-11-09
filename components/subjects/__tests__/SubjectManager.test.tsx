@@ -131,7 +131,8 @@ describe('SubjectManager', () => {
     render(<SubjectManager userId="user-a" />);
     fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: '영어' } });
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('영어 과목을 추가했어요.');
+    // 설정 화면(wide)은 빈 결과 줄(role=status)을 처음부터 그린다. findByRole은 문구가 그려지기 전에 그 빈 줄로 끝나므로 문구까지 기다린다.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('영어 과목을 추가했어요.'));
     fireEvent.change(screen.getByLabelText('새 과목 이름'), { target: { value: ' 영어 ' } });
     // The board keeps the result line's slot; typing only clears its text.
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
@@ -141,7 +142,7 @@ describe('SubjectManager', () => {
     fireEvent.click(screen.getByRole('button', { name: '영어 이름 변경' }));
     fireEvent.change(screen.getByLabelText('과목 이름 수정'), { target: { value: '영어 회화' } });
     fireEvent.keyDown(screen.getByLabelText('과목 이름 수정'), { key: 'Enter' });
-    expect(await screen.findByRole('status')).toHaveTextContent('과목 이름을 바꿨어요. 기록은 그대로예요.');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('과목 이름을 바꿨어요. 기록은 그대로예요.'));
     expect(db.rename).toHaveBeenCalledWith('1', '영어 회화');
   });
 
@@ -282,7 +283,8 @@ describe('SubjectManager 과목 삭제', () => {
     const busy = vi.fn();
     render(<SubjectManager userId="user-a" onBusyChange={busy} />);
     confirmDelete('영어');
-    expect(await screen.findByRole('status')).toHaveTextContent(DELETED('영어'));
+    // 설정 화면(wide)은 빈 결과 줄(role=status)을 처음부터 그린다. findByRole은 문구가 그려지기 전에 그 빈 줄로 끝나므로 문구까지 기다린다.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(DELETED('영어')));
     expect(db.remove).toHaveBeenCalledTimes(1);
     expect(db.remove).toHaveBeenCalledWith('s2');
     expect(screen.queryByText('영어')).not.toBeInTheDocument();
@@ -372,6 +374,33 @@ describe('SubjectManager 과목 삭제', () => {
     expect(busy.mock.calls).toEqual([[true], [false]]);
     expect(db.remove).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: '통계 삭제' })).toBeEnabled();
+  });
+
+  // 확인 창이 열린 사이 다른 화면의 변경으로 목록을 다시 불러오기 시작해도, 목록이 보이면 확인을 무시하지 않는다(서버가 기준).
+  it('deletes on confirm while the visible list is reloading in the background', async () => {
+    seed();
+    succeed();
+    const view = render(<SubjectManager userId="user-a" />);
+    const dialog = openDelete('영어');
+    db.loading = true;
+    view.rerender(<SubjectManager userId="user-a" />);
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+    expect(await screen.findByText(DELETED('영어'))).toBeInTheDocument();
+    expect(db.remove).toHaveBeenCalledTimes(1);
+    expect(db.remove).toHaveBeenCalledWith('s2');
+  });
+
+  it('still blocks a confirm while no list has loaded yet', () => {
+    seed();
+    succeed();
+    const view = render(<SubjectManager userId="user-a" />);
+    const dialog = openDelete('영어');
+    db.subjects = [];
+    db.loading = true;
+    view.rerender(<SubjectManager userId="user-a" />);
+    expect(screen.getByText('과목을 불러오는 중…')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+    expect(db.remove).not.toHaveBeenCalled();
   });
 
   it('ignores a deletion that finishes after switching accounts', async () => {

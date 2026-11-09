@@ -18,7 +18,7 @@ export function useStudySubjects(userId?: string | null) {
   currentOwner.current = owner;
   const generation = useRef(0);
   // Mount lifetime, separate from the read `generation`: a mutation that settles after
-  // unmount must not touch this hook's state (see deleteSubject for what it still does).
+  // unmount must not touch this hook's state (see accountChanged for what it still does).
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -85,8 +85,24 @@ export function useStudySubjects(userId?: string | null) {
     };
   }, [refresh]);
 
+  // Late responses (create, rename, delete):
+  // - Account changed: fail and touch neither state nor the change event.
+  //   A mounted hook sees this as `currentOwner`. Managers are keyed by user, so a switch
+  //   usually unmounts this hook with `currentOwner` frozen; then a known, different
+  //   signed-in user in the persisted session means the same thing.
+  // - Same account, hook unmounted (e.g. the history page's subject panel was collapsed
+  //   right after confirming): skip local state, but still announce a confirmed change.
+  //   The server already has it, so the same account's other screens (record cleanup's
+  //   target select, records, statistics, timer task lists) must reload.
+  const accountChanged = useCallback(() => {
+    if (currentOwner.current !== owner) return true;
+    if (mounted.current) return false;
+    const signedInAs = getCurrentUserId();
+    return signedInAs !== null && signedInAs !== owner;
+  }, [owner]);
+
   const reportError = useCallback((message: string) => {
-    if (currentOwner.current !== owner) return;
+    if (!mounted.current || currentOwner.current !== owner) return;
     setState(previous => ({
       owner,
       subjects: previous.owner === owner ? previous.subjects : [],
@@ -108,26 +124,28 @@ export function useStudySubjects(userId?: string | null) {
         .insert({ user_id: owner, name: value.trim() })
         .select('id, user_id, name, created_at')
         .single();
-      if (currentOwner.current !== owner) return null;
+      if (accountChanged()) return null;
       if (error) {
         reportError(error.code === '23505' ? '같은 이름의 과목이 이미 있습니다.' : '과목을 추가하지 못했습니다.');
         return null;
       }
       const subject = data as StudySubject;
-      setState(previous => ({
-        owner,
-        subjects: [...(previous.owner === owner ? previous.subjects : []), subject]
-          .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
-        loading: false,
-        error: null,
-      }));
+      if (mounted.current) {
+        setState(previous => ({
+          owner,
+          subjects: [...(previous.owner === owner ? previous.subjects : []), subject]
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+          loading: false,
+          error: null,
+        }));
+      }
       notifyStudySubjectsChanged();
       return subject;
     } catch {
       reportError('과목을 추가하지 못했습니다. 다시 시도해주세요.');
       return null;
     }
-  }, [owner, reportError]);
+  }, [owner, reportError, accountChanged]);
 
   const renameSubject = useCallback(async (id: string, value: string): Promise<boolean> => {
     if (!owner || currentOwner.current !== owner) return false;
@@ -144,7 +162,7 @@ export function useStudySubjects(userId?: string | null) {
         .eq('id', id)
         .select('id')
         .single();
-      if (currentOwner.current !== owner) return false;
+      if (accountChanged()) return false;
       if (error || !data) {
         reportError(error?.code === '23505' ? '같은 이름의 과목이 이미 있습니다.' : '과목 이름을 변경하지 못했습니다.');
         return false;
@@ -155,28 +173,12 @@ export function useStudySubjects(userId?: string | null) {
       reportError('과목 이름을 변경하지 못했습니다. 다시 시도해주세요.');
       return false;
     }
-  }, [owner, reportError]);
+  }, [owner, reportError, accountChanged]);
 
   // Referencing rows block a direct DELETE, so deletion goes through the RPC, which
   // unassigns them (study time is kept). Failures stay out of the shared load `error`
   // (that one carries a "reload" button); the caller shows its own message once.
-  //
-  // Late responses:
-  // - Account changed: report `failed` and touch neither state nor the change event.
-  //   A mounted hook sees this as `currentOwner`. Managers are keyed by user, so a switch
-  //   usually unmounts this hook with `currentOwner` frozen; then a known, different
-  //   signed-in user in the persisted session means the same thing.
-  // - Same account, hook unmounted (e.g. the history page's subject panel was collapsed
-  //   right after confirming): skip local state, but still announce a confirmed deletion.
-  //   The subject is already gone on the server, so the same account's other screens
-  //   (record cleanup's target select, records, statistics, timer task lists) must reload.
-  const accountChanged = useCallback(() => {
-    if (currentOwner.current !== owner) return true;
-    if (mounted.current) return false;
-    const signedInAs = getCurrentUserId();
-    return signedInAs !== null && signedInAs !== owner;
-  }, [owner]);
-
+  // A late response follows `accountChanged` above (`failed` when the account changed).
   const deleteSubject = useCallback(async (id: string): Promise<DeleteStudySubjectResult> => {
     if (!owner || currentOwner.current !== owner) return { status: 'failed' };
     try {
