@@ -1,23 +1,26 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StudySubject } from '@/lib/studySubjects';
+import type { DeleteStudySubjectResult, StudySubject } from '@/lib/studySubjects';
 import { simulateRunningAnimations } from '@/components/ui/__tests__/motionTestUtils';
 
 const db = vi.hoisted(() => ({
   subjects: [] as StudySubject[],
-  create: vi.fn(), rename: vi.fn(), refresh: vi.fn(),
+  loading: false,
+  create: vi.fn(), rename: vi.fn(), refresh: vi.fn(), remove: vi.fn(),
 }));
 vi.mock('@/hooks/useStudySubjects', () => ({
   useStudySubjects: (userId: string) => ({
     subjects: db.subjects.filter((subject) => subject.user_id === userId),
-    loading: false, error: null, createSubject: db.create, renameSubject: db.rename, refresh: db.refresh,
+    loading: db.loading, error: null, createSubject: db.create, renameSubject: db.rename, refresh: db.refresh, deleteSubject: db.remove,
   }),
 }));
 import SubjectManager from '../SubjectManager';
 
 beforeEach(() => {
   db.subjects = [];
+  db.loading = false;
+  db.remove.mockReset();
   db.create.mockReset(); db.rename.mockReset();
   db.create.mockImplementation(async (name: string) => {
     const subject = { id: String(db.subjects.length + 1), user_id: 'user-a', name };
@@ -204,5 +207,188 @@ describe('SubjectManager', () => {
     } finally {
       animations.restore();
     }
+  });
+});
+
+describe('SubjectManager 과목 삭제', () => {
+  const subject = (id: string, name: string, userId = 'user-a') => ({ id, user_id: userId, name });
+  const seed = () => { db.subjects = [subject('s1', '통계'), subject('s2', '영어'), subject('s3', '논문')]; };
+  const succeed = () => db.remove.mockImplementation(async (id: string) => {
+    db.subjects = db.subjects.filter((item) => item.id !== id);
+    return { status: 'deleted' };
+  });
+  // 실제 브라우저처럼 누른 버튼에 포커스를 둔 채 확인 창을 연다(닫히면 그 버튼으로 포커스가 돌아간다).
+  const openDelete = (name: string) => {
+    const trigger = screen.getByRole('button', { name: `${name} 삭제` });
+    trigger.focus();
+    fireEvent.click(trigger);
+    return screen.getByRole('alertdialog', { name: '과목을 삭제할까요?' });
+  };
+  const confirmDelete = (name: string) => {
+    fireEvent.click(within(openDelete(name)).getByRole('button', { name: '삭제' }));
+  };
+  const DELETED = (name: string) => `‘${name}’ 과목을 삭제했어요. 공부 기록은 미분류로 남아요.`;
+  const FAILED = '과목을 삭제하지 못했어요. 다시 시도해주세요.';
+
+  it('puts an accessible delete button after each rename button, disabled while editing or loading', () => {
+    seed();
+    const view = render(<SubjectManager userId="user-a" />);
+    const row = screen.getByText('영어').closest('li')!;
+    expect(within(row).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['영어 이름 변경', '영어 삭제']);
+    for (const name of ['통계', '영어', '논문']) expect(screen.getByRole('button', { name: `${name} 삭제` })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '통계 이름 변경' }));
+    expect(screen.queryByRole('button', { name: '통계 삭제' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '논문 삭제' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '영어 삭제' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '과목 이름 수정 취소' }));
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toBeEnabled();
+
+    db.loading = true;
+    view.rerender(<SubjectManager userId="user-a" />);
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toBeDisabled();
+
+    db.loading = false;
+    view.rerender(<SubjectManager userId="user-a" compact />);
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toBeEnabled();
+    expect(db.remove).not.toHaveBeenCalled();
+  });
+
+  it('asks in a danger dialog that starts on cancel, and cancel or Escape sends nothing', () => {
+    seed();
+    render(<SubjectManager userId="user-a" />);
+    const dialog = openDelete('영어');
+    expect(dialog).toHaveAccessibleDescription('‘영어’ 과목을 삭제하면 되돌릴 수 없어요. 이 과목으로 공부한 시간은 그대로 남고, 이 과목이 지정된 공부 기록과 할 일·목표·장기 과제는 미분류로 바뀌어요.');
+    expect(within(dialog).getByRole('button', { name: '취소' })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: '삭제' })).toHaveClass('bg-pomo-deep');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '취소' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toHaveFocus();
+
+    const again = openDelete('영어');
+    fireEvent.keyDown(within(again).getByRole('button', { name: '취소' }), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toHaveFocus();
+    expect(db.remove).not.toHaveBeenCalled();
+    expect(screen.getByText('영어')).toBeInTheDocument();
+  });
+
+  it('deletes after confirming, reports it and moves focus to the next row instead of the page', async () => {
+    seed();
+    succeed();
+    const busy = vi.fn();
+    render(<SubjectManager userId="user-a" onBusyChange={busy} />);
+    confirmDelete('영어');
+    expect(await screen.findByRole('status')).toHaveTextContent(DELETED('영어'));
+    expect(db.remove).toHaveBeenCalledTimes(1);
+    expect(db.remove).toHaveBeenCalledWith('s2');
+    expect(screen.queryByText('영어')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '논문 이름 변경' })).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(busy.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('moves focus to the previous row after deleting the last row, and to the list when none are left', async () => {
+    db.subjects = [subject('s1', '통계'), subject('s2', '영어')];
+    succeed();
+    render(<SubjectManager userId="user-a" compact />);
+    confirmDelete('영어');
+    expect(await screen.findByText(DELETED('영어'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '통계 이름 변경' })).toHaveFocus();
+
+    confirmDelete('통계');
+    expect(await screen.findByText(DELETED('통계'))).toBeInTheDocument();
+    expect(screen.getByText('아직 과목이 없어요. 자주 공부하는 과목을 추가해보세요.')).toBeInTheDocument();
+    expect(screen.getByRole('list')).toHaveFocus();
+    expect(document.activeElement).not.toBe(screen.getByLabelText('새 과목 이름'));
+  });
+
+  it.each([
+    [['중간고사'], '‘중간고사’ 장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+    [['중간고사', '기말고사'], '‘중간고사’, ‘기말고사’ 장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+    [['중간고사', '기말고사', '자격증'], '‘중간고사’, ‘기말고사’ 외 1개 장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+    [['중간고사', '기말고사', '자격증', '토익'], '‘중간고사’, ‘기말고사’ 외 2개 장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+    [['', '  '], '장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+    [[], '장기 과제의 과목 항목으로 쓰고 있어 삭제할 수 없어요. 계획 화면에서 과목 항목을 먼저 삭제해주세요.'],
+  ])('explains a subject group refusal for %j and keeps the row', async (projects, text) => {
+    seed();
+    db.remove.mockResolvedValue({ status: 'in_use_by_subject_group', projects });
+    render(<SubjectManager userId="user-a" />);
+    confirmDelete('영어');
+    expect((await screen.findByRole('alert')).textContent).toBe(text);
+    expect(screen.getByText('영어')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toHaveFocus();
+  });
+
+  it.each([
+    ['a failed result', () => db.remove.mockResolvedValue({ status: 'failed' })],
+    ['a thrown error', () => db.remove.mockRejectedValue(new Error('offline'))],
+  ])('shows the failure once on %s and keeps the subject', async (_label, arrange) => {
+    seed();
+    arrange();
+    render(<SubjectManager userId="user-a" compact />);
+    confirmDelete('영어');
+    expect((await screen.findByRole('alert')).textContent).toBe(FAILED);
+    expect(screen.getAllByText(FAILED)).toHaveLength(1);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByText('영어')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '영어 삭제' })).toHaveFocus();
+    // 다음 동작에서 지난 실패 문구를 지운다.
+    db.remove.mockReset();
+    succeed();
+    confirmDelete('영어');
+    expect(await screen.findByText(DELETED('영어'))).toBeInTheDocument();
+    expect(screen.queryByText(FAILED)).not.toBeInTheDocument();
+  });
+
+  it('sends one request and locks every row control until the deletion settles', async () => {
+    seed();
+    let respond!: (result: DeleteStudySubjectResult) => void;
+    db.remove.mockImplementation(() => new Promise((done) => { respond = done; }));
+    const busy = vi.fn();
+    render(<SubjectManager userId="user-a" onBusyChange={busy} />);
+    const confirm = within(openDelete('영어')).getByRole('button', { name: '삭제' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(db.remove).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    for (const name of ['통계', '영어', '논문']) {
+      expect(screen.getByRole('button', { name: `${name} 삭제` })).toBeDisabled();
+      expect(screen.getByRole('button', { name: `${name} 이름 변경` })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '통계 삭제' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(busy.mock.calls).toEqual([[true]]);
+
+    await act(async () => {
+      db.subjects = db.subjects.filter((item) => item.id !== 's2');
+      respond({ status: 'deleted' });
+    });
+    expect(busy.mock.calls).toEqual([[true], [false]]);
+    expect(db.remove).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '통계 삭제' })).toBeEnabled();
+  });
+
+  it('ignores a deletion that finishes after switching accounts', async () => {
+    seed();
+    db.subjects.push(subject('b1', '물리', 'user-b'));
+    let respond!: (result: DeleteStudySubjectResult) => void;
+    db.remove.mockImplementation(() => new Promise((done) => { respond = done; }));
+    const busy = vi.fn();
+    const { rerender } = render(<SubjectManager userId="user-a" onBusyChange={busy} />);
+    confirmDelete('영어');
+    rerender(<SubjectManager userId="user-b" onBusyChange={busy} />);
+    // 계정이 바뀌면 바쁨을 바로 풀어 준다(설정의 나머지가 잠긴 채 남지 않게).
+    expect(busy.mock.calls).toEqual([[true], [false]]);
+    await act(async () => respond({ status: 'deleted' }));
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '물리 삭제' })).toBeEnabled();
+    expect(busy.mock.calls).toEqual([[true], [false]]);
   });
 });

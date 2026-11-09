@@ -40,6 +40,12 @@ export default function SubjectSelect({
   const [error, setError] = useState<string | null>(null);
   // 방금 만든 과목. 목록(subjects)이 다시 불러와지기 전에도 이름으로 선택돼 보이게 둔다.
   const [createdSubjects, setCreatedSubjects] = useState<StudySubject[]>([]);
+  // 목록에 한 번 나타난 과목은 캐시에서 뺀다. 남겨 두면 그 과목을 지웠을 때 목록에서는 빠져도 캐시에서 다시 합쳐져
+  // 선택지에 남고, 같은 이름으로 다시 만들 때 지운 과목을 "이미 있음"으로 찾아 지운 ID를 고른다.
+  // (렌더 중 갱신: 다음 렌더에서는 겹치는 과목이 없어 한 번에 멈춘다.)
+  if (createdSubjects.some(created => subjects.some(subject => subject.id === created.id))) {
+    setCreatedSubjects(current => current.filter(created => !subjects.some(subject => subject.id === created.id)));
+  }
   const pending = useRef(false);
   const unclassifiedValue = '__unclassified__';
   const automaticValue = '__automatic__';
